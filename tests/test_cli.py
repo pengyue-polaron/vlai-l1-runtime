@@ -91,11 +91,10 @@ def test_xair_observer_reports_paired_bimanual_state(monkeypatch, capsys) -> Non
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "PASS"
     assert payload["mode"] == "bimanual"
-    assert payload["samples"] == [
-        {
-            "source_sequence": 7,
-            "monotonic_ns": 123_000,
-            "observation_deg": values,
-            "action_deg": values,
-        }
-    ]
+    assert payload["sample_count"] == 1
+    assert payload["first_source_sequence"] == 7
+    assert payload["last_source_sequence"] == 7
+    assert payload["first_monotonic_ns"] == 123_000
+    assert payload["last_monotonic_ns"] == 123_000
+    assert payload["observation_deg"] == values
+    assert payload["action_deg"] == values

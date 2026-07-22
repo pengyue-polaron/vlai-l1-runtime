@@ -242,22 +242,35 @@ def _run_xair_observer(args: argparse.Namespace) -> int:
     snapshots: list[dict[str, object]] = []
     with XAirStateReceiver(config) as receiver:
         if args.side == "bimanual":
+            first_sequence: int | None = None
+            first_monotonic_ns: int | None = None
+            observation = None
+            action = None
             for _ in range(args.samples):
                 sample = receiver.receive(timeout_s=args.timeout)
                 if sample is None:
                     raise TimeoutError("timed out waiting for paired x_air state")
                 observation, action = sample
-                snapshots.append(
-                    {
-                        "source_sequence": observation.metadata.source_sequence,
-                        "monotonic_ns": observation.metadata.monotonic_ns,
-                        "observation_deg": dict(observation.values),
-                        "action_deg": dict(action.values),
-                    }
-                )
+                if first_sequence is None:
+                    first_sequence = observation.metadata.source_sequence
+                    first_monotonic_ns = observation.metadata.monotonic_ns
+            assert observation is not None
+            assert action is not None
+            assert first_sequence is not None
+            assert first_monotonic_ns is not None
             print(
                 json.dumps(
-                    {"status": "PASS", "mode": "bimanual", "samples": snapshots},
+                    {
+                        "status": "PASS",
+                        "mode": "bimanual",
+                        "sample_count": args.samples,
+                        "first_source_sequence": first_sequence,
+                        "last_source_sequence": observation.metadata.source_sequence,
+                        "first_monotonic_ns": first_monotonic_ns,
+                        "last_monotonic_ns": observation.metadata.monotonic_ns,
+                        "observation_deg": dict(observation.values),
+                        "action_deg": dict(action.values),
+                    },
                     indent=2,
                     sort_keys=True,
                 )

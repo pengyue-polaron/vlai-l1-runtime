@@ -49,9 +49,9 @@ entries.
    ```
 
    `bimanual` waits for a fresh packet from both sidecars, checks the tracked
-   left/right timestamp skew, and prints the paired, named follower observation
-   and leader action in degrees. Use `left` or `right` only for an isolated
-   single-side stage.
+   left/right timestamp skew, and prints a compact summary plus the final named
+   follower observation and leader action in degrees. Use `left` or `right`
+   only for an isolated single-side stage.
 
 5. Test the left pair first (`can1` leader to `can3` follower). Keep both arms
    mechanically aligned before creation and stop on unexpected alignment,

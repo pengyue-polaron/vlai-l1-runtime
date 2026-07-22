@@ -82,7 +82,7 @@ camera-list:
         fi
     done
 
-camera-check samples="90" timeout="1":
+camera-check samples="30" timeout="0.25":
     {{ vpy }} -m vlai_l1_runtime.cli camera-check \
         --config {{ system_config }} \
         --samples "{{ samples }}" \

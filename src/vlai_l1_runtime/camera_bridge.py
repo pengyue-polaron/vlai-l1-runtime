@@ -49,11 +49,14 @@ class CameraHealthStream:
     first_sequence: int
     last_sequence: int
     shape: tuple[int, int, int]
+    configured_fps: int
 
 
 @dataclass(frozen=True)
 class CameraHealthReport:
     sample_count: int
+    elapsed_s: float
+    effective_fps: float
     max_pair_skew_ms: float
     streams: dict[str, CameraHealthStream]
 
@@ -158,6 +161,7 @@ def check_v4l2_cameras(
     max_pair_skew_ns = 0
 
     with V4L2CameraSet(config, backend=backend) as cameras:
+        started_ns = time.monotonic_ns()
         for _ in range(sample_count):
             samples = cameras.capture(timeout_s=timeout_s)
             metadata = {role: sample.metadata for role, sample in samples.items()}
@@ -170,9 +174,12 @@ def check_v4l2_cameras(
                 first_sequences.setdefault(role, sample.metadata.source_sequence)
                 last_sequences[role] = sample.metadata.source_sequence
                 shapes[role] = tuple(sample.image.shape)
+        elapsed_s = (time.monotonic_ns() - started_ns) / 1_000_000_000
 
     return CameraHealthReport(
         sample_count=sample_count,
+        elapsed_s=elapsed_s,
+        effective_fps=sample_count / elapsed_s,
         max_pair_skew_ms=max_pair_skew_ns / 1_000_000,
         streams={
             role: CameraHealthStream(
@@ -180,6 +187,7 @@ def check_v4l2_cameras(
                 first_sequence=first_sequences[role],
                 last_sequence=last_sequences[role],
                 shape=shapes[role],
+                configured_fps=stream.fps,
             )
             for role, stream in stream_by_role.items()
         },

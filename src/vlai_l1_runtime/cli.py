@@ -325,6 +325,8 @@ def _run_camera_check(args: argparse.Namespace) -> int:
             {
                 "status": "PASS",
                 "sample_count": report.sample_count,
+                "elapsed_s": report.elapsed_s,
+                "effective_fps": report.effective_fps,
                 "max_pair_skew_ms": report.max_pair_skew_ms,
                 "streams": {
                     role: {
@@ -332,6 +334,7 @@ def _run_camera_check(args: argparse.Namespace) -> int:
                         "first_sequence": stream.first_sequence,
                         "last_sequence": stream.last_sequence,
                         "shape": stream.shape,
+                        "configured_fps": stream.configured_fps,
                     }
                     for role, stream in report.streams.items()
                 },

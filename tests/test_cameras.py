@@ -274,8 +274,11 @@ def test_camera_health_check_validates_a_finite_sample_window() -> None:
     )
 
     assert report.sample_count == 3
+    assert report.elapsed_s > 0
+    assert report.effective_fps > 0
     assert report.max_pair_skew_ms < 50
     assert report.streams["wrist_left"].device_id == "left-by-id"
+    assert report.streams["wrist_left"].configured_fps == 30
     assert report.streams["wrist_left"].last_sequence > report.streams["wrist_left"].first_sequence
     assert report.streams["wrist_right"].shape == (480, 640, 3)
     assert all(reader.closed for reader in backend.readers)

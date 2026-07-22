@@ -1,0 +1,9 @@
+schema_version = 1
+system_config = "../system/vlai_l1.toml"
+dataset_root = "../../data/datasets"
+derivative_root = "../../data/derivatives"
+repo_id_prefix = "pengyue-polaron/vlai-l1"
+fps = 30
+max_sample_age_s = 0.25
+max_state_action_skew_s = 0.05
+max_action_step_deg = 20.0

@@ -1,0 +1,185 @@
+schema_version = 1
+robot_id = "vlai_l1"
+topology_id = "vlai_l1_verified_2026_07_06"
+position_unit = "degree"
+
+[safety]
+command_ready = false
+production_source_available = false
+j2_coordinate_verified = false
+follower_right_bus_stability_verified = false
+joint_limits_verified = false
+first_command_hold_tolerance_deg = 0.1
+session_liveness_timeout_s = 1.0
+command_inactivity_timeout_s = 0.25
+
+[can]
+fd = true
+nominal_bitrate = 1000000
+data_bitrate = 5000000
+restart_ms = 100
+
+[[can.endpoints]]
+id = "leader_right"
+interface = "can0"
+parentdev = "1-1.4.1:1.0"
+side = "right"
+role = "leader"
+
+[[can.endpoints]]
+id = "leader_left"
+interface = "can1"
+parentdev = "1-1.4.2:1.0"
+side = "left"
+role = "leader"
+
+[[can.endpoints]]
+id = "follower_right"
+interface = "can2"
+parentdev = "1-1.4.3:1.0"
+side = "right"
+role = "follower"
+
+[[can.endpoints]]
+id = "follower_left"
+interface = "can3"
+parentdev = "1-1.4.4:1.0"
+side = "left"
+role = "follower"
+
+[[motors]]
+name = "joint_1"
+send_id = 1
+receive_id = 17
+motor_type = "DM8009"
+
+[[motors]]
+name = "joint_2"
+send_id = 2
+receive_id = 18
+motor_type = "DM8009"
+
+[[motors]]
+name = "joint_3"
+send_id = 3
+receive_id = 19
+motor_type = "DM4340"
+
+[[motors]]
+name = "joint_4"
+send_id = 4
+receive_id = 20
+motor_type = "DM4340"
+
+[[motors]]
+name = "joint_5"
+send_id = 5
+receive_id = 21
+motor_type = "DM4310"
+
+[[motors]]
+name = "joint_6"
+send_id = 6
+receive_id = 22
+motor_type = "DM4310"
+
+[[motors]]
+name = "joint_7"
+send_id = 7
+receive_id = 23
+motor_type = "DM4310"
+
+[[motors]]
+name = "gripper"
+send_id = 8
+receive_id = 24
+motor_type = "DM4310"
+
+[control.leader]
+kp = [240.0, 240.0, 240.0, 240.0, 24.0, 31.0, 25.0, 16.0]
+kd = [3.0, 3.0, 3.0, 3.0, 0.2, 0.2, 0.2, 0.2]
+
+[control.follower]
+kp = [240.0, 240.0, 240.0, 240.0, 24.0, 31.0, 25.0, 16.0]
+kd = [3.0, 3.0, 3.0, 3.0, 0.2, 0.2, 0.2, 0.2]
+
+[joint_limits.left.joint_1]
+minimum_deg = -75.0
+maximum_deg = 75.0
+[joint_limits.left.joint_2]
+minimum_deg = -90.0
+maximum_deg = 9.0
+[joint_limits.left.joint_3]
+minimum_deg = -85.0
+maximum_deg = 85.0
+[joint_limits.left.joint_4]
+minimum_deg = 0.0
+maximum_deg = 135.0
+[joint_limits.left.joint_5]
+minimum_deg = -85.0
+maximum_deg = 85.0
+[joint_limits.left.joint_6]
+minimum_deg = -40.0
+maximum_deg = 40.0
+[joint_limits.left.joint_7]
+minimum_deg = -80.0
+maximum_deg = 80.0
+[joint_limits.left.gripper]
+minimum_deg = -65.0
+maximum_deg = 0.0
+
+[joint_limits.right.joint_1]
+minimum_deg = -75.0
+maximum_deg = 75.0
+[joint_limits.right.joint_2]
+minimum_deg = -9.0
+maximum_deg = 90.0
+[joint_limits.right.joint_3]
+minimum_deg = -85.0
+maximum_deg = 85.0
+[joint_limits.right.joint_4]
+minimum_deg = 0.0
+maximum_deg = 135.0
+[joint_limits.right.joint_5]
+minimum_deg = -85.0
+maximum_deg = 85.0
+[joint_limits.right.joint_6]
+minimum_deg = -40.0
+maximum_deg = 40.0
+[joint_limits.right.joint_7]
+minimum_deg = -80.0
+maximum_deg = 80.0
+[joint_limits.right.gripper]
+minimum_deg = -65.0
+maximum_deg = 0.0
+
+[cameras]
+max_age_s = 0.5
+max_pair_skew_s = 0.05
+
+[cameras.agent]
+enabled = false
+width = 640
+height = 480
+fps = 30
+
+[cameras.wrist]
+enabled = false
+width = 640
+height = 480
+fps = 30
+
+[runtime]
+transport = "unimplemented"
+socket_path = "/run/vlai-l1/runtime.sock"
+
+[operator_panel]
+bind = "0.0.0.0"
+port = 8765
+
+[lifecycle]
+startup = "manual"
+can_setup_service = "xarm-can-rename.service"
+cpu_performance_service = "xarm-cpu-performance.service"
+left_teleop_service = "xarm-teleop-left.service"
+right_teleop_service = "xarm-teleop-right.service"

@@ -1,0 +1,61 @@
+[project]
+name = "vlai-l1-runtime"
+version = "0.1.0"
+description = "Hardware contracts and runtime composition for the VLAI L1"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "PengYue" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Typing :: Typed",
+]
+dependencies = [
+    "embodied-ops>=0.5,<0.6",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+collection = [
+    "lerobot[dataset]>=0.6,<0.7; python_version >= '3.12'",
+    "numpy>=2.2,<3; python_version >= '3.12'",
+    "pandas>=2.3,<3; python_version >= '3.12'",
+]
+
+[project.scripts]
+vlai-l1 = "vlai_l1_runtime.cli:main"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vlai_l1_runtime = ["py.typed"]
+
+[tool.uv.sources]
+embodied-ops = { path = "external/embodied-ops", editable = true }
+
+[dependency-groups]
+dev = [
+    "build>=1.2",
+    "pytest>=8.3",
+    "ruff>=0.11",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["B", "C4", "E4", "E7", "E9", "F", "I", "PIE", "PT", "RUF", "SIM", "UP"]

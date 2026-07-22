@@ -214,18 +214,21 @@ class _OpenCvReader:
     def capture(self, *, timeout_s: float) -> CameraCapture:
         deadline = time.monotonic() + timeout_s
         with self._condition:
-            while (
-                self._latest is None
-                or self._latest.source_sequence <= self._last_delivered_sequence
-            ):
+            while True:
                 if self._error is not None:
                     raise self._error
                 if self._stop.is_set():
                     raise RuntimeError(f"{self._role} camera reader is closed")
+                if (
+                    self._latest is not None
+                    and self._latest.source_sequence > self._last_delivered_sequence
+                ):
+                    break
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError(f"{self._role} camera capture timed out")
                 self._condition.wait(remaining)
+            assert self._latest is not None
             sample = self._latest
             self._last_delivered_sequence = sample.source_sequence
             return sample
@@ -244,7 +247,13 @@ class _OpenCvReader:
     def _read_frames(self) -> None:
         sequence = 0
         while not self._stop.is_set():
-            ok, image = self._capture.read()
+            try:
+                ok, image = self._capture.read()
+            except Exception as exc:  # pragma: no cover - native backend failure
+                error = RuntimeError(f"{self._role} camera read failed")
+                error.__cause__ = exc
+                self._fail(error)
+                return
             captured_ns = time.monotonic_ns()
             if not ok or image is None:
                 if not self._stop.is_set():

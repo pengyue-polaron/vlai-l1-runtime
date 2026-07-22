@@ -3,6 +3,7 @@ set quiet
 
 repo := justfile_directory()
 vpy := repo + "/.venv/bin/python"
+uv := env("UV_BIN", "uv")
 system_config := repo + "/configs/system/vlai_l1.toml"
 collection_config := repo + "/configs/collection/default.toml"
 
@@ -63,6 +64,12 @@ sdk-stop:
 
 # Cameras and collection
 
+setup-camera:
+    {{ uv }} sync --frozen --python 3.12 --extra camera
+
+setup-dataset:
+    {{ uv }} sync --frozen --python 3.12 --extra camera --extra dataset
+
 camera-list:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -74,6 +81,12 @@ camera-list:
             printf '%s\n' "$(<"${path}/serial")"
         fi
     done
+
+camera-check samples="90" timeout="1":
+    {{ vpy }} -m vlai_l1_runtime.cli camera-check \
+        --config {{ system_config }} \
+        --samples "{{ samples }}" \
+        --timeout "{{ timeout }}"
 
 panel:
     {{ vpy }} -m vlai_l1_runtime.cli panel --config {{ collection_config }}

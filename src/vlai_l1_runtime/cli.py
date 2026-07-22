@@ -55,6 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
     observe_xair.add_argument("--side", choices=("left", "right", "bimanual"), required=True)
     observe_xair.add_argument("--samples", type=int, required=True)
     observe_xair.add_argument("--timeout", type=float, default=1.0)
+    camera_check = subparsers.add_parser(
+        "camera-check", help="validate a finite live camera sample window"
+    )
+    camera_check.add_argument("--config", type=Path, required=True)
+    camera_check.add_argument("--samples", type=int, required=True)
+    camera_check.add_argument("--timeout", type=float, default=1.0)
     for command, help_text in (
         ("validate-collection", "validate collection and System contracts"),
         ("describe-collection", "print the canonical dataset contract as JSON"),
@@ -79,6 +85,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "observe-xair":
             return _run_xair_observer(args)
+        if args.command == "camera-check":
+            return _run_camera_check(args)
         if args.command in {
             "validate-config",
             "describe",
@@ -301,6 +309,37 @@ def _run_xair_observer(args: argparse.Namespace) -> int:
                 }
             )
     print(json.dumps({"status": "PASS", "samples": snapshots}, indent=2, sort_keys=True))
+    return 0
+
+
+def _run_camera_check(args: argparse.Namespace) -> int:
+    from .camera_bridge import check_realsense_cameras
+
+    report = check_realsense_cameras(
+        load_system_config(args.config),
+        sample_count=args.samples,
+        timeout_s=args.timeout,
+    )
+    print(
+        json.dumps(
+            {
+                "status": "PASS",
+                "sample_count": report.sample_count,
+                "max_pair_skew_ms": report.max_pair_skew_ms,
+                "streams": {
+                    role: {
+                        "device_id": stream.device_id,
+                        "first_sequence": stream.first_sequence,
+                        "last_sequence": stream.last_sequence,
+                        "shape": stream.shape,
+                    }
+                    for role, stream in report.streams.items()
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

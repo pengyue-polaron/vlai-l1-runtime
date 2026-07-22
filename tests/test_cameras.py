@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -11,7 +12,11 @@ from vlai_l1_runtime import (
     CameraSetValidator,
     load_system_config,
 )
-from vlai_l1_runtime.camera_bridge import CameraCapture, RealSenseCameraSet
+from vlai_l1_runtime.camera_bridge import (
+    CameraCapture,
+    RealSenseCameraSet,
+    check_realsense_cameras,
+)
 from vlai_l1_runtime.configuration import CameraConfig, CamerasConfig, ConfigError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,7 +34,8 @@ class _Reader:
 
     def capture(self, *, timeout_s: float) -> CameraCapture:
         assert timeout_s > 0
-        return CameraCapture(self.sequence, 1_000_000_000 + self.sequence, _Image())
+        self.sequence += 1
+        return CameraCapture(self.sequence, time.monotonic_ns(), _Image())
 
     def close(self) -> None:
         self.closed = True
@@ -249,3 +255,25 @@ def test_realsense_bridge_owns_enabled_cameras_and_unwinds_partial_startup() -> 
     ):
         pass
     assert failing.readers[0].closed is True
+
+
+def test_camera_health_check_validates_a_finite_sample_window() -> None:
+    system = replace(
+        load_system_config(ROOT / "configs/system/vlai_l1.toml"),
+        cameras=_commissioned(),
+    )
+    backend = _Backend()
+
+    report = check_realsense_cameras(
+        system,
+        sample_count=3,
+        timeout_s=0.1,
+        backend=backend,
+    )
+
+    assert report.sample_count == 3
+    assert report.max_pair_skew_ms < 50
+    assert report.streams["wrist_left"].device_id == "left-by-id"
+    assert report.streams["wrist_left"].last_sequence > report.streams["wrist_left"].first_sequence
+    assert report.streams["wrist_right"].shape == (480, 640, 3)
+    assert all(reader.closed for reader in backend.readers)

@@ -9,8 +9,8 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from .cameras import CameraFrameMetadata
-from .collection.schema import CameraSample
+from .cameras import CameraFrameMetadata, CameraSetValidator
+from .collection.schema import CameraSample, validate_camera_image
 from .configuration import CameraConfig, SystemConfig
 
 
@@ -39,6 +39,21 @@ class CameraReader(Protocol):
 
 class CameraBackend(Protocol):
     def open(self, stream: CameraConfig) -> CameraReader: ...
+
+
+@dataclass(frozen=True)
+class CameraHealthStream:
+    device_id: str
+    first_sequence: int
+    last_sequence: int
+    shape: tuple[int, int, int]
+
+
+@dataclass(frozen=True)
+class CameraHealthReport:
+    sample_count: int
+    max_pair_skew_ms: float
+    streams: dict[str, CameraHealthStream]
 
 
 class RealSenseCameraSet:
@@ -114,6 +129,61 @@ class RealSenseCameraSet:
             raise RuntimeError(f"failed to stop {len(errors)} camera stream(s)") from errors[0]
 
 
+def check_realsense_cameras(
+    config: SystemConfig,
+    *,
+    sample_count: int,
+    timeout_s: float,
+    backend: CameraBackend | None = None,
+) -> CameraHealthReport:
+    """Open the configured cameras once and validate a finite live sample window."""
+
+    if isinstance(sample_count, bool) or not isinstance(sample_count, int) or sample_count <= 0:
+        raise ValueError("camera sample_count must be a positive integer")
+    if (
+        isinstance(timeout_s, bool)
+        or not isinstance(timeout_s, (int, float))
+        or not math.isfinite(timeout_s)
+        or timeout_s <= 0
+    ):
+        raise ValueError("camera timeout must be finite and positive")
+
+    stream_by_role = {stream.role: stream for stream in config.cameras.streams if stream.enabled}
+    validator = CameraSetValidator(config.cameras)
+    first_sequences: dict[str, int] = {}
+    last_sequences: dict[str, int] = {}
+    shapes: dict[str, tuple[int, int, int]] = {}
+    max_pair_skew_ns = 0
+
+    with RealSenseCameraSet(config, backend=backend) as cameras:
+        for _ in range(sample_count):
+            samples = cameras.capture(timeout_s=timeout_s)
+            metadata = {role: sample.metadata for role, sample in samples.items()}
+            validator.validate(metadata, now_ns=time.monotonic_ns())
+            timestamps = [frame.monotonic_ns for frame in metadata.values()]
+            max_pair_skew_ns = max(max_pair_skew_ns, max(timestamps) - min(timestamps))
+            for role, sample in samples.items():
+                stream = stream_by_role[role]
+                validate_camera_image(sample.image, stream)
+                first_sequences.setdefault(role, sample.metadata.source_sequence)
+                last_sequences[role] = sample.metadata.source_sequence
+                shapes[role] = tuple(sample.image.shape)
+
+    return CameraHealthReport(
+        sample_count=sample_count,
+        max_pair_skew_ms=max_pair_skew_ns / 1_000_000,
+        streams={
+            role: CameraHealthStream(
+                device_id=str(stream.device_id),
+                first_sequence=first_sequences[role],
+                last_sequence=last_sequences[role],
+                shape=shapes[role],
+            )
+            for role, stream in stream_by_role.items()
+        },
+    )
+
+
 class _PyRealSenseReader:
     def __init__(self, pipeline: Any) -> None:
         self._pipeline = pipeline
@@ -133,7 +203,7 @@ class _PyRealSenseReader:
         try:
             import numpy as np
         except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
-            raise RuntimeError("RealSense collection requires NumPy") from exc
+            raise RuntimeError("RealSense collection requires 'vlai-l1-runtime[camera]'") from exc
         image = np.asanyarray(color.get_data()).copy()
         return CameraCapture(int(color.get_frame_number()), time.monotonic_ns(), image)
 
@@ -148,7 +218,7 @@ class _PyRealSenseBackend:
         try:
             import pyrealsense2 as rs
         except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
-            raise RuntimeError("camera collection requires pyrealsense2") from exc
+            raise RuntimeError("camera collection requires 'vlai-l1-runtime[camera]'") from exc
         pipeline = rs.pipeline()
         settings = rs.config()
         settings.enable_device(str(stream.device_id))

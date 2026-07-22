@@ -198,7 +198,7 @@ class SampleAssembler:
         if set(sample.cameras) != set(enabled_roles):
             raise CollectionContractError("sample must contain every enabled camera role exactly")
         for role in enabled_roles:
-            _validate_image(sample.cameras[role].image, stream_by_role[role])
+            validate_camera_image(sample.cameras[role].image, stream_by_role[role])
             images[f"{IMAGE_PREFIX}{role}"] = sample.cameras[role].image
         metadata = {role: camera.metadata for role, camera in sample.cameras.items()}
         self._camera_validator.validate(metadata, now_ns=now_ns)
@@ -260,7 +260,9 @@ def _require_increasing_sequence(value: int, *, previous: int | None, label: str
         raise CollectionContractError(f"{label} sequence did not increase")
 
 
-def _validate_image(image: Any, config: CameraConfig) -> None:
+def validate_camera_image(image: Any, config: CameraConfig) -> None:
+    """Require one configured RGB image without importing an image library."""
+
     expected_array_shape = (config.height, config.width, 3)
     shape = getattr(image, "shape", None)
     if shape is not None:

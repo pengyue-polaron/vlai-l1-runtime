@@ -65,7 +65,7 @@ vlai-l1 dataset-doctor \
 The doctor compares the dataset with the currently tracked collection and
 System config hashes. It also rejects symlinks, special files, schema drift,
 feature drift, task drift, non-contiguous episode/frame ranges, missing Parquet
-columns, incorrect row counts, and missing videos. It requires the `collection`
+columns, incorrect row counts, and missing videos. It requires the `dataset`
 extra but never opens robot or camera devices.
 
 ## v2.1 export
@@ -82,5 +82,5 @@ an episode-local H.264 file, verified with `ffprobe`, and accompanied by v2.1
 JSONL metadata. The derivative retains namespaced source provenance and records
 its source repository ID and counts.
 
-The exporter requires `ffmpeg`, `ffprobe`, Python 3.12, and the `collection`
+The exporter requires `ffmpeg`, `ffprobe`, Python 3.12, and the `dataset`
 extra. The canonical v3 dataset remains the sole source of truth.

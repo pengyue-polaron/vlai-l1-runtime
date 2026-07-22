@@ -20,11 +20,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-collection = [
+camera = [
+    "numpy>=2.2,<3; python_version >= '3.12'",
+    "pyrealsense2>=2.58.3.10794,<2.59; python_version >= '3.12' and platform_system == 'Linux'",
+]
+dataset = [
     "lerobot[dataset]>=0.6,<0.7; python_version >= '3.12'",
     "numpy>=2.2,<3; python_version >= '3.12'",
     "pandas>=2.3,<3; python_version >= '3.12'",
-    "pyrealsense2>=2.58.3.10794,<2.59; python_version >= '3.12' and platform_system == 'Linux'",
+    "torch==2.11.0+cpu; python_version >= '3.12'",
+    "torchvision==0.26.0+cpu; python_version >= '3.12'",
 ]
 
 [project.scripts]
@@ -42,6 +47,13 @@ vlai_l1_runtime = ["py.typed"]
 
 [tool.uv.sources]
 embodied-ops = { path = "external/embodied-ops", editable = true }
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [dependency-groups]
 dev = [

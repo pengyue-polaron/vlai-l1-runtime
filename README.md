@@ -60,13 +60,15 @@ just export-v21 <experiment>
 ```
 
 Validation and description do not import LeRobot, Torch, camera libraries, or
-device APIs. Dataset recording, deep doctor checks, and v2.1 export use the
-optional collection dependencies. The Panel exposes only validation, doctor,
-and export while live readiness gates remain unresolved.
+device APIs. Camera checks and dataset operations have separate optional
+dependencies. The Panel exposes only validation, doctor, and export while live
+readiness gates remain unresolved.
 
 ```bash
 git submodule update --init --recursive
-uv sync --python 3.12 --extra collection
+just setup-camera
+just camera-check
+just setup-dataset
 ```
 
 The x_air dependency and native state sidecar can be built without hardware:
@@ -94,9 +96,10 @@ transaction. The Operator Panel exposes the same workflow only when every
 tracked collection gate is ready.
 
 On the robot, `just camera-list` prints the connected D405 serials without
-opening their video streams. `just sdk-status` inspects the deployed processes
-and CAN controllers, and `just sdk-stop` disables both pairs and returns all four
-links to `DOWN`.
+opening their video streams. `just camera-check` opens both configured streams
+for a finite continuity, identity, format, freshness, and skew check.
+`just sdk-status` inspects the deployed processes and CAN controllers, and
+`just sdk-stop` disables both pairs and returns all four links to `DOWN`.
 
 The repository pins `embodied-ops` as a submodule; initialize it before running
 repository commands. Runtime contracts remain importable on Python 3.10; the

@@ -172,7 +172,8 @@ device_id = "255323074436"
 width = 640
 height = 480
 fps = 30
-driver = "realsense"
+driver = "v4l2"
+video_index = 4
 
 [cameras.wrist_right]
 required_for_collection = true
@@ -181,7 +182,8 @@ device_id = "255323074499"
 width = 640
 height = 480
 fps = 30
-driver = "realsense"
+driver = "v4l2"
+video_index = 4
 
 [cameras.agent]
 required_for_collection = false

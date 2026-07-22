@@ -32,7 +32,7 @@ MOTOR_NAMES = (
 SIDES = ("left", "right")
 ROLES = ("leader", "follower")
 CAMERA_ROLES = ("wrist_left", "wrist_right", "agent")
-CAMERA_DRIVERS = ("realsense", "unassigned")
+CAMERA_DRIVERS = ("v4l2", "unassigned")
 _LOADER_VALIDATION_TOKEN = object()
 _MAX_CONFIG_BYTES = 1_048_576
 _LOCAL_CONFIG_FILESYSTEM_TYPES = frozenset(
@@ -132,6 +132,7 @@ class CameraConfig:
     fps: int
     driver: str
     device_id: str | None
+    video_index: int | None = None
 
     def __post_init__(self) -> None:
         if self.role not in CAMERA_ROLES:
@@ -161,6 +162,16 @@ class CameraConfig:
             raise ConfigError(f"camera {self.role} requires an assigned driver when enabled")
         if not self.enabled and self.device_id is not None:
             raise ConfigError(f"camera {self.role} device_id must be absent while disabled")
+        if self.video_index is not None and (
+            isinstance(self.video_index, bool)
+            or not isinstance(self.video_index, int)
+            or self.video_index < 0
+        ):
+            raise ConfigError(f"camera {self.role} video_index must be a non-negative integer")
+        if self.enabled and self.driver == "v4l2" and self.video_index is None:
+            raise ConfigError(f"camera {self.role} requires a video_index for v4l2")
+        if self.driver != "v4l2" and self.video_index is not None:
+            raise ConfigError(f"camera {self.role} video_index is only valid for v4l2")
 
 
 @dataclass(frozen=True)
@@ -597,7 +608,7 @@ def _parse_cameras(value: Any) -> CamerasConfig:
         _allowed_keys(
             table,
             {"required_for_collection", "enabled", "width", "height", "fps", "driver"},
-            {"device_id"},
+            {"device_id", "video_index"},
             label,
         )
         enabled = _boolean(table["enabled"], f"{label}.enabled")
@@ -618,6 +629,11 @@ def _parse_cameras(value: Any) -> CamerasConfig:
                 fps=_integer(table["fps"], f"{label}.fps", minimum=1),
                 driver=_choice(table["driver"], CAMERA_DRIVERS, f"{label}.driver"),
                 device_id=None if device is None else _text(device, f"{label}.device_id"),
+                video_index=(
+                    None
+                    if "video_index" not in table
+                    else _integer(table["video_index"], f"{label}.video_index", minimum=0)
+                ),
             )
         )
     return CamerasConfig(max_age, max_skew, tuple(streams))

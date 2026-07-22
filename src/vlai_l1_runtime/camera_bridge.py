@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import math
+import threading
 import time
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from .cameras import CameraFrameMetadata, CameraSetValidator
@@ -56,23 +58,23 @@ class CameraHealthReport:
     streams: dict[str, CameraHealthStream]
 
 
-class RealSenseCameraSet:
-    """Open each enabled RealSense once and return role-keyed RGB frames."""
+class V4L2CameraSet:
+    """Open each configured V4L2 stream once and return role-keyed RGB frames."""
 
     def __init__(self, config: SystemConfig, *, backend: CameraBackend | None = None) -> None:
         if not isinstance(config, SystemConfig):
-            raise TypeError("RealSenseCameraSet requires SystemConfig")
+            raise TypeError("V4L2CameraSet requires SystemConfig")
         if not config.cameras.collection_ready:
             raise ValueError("required camera identities are not commissioned")
         self._streams = tuple(stream for stream in config.cameras.streams if stream.enabled)
-        unsupported = [stream.role for stream in self._streams if stream.driver != "realsense"]
+        unsupported = [stream.role for stream in self._streams if stream.driver != "v4l2"]
         if unsupported:
             raise ValueError(f"enabled camera roles require unsupported drivers: {unsupported}")
-        self._backend = backend or _PyRealSenseBackend()
+        self._backend = backend or _OpenCvBackend()
         self._readers: dict[str, CameraReader] = {}
         self._epochs: dict[str, str] = {}
 
-    def __enter__(self) -> RealSenseCameraSet:
+    def __enter__(self) -> V4L2CameraSet:
         if self._readers:
             raise RuntimeError("camera set is already open")
         try:
@@ -129,7 +131,7 @@ class RealSenseCameraSet:
             raise RuntimeError(f"failed to stop {len(errors)} camera stream(s)") from errors[0]
 
 
-def check_realsense_cameras(
+def check_v4l2_cameras(
     config: SystemConfig,
     *,
     sample_count: int,
@@ -155,7 +157,7 @@ def check_realsense_cameras(
     shapes: dict[str, tuple[int, int, int]] = {}
     max_pair_skew_ns = 0
 
-    with RealSenseCameraSet(config, backend=backend) as cameras:
+    with V4L2CameraSet(config, backend=backend) as cameras:
         for _ in range(sample_count):
             samples = cameras.capture(timeout_s=timeout_s)
             metadata = {role: sample.metadata for role, sample in samples.items()}
@@ -184,55 +186,126 @@ def check_realsense_cameras(
     )
 
 
-class _PyRealSenseReader:
-    def __init__(self, pipeline: Any) -> None:
-        self._pipeline = pipeline
-        self._closed = False
+class _OpenCvReader:
+    def __init__(self, capture: Any, cv2: Any, *, role: str) -> None:
+        self._capture = capture
+        self._cv2 = cv2
+        self._role = role
+        self._condition = threading.Condition()
+        self._stop = threading.Event()
+        self._latest: CameraCapture | None = None
+        self._last_delivered_sequence = 0
+        self._error: RuntimeError | None = None
+        self._thread = threading.Thread(
+            target=self._read_frames,
+            name=f"vlai-{role}-camera",
+            daemon=True,
+        )
+        self._thread.start()
 
     def capture(self, *, timeout_s: float) -> CameraCapture:
-        if self._closed:
-            raise RuntimeError("RealSense reader is closed")
-        timeout_ms = max(1, math.ceil(timeout_s * 1000))
-        try:
-            frames = self._pipeline.wait_for_frames(timeout_ms)
-            color = frames.get_color_frame()
-        except RuntimeError as exc:
-            raise TimeoutError("RealSense frame capture timed out") from exc
-        if not color:
-            raise RuntimeError("RealSense frameset has no color frame")
-        try:
-            import numpy as np
-        except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
-            raise RuntimeError("RealSense collection requires 'vlai-l1-runtime[camera]'") from exc
-        image = np.asanyarray(color.get_data()).copy()
-        return CameraCapture(int(color.get_frame_number()), time.monotonic_ns(), image)
+        deadline = time.monotonic() + timeout_s
+        with self._condition:
+            while (
+                self._latest is None
+                or self._latest.source_sequence <= self._last_delivered_sequence
+            ):
+                if self._error is not None:
+                    raise self._error
+                if self._stop.is_set():
+                    raise RuntimeError(f"{self._role} camera reader is closed")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(f"{self._role} camera capture timed out")
+                self._condition.wait(remaining)
+            sample = self._latest
+            self._last_delivered_sequence = sample.source_sequence
+            return sample
 
     def close(self) -> None:
-        if not self._closed:
-            self._pipeline.stop()
-            self._closed = True
+        if self._stop.is_set():
+            return
+        self._stop.set()
+        self._capture.release()
+        with self._condition:
+            self._condition.notify_all()
+        self._thread.join(timeout=2)
+        if self._thread.is_alive():
+            raise RuntimeError(f"{self._role} camera reader did not stop")
+
+    def _read_frames(self) -> None:
+        sequence = 0
+        while not self._stop.is_set():
+            ok, image = self._capture.read()
+            captured_ns = time.monotonic_ns()
+            if not ok or image is None:
+                if not self._stop.is_set():
+                    self._fail(RuntimeError(f"{self._role} camera read failed"))
+                return
+            try:
+                image = self._cv2.cvtColor(image, self._cv2.COLOR_BGR2RGB)
+            except Exception as exc:  # pragma: no cover - native backend failure
+                error = RuntimeError(f"{self._role} camera color conversion failed")
+                error.__cause__ = exc
+                self._fail(error)
+                return
+            sequence += 1
+            sample = CameraCapture(sequence, captured_ns, image)
+            with self._condition:
+                self._latest = sample
+                self._condition.notify_all()
+
+    def _fail(self, error: RuntimeError) -> None:
+        with self._condition:
+            self._error = error
+            self._condition.notify_all()
 
 
-class _PyRealSenseBackend:
+class _OpenCvBackend:
     def open(self, stream: CameraConfig) -> CameraReader:
         try:
-            import pyrealsense2 as rs
+            import cv2
         except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
-            raise RuntimeError("camera collection requires 'vlai-l1-runtime[camera]'") from exc
-        pipeline = rs.pipeline()
-        settings = rs.config()
-        settings.enable_device(str(stream.device_id))
-        settings.enable_stream(
-            rs.stream.color,
-            stream.width,
-            stream.height,
-            rs.format.rgb8,
-            stream.fps,
-        )
+            raise RuntimeError("V4L2 collection requires 'vlai-l1-runtime[camera]'") from exc
+
+        device = _resolve_v4l2_device(stream)
+        capture = cv2.VideoCapture(str(device), cv2.CAP_V4L2)
+        if not capture.isOpened():
+            capture.release()
+            raise RuntimeError(f"cannot open {stream.role} V4L2 device {device}")
         try:
-            pipeline.start(settings)
-        except RuntimeError as exc:
-            raise RuntimeError(
-                f"cannot start {stream.role} RealSense {stream.device_id}: {exc}"
-            ) from exc
-        return _PyRealSenseReader(pipeline)
+            capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"YUYV"))
+            capture.set(cv2.CAP_PROP_FRAME_WIDTH, stream.width)
+            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, stream.height)
+            capture.set(cv2.CAP_PROP_FPS, stream.fps)
+            capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            actual = (
+                round(capture.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                round(capture.get(cv2.CAP_PROP_FPS)),
+            )
+            expected = (stream.width, stream.height, stream.fps)
+            if actual != expected:
+                raise RuntimeError(f"{stream.role} V4L2 mode is {actual}, expected {expected}")
+            return _OpenCvReader(capture, cv2, role=stream.role)
+        except BaseException:
+            capture.release()
+            raise
+
+
+def _resolve_v4l2_device(stream: CameraConfig) -> Path:
+    if stream.device_id is None or stream.video_index is None:
+        raise ValueError(f"{stream.role} V4L2 identity is incomplete")
+    by_id = Path("/dev/v4l/by-id")
+    if not by_id.is_dir():
+        raise RuntimeError("V4L2 by-id directory is unavailable")
+    suffix = f"_{stream.device_id}-video-index{stream.video_index}"
+    matches = tuple(path for path in by_id.iterdir() if path.name.endswith(suffix))
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"{stream.role} expected one V4L2 device ending {suffix!r}, found {len(matches)}"
+        )
+    resolved = matches[0].resolve(strict=True)
+    if resolved.parent != Path("/dev") or not resolved.name.startswith("video"):
+        raise RuntimeError(f"{stream.role} V4L2 identity resolves outside /dev/video*: {resolved}")
+    return resolved

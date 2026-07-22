@@ -313,9 +313,9 @@ def _run_xair_observer(args: argparse.Namespace) -> int:
 
 
 def _run_camera_check(args: argparse.Namespace) -> int:
-    from .camera_bridge import check_realsense_cameras
+    from .camera_bridge import check_v4l2_cameras
 
-    report = check_realsense_cameras(
+    report = check_v4l2_cameras(
         load_system_config(args.config),
         sample_count=args.samples,
         timeout_s=args.timeout,

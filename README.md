@@ -90,7 +90,7 @@ with:
 just collect fruit_placement_v1 "place the fruit in the bowl" 300 save
 ```
 
-The live source owns both RealSense devices, receives the two x_air sidecars on
+The live source owns both configured V4L2 streams, receives the two x_air sidecars on
 one Unix datagram endpoint, and writes the existing atomic canonical dataset
 transaction. The Operator Panel exposes the same workflow only when every
 tracked collection gate is ready.

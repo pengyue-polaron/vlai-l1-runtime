@@ -14,8 +14,8 @@ from vlai_l1_runtime import (
 )
 from vlai_l1_runtime.camera_bridge import (
     CameraCapture,
-    RealSenseCameraSet,
-    check_realsense_cameras,
+    V4L2CameraSet,
+    check_v4l2_cameras,
 )
 from vlai_l1_runtime.configuration import CameraConfig, CamerasConfig, ConfigError
 
@@ -59,8 +59,8 @@ def _commissioned() -> CamerasConfig:
         max_age_s=0.5,
         max_pair_skew_s=0.05,
         streams=(
-            CameraConfig("wrist_left", True, True, 640, 480, 30, "realsense", "left-by-id"),
-            CameraConfig("wrist_right", True, True, 640, 480, 30, "realsense", "right-by-id"),
+            CameraConfig("wrist_left", True, True, 640, 480, 30, "v4l2", "left-by-id", 4),
+            CameraConfig("wrist_right", True, True, 640, 480, 30, "v4l2", "right-by-id", 4),
             CameraConfig("agent", False, False, 640, 480, 30, "unassigned", None),
         ),
     )
@@ -88,10 +88,12 @@ def test_tracked_wrist_camera_mapping_is_commissioned() -> None:
     system = load_system_config(ROOT / "configs/system/vlai_l1.toml")
     CameraSetValidator(system.cameras)
     assert {
-        stream.role: stream.device_id for stream in system.cameras.streams if stream.enabled
+        stream.role: (stream.device_id, stream.video_index)
+        for stream in system.cameras.streams
+        if stream.enabled
     } == {
-        "wrist_left": "255323074436",
-        "wrist_right": "255323074499",
+        "wrist_left": ("255323074436", 4),
+        "wrist_right": ("255323074499", 4),
     }
 
 
@@ -229,20 +231,20 @@ def test_commissioned_camera_devices_must_be_distinct() -> None:
             max_age_s=0.5,
             max_pair_skew_s=0.05,
             streams=(
-                CameraConfig("wrist_left", True, True, 640, 480, 30, "realsense", "same-device"),
-                CameraConfig("wrist_right", True, True, 640, 480, 30, "realsense", "same-device"),
+                CameraConfig("wrist_left", True, True, 640, 480, 30, "v4l2", "same-device", 4),
+                CameraConfig("wrist_right", True, True, 640, 480, 30, "v4l2", "same-device", 4),
                 CameraConfig("agent", False, False, 640, 480, 30, "unassigned", None),
             ),
         )
 
 
-def test_realsense_bridge_owns_enabled_cameras_and_unwinds_partial_startup() -> None:
+def test_v4l2_bridge_owns_enabled_cameras_and_unwinds_partial_startup() -> None:
     system = replace(
         load_system_config(ROOT / "configs/system/vlai_l1.toml"),
         cameras=_commissioned(),
     )
     backend = _Backend()
-    with RealSenseCameraSet(system, backend=backend) as cameras:
+    with V4L2CameraSet(system, backend=backend) as cameras:
         samples = cameras.capture(timeout_s=0.1)
         assert tuple(samples) == ("wrist_left", "wrist_right")
         assert samples["wrist_left"].metadata.device_id == "left-by-id"
@@ -251,7 +253,7 @@ def test_realsense_bridge_owns_enabled_cameras_and_unwinds_partial_startup() -> 
     failing = _Backend(fail_role="wrist_right")
     with (
         pytest.raises(RuntimeError, match="camera open failed"),
-        RealSenseCameraSet(system, backend=failing),
+        V4L2CameraSet(system, backend=failing),
     ):
         pass
     assert failing.readers[0].closed is True
@@ -264,7 +266,7 @@ def test_camera_health_check_validates_a_finite_sample_window() -> None:
     )
     backend = _Backend()
 
-    report = check_realsense_cameras(
+    report = check_v4l2_cameras(
         system,
         sample_count=3,
         timeout_s=0.1,

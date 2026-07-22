@@ -73,7 +73,7 @@ command resources before another lease can be granted.
 
 The Runtime repository owns the left-wrist, right-wrist, and optional AgentView
 camera identities and their freshness/skew contract. The Camera Bridge opens
-each enabled RealSense exactly once and exposes timestamped RGB frames to live
+each enabled V4L2 stream exactly once and exposes timestamped RGB frames to live
 collection. `embodied-ops` receives only normalized health and preview URLs
 through an optional presentation provider; it never owns a camera.
 

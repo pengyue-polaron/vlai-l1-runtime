@@ -9,7 +9,7 @@ from typing import Protocol
 
 from embodied_ops import EpisodeDecision
 
-from ..camera_bridge import RealSenseCameraSet
+from ..camera_bridge import V4L2CameraSet
 from ..contracts import NamedJointVector
 from ..teleoperation import XAirStateReceiver
 from .configuration import CollectionConfig
@@ -56,7 +56,7 @@ class LiveCollectionSource:
             )
         self._config = config
         self._state_source = state_source or XAirStateReceiver(config.system)
-        self._camera_source = camera_source or RealSenseCameraSet(config.system)
+        self._camera_source = camera_source or V4L2CameraSet(config.system)
         self._stack: ExitStack | None = None
 
     def __enter__(self) -> LiveCollectionSource:

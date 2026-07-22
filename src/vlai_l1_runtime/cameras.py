@@ -70,6 +70,7 @@ class CameraSetValidator:
                         stream.fps,
                         stream.driver,
                         stream.device_id,
+                        stream.video_index,
                     )
                     for stream in config.streams
                 ),

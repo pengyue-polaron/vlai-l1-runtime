@@ -22,7 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 camera = [
     "numpy>=2.2,<3; python_version >= '3.12'",
-    "pyrealsense2>=2.58.3.10794,<2.59; python_version >= '3.12' and platform_system == 'Linux'",
+    "opencv-python-headless>=4.12,<5; python_version >= '3.12' and platform_system == 'Linux'",
 ]
 dataset = [
     "lerobot[dataset]>=0.6,<0.7; python_version >= '3.12'",

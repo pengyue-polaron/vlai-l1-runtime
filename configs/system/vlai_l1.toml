@@ -164,6 +164,7 @@ maximum_deg = 0.0
 [cameras]
 max_age_s = 0.5
 max_pair_skew_s = 0.05
+startup_timeout_s = 2.0
 
 [cameras.wrist_left]
 required_for_collection = true

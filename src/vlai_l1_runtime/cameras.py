@@ -60,6 +60,7 @@ class CameraSetValidator:
             config_snapshot = CamerasConfig(
                 config.max_age_s,
                 config.max_pair_skew_s,
+                config.startup_timeout_s,
                 tuple(
                     CameraConfig(
                         stream.role,

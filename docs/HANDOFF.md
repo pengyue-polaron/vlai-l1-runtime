@@ -133,6 +133,9 @@ Camera and data evidence:
 - at the last 2026-07-23 inventory, neither D405 was enumerated;
 - the connected D455 AgentView produced 60 fresh 640x480 RGB `uint8` frames at
   29.82 effective FPS over USB 3; the saved image was very dark but valid;
+- repeated D455 opens took 0.49--0.58 seconds to produce their first frame and
+  then sustained 29.99--30.20 FPS, so camera startup has a separate tracked
+  warmup budget rather than weakening steady-state freshness;
 - LeRobot 0.6.0 created, finalized and passed deep inspection of a temporary
   12-frame, two-video canonical v3 dataset on the onboard host;
 - the same source exported successfully to a two-video v2.1 derivative;

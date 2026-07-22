@@ -64,6 +64,7 @@ def _commissioned_config():
     cameras = CamerasConfig(
         max_age_s=0.5,
         max_pair_skew_s=0.05,
+        startup_timeout_s=2.0,
         streams=(
             CameraConfig(
                 "wrist_left",

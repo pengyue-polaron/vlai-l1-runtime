@@ -73,6 +73,7 @@ class V4L2CameraSet:
         unsupported = [stream.role for stream in self._streams if stream.driver != "v4l2"]
         if unsupported:
             raise ValueError(f"enabled camera roles require unsupported drivers: {unsupported}")
+        self._startup_timeout_s = config.cameras.startup_timeout_s
         self._backend = backend or _OpenCvBackend()
         self._readers: dict[str, CameraReader] = {}
         self._epochs: dict[str, str] = {}
@@ -84,6 +85,13 @@ class V4L2CameraSet:
             for stream in self._streams:
                 self._readers[stream.role] = self._backend.open(stream)
                 self._epochs[stream.role] = uuid.uuid4().hex
+            deadline = time.monotonic() + self._startup_timeout_s
+            for stream in self._streams:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("camera set startup timed out")
+                capture = self._readers[stream.role].capture(timeout_s=remaining)
+                validate_camera_image(capture.image, stream)
         except BaseException:
             with suppress(RuntimeError):
                 self._close()

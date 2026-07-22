@@ -30,10 +30,12 @@ class _Image:
 class _Reader:
     def __init__(self, sequence: int) -> None:
         self.sequence = sequence
+        self.capture_count = 0
         self.closed = False
 
     def capture(self, *, timeout_s: float) -> CameraCapture:
         assert timeout_s > 0
+        self.capture_count += 1
         self.sequence += 1
         return CameraCapture(self.sequence, time.monotonic_ns(), _Image())
 
@@ -58,6 +60,7 @@ def _commissioned() -> CamerasConfig:
     return CamerasConfig(
         max_age_s=0.5,
         max_pair_skew_s=0.05,
+        startup_timeout_s=2.0,
         streams=(
             CameraConfig("wrist_left", True, True, 640, 480, 30, "v4l2", "left-by-id", 4),
             CameraConfig("wrist_right", True, True, 640, 480, 30, "v4l2", "right-by-id", 4),
@@ -231,6 +234,7 @@ def test_commissioned_camera_devices_must_be_distinct() -> None:
         CamerasConfig(
             max_age_s=0.5,
             max_pair_skew_s=0.05,
+            startup_timeout_s=2.0,
             streams=(
                 CameraConfig("wrist_left", True, True, 640, 480, 30, "v4l2", "same-device", 4),
                 CameraConfig("wrist_right", True, True, 640, 480, 30, "v4l2", "same-device", 4),
@@ -239,7 +243,7 @@ def test_commissioned_camera_devices_must_be_distinct() -> None:
         )
 
 
-def test_v4l2_bridge_owns_enabled_cameras_and_unwinds_partial_startup() -> None:
+def test_v4l2_bridge_warms_and_owns_enabled_cameras_and_unwinds_partial_startup() -> None:
     system = replace(
         load_system_config(ROOT / "configs/system/vlai_l1.toml"),
         cameras=_commissioned(),
@@ -249,6 +253,7 @@ def test_v4l2_bridge_owns_enabled_cameras_and_unwinds_partial_startup() -> None:
         samples = cameras.capture(timeout_s=0.1)
         assert tuple(samples) == ("wrist_left", "wrist_right")
         assert samples["wrist_left"].metadata.device_id == "left-by-id"
+        assert all(reader.capture_count == 2 for reader in backend.readers)
     assert all(reader.closed for reader in backend.readers)
 
     failing = _Backend(fail_role="wrist_right")

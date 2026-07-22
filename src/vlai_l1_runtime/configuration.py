@@ -178,12 +178,14 @@ class CameraConfig:
 class CamerasConfig:
     max_age_s: float
     max_pair_skew_s: float
+    startup_timeout_s: float
     streams: tuple[CameraConfig, ...]
 
     def __post_init__(self) -> None:
         for label, value in (
             ("max_age_s", self.max_age_s),
             ("max_pair_skew_s", self.max_pair_skew_s),
+            ("startup_timeout_s", self.startup_timeout_s),
         ):
             if (
                 isinstance(value, bool)
@@ -598,9 +600,14 @@ def _parse_joint_limits(value: Any) -> Mapping[str, Mapping[str, JointLimit]]:
 
 def _parse_cameras(value: Any) -> CamerasConfig:
     raw = _mapping(value, "cameras")
-    _exact_keys(raw, {"max_age_s", "max_pair_skew_s", *CAMERA_ROLES}, "cameras")
+    _exact_keys(
+        raw,
+        {"max_age_s", "max_pair_skew_s", "startup_timeout_s", *CAMERA_ROLES},
+        "cameras",
+    )
     max_age = _positive_number(raw["max_age_s"], "cameras.max_age_s")
     max_skew = _positive_number(raw["max_pair_skew_s"], "cameras.max_pair_skew_s")
+    startup_timeout = _positive_number(raw["startup_timeout_s"], "cameras.startup_timeout_s")
     streams: list[CameraConfig] = []
     for role in CAMERA_ROLES:
         label = f"cameras.{role}"
@@ -636,7 +643,7 @@ def _parse_cameras(value: Any) -> CamerasConfig:
                 ),
             )
         )
-    return CamerasConfig(max_age, max_skew, tuple(streams))
+    return CamerasConfig(max_age, max_skew, startup_timeout, tuple(streams))
 
 
 def _parse_runtime(value: Any) -> RuntimeConfig:
@@ -904,6 +911,7 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
         (
             config.cameras.max_age_s,
             config.cameras.max_pair_skew_s,
+            config.cameras.startup_timeout_s,
             tuple(
                 (
                     stream.role,
@@ -914,6 +922,7 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
                     stream.fps,
                     stream.driver,
                     stream.device_id,
+                    stream.video_index,
                 )
                 for stream in config.cameras.streams
             ),

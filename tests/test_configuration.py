@@ -57,6 +57,7 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         "joint_limits_unverified",
     )
     assert config.cameras.collection_ready is True
+    assert config.cameras.startup_timeout_s == 2.0
     assert [(camera.role, camera.device_id) for camera in config.cameras.streams] == [
         ("wrist_left", "255323074436"),
         ("wrist_right", "255323074499"),
@@ -96,6 +97,7 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
             "full Git commit",
         ),
         ("rt_priority = 20", "rt_priority = 100", "outside the allowed range"),
+        ("startup_timeout_s = 2.0", "startup_timeout_s = 0.0", "must be positive"),
         (
             "can_health_poll_s = 0.1",
             "can_health_poll_s = 0.2",

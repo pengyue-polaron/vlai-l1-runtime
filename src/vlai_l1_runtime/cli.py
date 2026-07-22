@@ -52,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
         "observe-xair", help="read sidecar state without opening robot hardware"
     )
     observe_xair.add_argument("--config", type=Path, required=True)
-    observe_xair.add_argument("--side", choices=("left", "right"), required=True)
+    observe_xair.add_argument("--side", choices=("left", "right", "bimanual"), required=True)
     observe_xair.add_argument("--samples", type=int, required=True)
     observe_xair.add_argument("--timeout", type=float, default=1.0)
     for command, help_text in (
@@ -241,6 +241,28 @@ def _run_xair_observer(args: argparse.Namespace) -> int:
     config = load_system_config(args.config)
     snapshots: list[dict[str, object]] = []
     with XAirStateReceiver(config) as receiver:
+        if args.side == "bimanual":
+            for _ in range(args.samples):
+                sample = receiver.receive(timeout_s=args.timeout)
+                if sample is None:
+                    raise TimeoutError("timed out waiting for paired x_air state")
+                observation, action = sample
+                snapshots.append(
+                    {
+                        "source_sequence": observation.metadata.source_sequence,
+                        "monotonic_ns": observation.metadata.monotonic_ns,
+                        "observation_deg": dict(observation.values),
+                        "action_deg": dict(action.values),
+                    }
+                )
+            print(
+                json.dumps(
+                    {"status": "PASS", "mode": "bimanual", "samples": snapshots},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 0
         for _ in range(args.samples):
             deadline = time.monotonic() + args.timeout
             while True:

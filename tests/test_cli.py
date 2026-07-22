@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from vlai_l1_runtime.cli import main
+from vlai_l1_runtime.contracts import FEATURE_NAMES, NamedJointVector, SampleMetadata
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM_CONFIG = ROOT / "configs/system/vlai_l1.toml"
@@ -49,3 +50,52 @@ def test_hardware_free_cli_validates_and_describes_collection(capsys) -> None:
         "action",
         "observation.state",
     }
+
+
+def test_xair_observer_reports_paired_bimanual_state(monkeypatch, capsys) -> None:
+    values = {name: float(index) for index, name in enumerate(FEATURE_NAMES)}
+    sample = NamedJointVector(values, SampleMetadata(7, 123_000))
+
+    class Receiver:
+        def __init__(self, config) -> None:
+            self.config = config
+
+        def __enter__(self):
+            return self
+
+        def receive(self, *, timeout_s: float):
+            assert timeout_s == 0.5
+            return sample, sample
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+    monkeypatch.setattr("vlai_l1_runtime.cli.XAirStateReceiver", Receiver)
+
+    assert (
+        main(
+            [
+                "observe-xair",
+                "--config",
+                str(SYSTEM_CONFIG),
+                "--side",
+                "bimanual",
+                "--samples",
+                "1",
+                "--timeout",
+                "0.5",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "PASS"
+    assert payload["mode"] == "bimanual"
+    assert payload["samples"] == [
+        {
+            "source_sequence": 7,
+            "monotonic_ns": 123_000,
+            "observation_deg": values,
+            "action_deg": values,
+        }
+    ]

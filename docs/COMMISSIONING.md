@@ -43,10 +43,15 @@ entries.
    sudo install -d -o sunrise -g sunrise /run/vlai-l1
    vlai-l1 observe-xair \
      --config configs/system/vlai_l1.toml \
-     --side left \
+     --side bimanual \
      --samples 20 \
      --timeout 3
    ```
+
+   `bimanual` waits for a fresh packet from both sidecars, checks the tracked
+   left/right timestamp skew, and prints the paired, named follower observation
+   and leader action in degrees. Use `left` or `right` only for an isolated
+   single-side stage.
 
 5. Test the left pair first (`can1` leader to `can3` follower). Keep both arms
    mechanically aligned before creation and stop on unexpected alignment,
@@ -55,8 +60,9 @@ entries.
    counters before advancing.
 7. Repeat for the right pair (`can0` leader to `can2` follower). This stage must
    specifically close the previous `can2` stability concern.
-8. Only after both isolated stages pass, run both sidecars together and verify
-   bimanual packet continuity and left/right skew.
+8. Only after both isolated stages pass, run both sidecars together and require
+   the `bimanual` observer to complete all requested samples without a timeout,
+   sequence failure, or left/right skew failure.
 
 The sidecar command takes no hardware defaults. Populate every argument from
 `build/xair-assets/manifest.json` and the tracked config:

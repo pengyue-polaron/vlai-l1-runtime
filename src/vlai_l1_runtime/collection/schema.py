@@ -10,7 +10,7 @@ from typing import Any
 from embodied_ops import require_fresh_sample, require_pair_skew
 
 from ..cameras import CameraFrameMetadata, CameraSetValidator
-from ..configuration import CAMERA_ROLES, CameraConfig, SystemConfig
+from ..configuration import CameraConfig, SystemConfig
 from ..contracts import FEATURE_NAMES, NamedJointVector, limits_by_feature, validate_named_values
 from .configuration import CollectionConfig
 from .dependencies import collection_dependency_error, require_collection_python
@@ -18,9 +18,9 @@ from .dependencies import collection_dependency_error, require_collection_python
 STATE_KEY = "observation.state"
 ACTION_KEY = "action"
 IMAGE_PREFIX = "observation.images."
-AGENT_IMAGE_KEY = f"{IMAGE_PREFIX}agent"
-WRIST_IMAGE_KEY = f"{IMAGE_PREFIX}wrist"
-DATASET_SCHEMA = "vlai_l1_lerobot_dataset_v3_v1"
+WRIST_LEFT_IMAGE_KEY = f"{IMAGE_PREFIX}wrist_left"
+WRIST_RIGHT_IMAGE_KEY = f"{IMAGE_PREFIX}wrist_right"
+DATASET_SCHEMA = "vlai_l1_lerobot_dataset_v3_v2"
 
 
 class CollectionContractError(ValueError):
@@ -192,11 +192,23 @@ class SampleAssembler:
 
         images: dict[str, Any] = {}
         stream_by_role = {stream.role: stream for stream in self._config.system.cameras.streams}
-        for role in CAMERA_ROLES:
+        enabled_roles = tuple(
+            stream.role for stream in self._config.system.cameras.streams if stream.enabled
+        )
+        if set(sample.cameras) != set(enabled_roles):
+            raise CollectionContractError("sample must contain every enabled camera role exactly")
+        for role in enabled_roles:
             _validate_image(sample.cameras[role].image, stream_by_role[role])
             images[f"{IMAGE_PREFIX}{role}"] = sample.cameras[role].image
         metadata = {role: camera.metadata for role, camera in sample.cameras.items()}
         self._camera_validator.validate(metadata, now_ns=now_ns)
+        max_robot_camera_skew_ns = int(self._config.max_robot_camera_skew_s * 1_000_000_000)
+        if any(
+            abs(camera.monotonic_ns - sample.observation.metadata.monotonic_ns)
+            > max_robot_camera_skew_ns
+            for camera in metadata.values()
+        ):
+            raise CollectionContractError("robot/camera sample skew exceeds the tracked limit")
 
         self._previous_action = candidate_action
         self._last_observation_sequence = observation.seq
@@ -212,7 +224,9 @@ class _TimedSample:
 
 def canonical_dataset_contract(system: SystemConfig) -> DatasetContract:
     cameras = tuple(
-        CameraSpec(stream.role, stream.height, stream.width) for stream in system.cameras.streams
+        CameraSpec(stream.role, stream.height, stream.width)
+        for stream in system.cameras.streams
+        if stream.enabled
     )
     return DatasetContract(FEATURE_NAMES, FEATURE_NAMES, cameras)
 

@@ -29,6 +29,8 @@ class RobotDescription:
     topology_id: str
     observation_features: tuple[FeatureSpec, ...]
     action_features: tuple[FeatureSpec, ...]
+    teleoperation_ready: bool
+    teleoperation_blockers: tuple[str, ...]
     command_ready: bool
     command_blockers: tuple[str, ...]
     camera_roles: tuple[str, ...]
@@ -138,6 +140,8 @@ def robot_description(config: SystemConfig) -> RobotDescription:
         topology_id=config.topology_id,
         observation_features=features,
         action_features=features,
+        teleoperation_ready=not config.teleoperation.blockers,
+        teleoperation_blockers=config.teleoperation.blockers,
         command_ready=config.safety.command_ready,
         command_blockers=config.command_blockers,
         camera_roles=tuple(stream.role for stream in config.cameras.streams),

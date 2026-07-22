@@ -3,9 +3,10 @@
 ## Canonical v3 dataset
 
 `configs/collection/default.toml` owns dataset roots, repository ID prefix, FPS,
-sample timing, and action-step validation. It points to exactly one System
-config; camera dimensions and roles, joint names, physical units, limits, and
-robot identity are not duplicated.
+sample freshness, state/action, robot/camera and camera-pair skew, and
+action-step validation. It points to exactly one System config; camera
+dimensions and roles, joint names, physical units, limits, and robot identity
+are not duplicated.
 
 An experiment named `pick_blocks_v1` is stored at:
 
@@ -23,9 +24,15 @@ The canonical features are:
 ```text
 observation.state         float32[16], degrees
 action                    float32[16], degrees
-observation.images.agent  video[height,width,3]
-observation.images.wrist  video[height,width,3]
+observation.images.wrist_left   video[height,width,3]
+observation.images.wrist_right  video[height,width,3]
+observation.images.agent        video[height,width,3], optional
 ```
+
+Only enabled camera roles are part of an experiment's feature contract. The two
+wrist cameras are required for collection on the current L1; AgentView is
+optional and can be enabled for a new experiment after its identity is
+commissioned.
 
 Both vectors use:
 

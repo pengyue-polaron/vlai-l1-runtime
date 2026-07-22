@@ -24,6 +24,7 @@ collection = [
     "lerobot[dataset]>=0.6,<0.7; python_version >= '3.12'",
     "numpy>=2.2,<3; python_version >= '3.12'",
     "pandas>=2.3,<3; python_version >= '3.12'",
+    "pyrealsense2>=2.58.3.10794,<2.59; python_version >= '3.12' and platform_system == 'Linux'",
 ]
 
 [project.scripts]
@@ -56,6 +57,7 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+extend-exclude = ["external/x-air-sdk"]
 
 [tool.ruff.lint]
 select = ["B", "C4", "E4", "E7", "E9", "F", "I", "PIE", "PT", "RUF", "SIM", "UP"]

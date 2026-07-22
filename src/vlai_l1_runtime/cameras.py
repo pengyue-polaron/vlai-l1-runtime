@@ -63,10 +63,12 @@ class CameraSetValidator:
                 tuple(
                     CameraConfig(
                         stream.role,
+                        stream.required_for_collection,
                         stream.enabled,
                         stream.width,
                         stream.height,
                         stream.fps,
+                        stream.driver,
                         stream.device_id,
                     )
                     for stream in config.streams

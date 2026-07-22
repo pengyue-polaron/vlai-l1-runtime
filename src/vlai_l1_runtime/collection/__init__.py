@@ -13,9 +13,9 @@ from .mock import SyntheticSampleSource
 from .orchestration import EpisodeResult, record_episode
 from .schema import (
     ACTION_KEY,
-    AGENT_IMAGE_KEY,
     STATE_KEY,
-    WRIST_IMAGE_KEY,
+    WRIST_LEFT_IMAGE_KEY,
+    WRIST_RIGHT_IMAGE_KEY,
     CameraSample,
     CollectionSample,
     DatasetContract,
@@ -24,9 +24,9 @@ from .schema import (
 
 __all__ = [
     "ACTION_KEY",
-    "AGENT_IMAGE_KEY",
     "STATE_KEY",
-    "WRIST_IMAGE_KEY",
+    "WRIST_LEFT_IMAGE_KEY",
+    "WRIST_RIGHT_IMAGE_KEY",
     "CameraSample",
     "CollectionConfig",
     "CollectionSample",

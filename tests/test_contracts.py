@@ -36,6 +36,8 @@ def test_description_is_lerobot_compatible_and_fail_closed() -> None:
     assert description.action_features[0].name == "left_joint_1.pos"
     assert description.action_features[-1].name == "right_gripper.pos"
     assert {feature.unit for feature in description.action_features} == {"degree"}
+    assert description.teleoperation_ready is False
+    assert description.teleoperation_blockers == ("teleoperation_uncommissioned",)
     assert description.command_ready is False
     assert description.collection_ready is False
 

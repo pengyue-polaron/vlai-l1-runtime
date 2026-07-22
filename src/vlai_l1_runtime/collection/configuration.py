@@ -43,6 +43,7 @@ class CollectionConfig:
     fps: int
     max_sample_age_s: float
     max_state_action_skew_s: float
+    max_robot_camera_skew_s: float
     max_action_step_deg: float
     config_sha256: str
     system_config_sha256: str
@@ -52,9 +53,9 @@ class CollectionConfig:
         camera_blockers = tuple(
             f"camera_{stream.role}_uncommissioned"
             for stream in self.system.cameras.streams
-            if not stream.enabled
+            if stream.required_for_collection and not stream.enabled
         )
-        return (*self.system.command_blockers, *camera_blockers)
+        return (*self.system.teleoperation.blockers, *camera_blockers)
 
     @property
     def collection_ready(self) -> bool:
@@ -95,6 +96,7 @@ def load_collection_config(path: Path) -> CollectionConfig:
         "fps",
         "max_sample_age_s",
         "max_state_action_skew_s",
+        "max_robot_camera_skew_s",
         "max_action_step_deg",
     }
     _exact_keys(root, keys, "collection")
@@ -122,6 +124,9 @@ def load_collection_config(path: Path) -> CollectionConfig:
     state_action_skew = _positive_number(root["max_state_action_skew_s"], "max_state_action_skew_s")
     if state_action_skew > sample_age:
         raise ConfigError("max_state_action_skew_s must not exceed max_sample_age_s")
+    robot_camera_skew = _positive_number(root["max_robot_camera_skew_s"], "max_robot_camera_skew_s")
+    if robot_camera_skew > sample_age:
+        raise ConfigError("max_robot_camera_skew_s must not exceed max_sample_age_s")
     system = load_system_config(system_path)
     return CollectionConfig(
         path=resolved,
@@ -134,6 +139,7 @@ def load_collection_config(path: Path) -> CollectionConfig:
         fps=fps,
         max_sample_age_s=sample_age,
         max_state_action_skew_s=state_action_skew,
+        max_robot_camera_skew_s=robot_camera_skew,
         max_action_step_deg=_positive_number(root["max_action_step_deg"], "max_action_step_deg"),
         config_sha256=hashlib.sha256(content).hexdigest(),
         system_config_sha256=hashlib.sha256(

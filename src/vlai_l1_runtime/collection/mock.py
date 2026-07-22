@@ -65,6 +65,7 @@ class SyntheticSampleSource:
                     ),
                 )
                 for stream in self._config.system.cameras.streams
+                if stream.enabled
             }
             yield (
                 CollectionSample(

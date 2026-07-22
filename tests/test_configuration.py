@@ -40,6 +40,12 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         25.0,
         16.0,
     )
+    assert config.control["follower"].fc[5] == 0.093
+    assert config.teleoperation.source_revision == ("bf300508e179f652b23f0efaf3b6c9048f1f12e9")
+    assert config.teleoperation.state_timeout_s == 0.1
+    assert config.teleoperation.rt_priority == 20
+    assert config.teleoperation.can_health_poll_s == 0.1
+    assert config.teleoperation.blockers == ("teleoperation_uncommissioned",)
     assert config.joint_limits["left"]["joint_2"].maximum_deg == 9.0
     assert config.joint_limits["right"]["joint_2"].minimum_deg == -9.0
     assert config.safety.command_ready is False
@@ -52,8 +58,9 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
     )
     assert config.cameras.collection_ready is False
     assert [(camera.role, camera.device_id) for camera in config.cameras.streams] == [
+        ("wrist_left", None),
+        ("wrist_right", None),
         ("agent", None),
-        ("wrist", None),
     ]
 
 
@@ -78,6 +85,17 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
             "kp = [240.0, 240.0, 240.0, 240.0, 24.0, 31.0, 25.0, 16.0]",
             "kp = [240.0]",
             "exactly 8",
+        ),
+        (
+            'source_revision = "bf300508e179f652b23f0efaf3b6c9048f1f12e9"',
+            'source_revision = "main"',
+            "full Git commit",
+        ),
+        ("rt_priority = 20", "rt_priority = 100", "outside the allowed range"),
+        (
+            "can_health_poll_s = 0.1",
+            "can_health_poll_s = 0.2",
+            "must not exceed state_timeout_s",
         ),
     ],
 )

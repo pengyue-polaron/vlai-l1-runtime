@@ -47,6 +47,10 @@ _REPRODUCIBILITY_FIELDS = {
     "image_storage",
     "feature_names",
     "camera_roles",
+    "teleoperation_provider",
+    "teleoperation_sdk_version",
+    "teleoperation_source_revision",
+    "teleoperation_state_protocol_version",
 }
 
 
@@ -348,7 +352,13 @@ def provenance_from_config(config: Any) -> dict[str, Any]:
         "fps": config.fps,
         "image_storage": "video",
         "feature_names": list(FEATURE_NAMES),
-        "camera_roles": [stream.role for stream in config.system.cameras.streams],
+        "camera_roles": [stream.role for stream in config.system.cameras.streams if stream.enabled],
+        "teleoperation_provider": config.system.teleoperation.provider,
+        "teleoperation_sdk_version": config.system.teleoperation.sdk_version,
+        "teleoperation_source_revision": config.system.teleoperation.source_revision,
+        "teleoperation_state_protocol_version": (
+            config.system.teleoperation.state_protocol_version
+        ),
     }
 
 

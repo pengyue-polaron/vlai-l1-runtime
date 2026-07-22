@@ -1,3 +1,6 @@
 [submodule "external/embodied-ops"]
 	path = external/embodied-ops
 	url = https://github.com/pengyue-polaron/embodied-ops.git
+[submodule "external/x-air-sdk"]
+	path = external/x-air-sdk
+	url = https://github.com/pengyue-polaron/vlai-x-air-sdk.git

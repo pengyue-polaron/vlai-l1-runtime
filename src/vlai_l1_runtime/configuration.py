@@ -31,7 +31,8 @@ MOTOR_NAMES = (
 )
 SIDES = ("left", "right")
 ROLES = ("leader", "follower")
-CAMERA_ROLES = ("agent", "wrist")
+CAMERA_ROLES = ("wrist_left", "wrist_right", "agent")
+CAMERA_DRIVERS = ("realsense", "unassigned")
 _LOADER_VALIDATION_TOKEN = object()
 _MAX_CONFIG_BYTES = 1_048_576
 _LOCAL_CONFIG_FILESYSTEM_TYPES = frozenset(
@@ -109,6 +110,10 @@ class MotorConfig:
 class ControlProfile:
     kp: tuple[float, ...]
     kd: tuple[float, ...]
+    fc: tuple[float, ...]
+    friction_k: tuple[float, ...]
+    fv: tuple[float, ...]
+    fo: tuple[float, ...]
 
 
 @dataclass(frozen=True)
@@ -120,15 +125,19 @@ class JointLimit:
 @dataclass(frozen=True)
 class CameraConfig:
     role: str
+    required_for_collection: bool
     enabled: bool
     width: int
     height: int
     fps: int
+    driver: str
     device_id: str | None
 
     def __post_init__(self) -> None:
         if self.role not in CAMERA_ROLES:
             raise ConfigError(f"unknown camera role: {self.role!r}")
+        if not isinstance(self.required_for_collection, bool):
+            raise ConfigError(f"camera {self.role} required_for_collection must be a boolean")
         if not isinstance(self.enabled, bool):
             raise ConfigError(f"camera {self.role} enabled must be a boolean")
         for label, value in (
@@ -138,6 +147,8 @@ class CameraConfig:
         ):
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ConfigError(f"camera {self.role} {label} must be a positive integer")
+        if self.driver not in CAMERA_DRIVERS:
+            raise ConfigError(f"camera {self.role} has unknown driver: {self.driver!r}")
         if self.device_id is not None and (
             not isinstance(self.device_id, str)
             or not self.device_id
@@ -146,6 +157,8 @@ class CameraConfig:
             raise ConfigError(f"camera {self.role} device_id must be normalized text")
         if self.enabled and not self.device_id:
             raise ConfigError(f"camera {self.role} requires a device_id when enabled")
+        if self.enabled and self.driver == "unassigned":
+            raise ConfigError(f"camera {self.role} requires an assigned driver when enabled")
         if not self.enabled and self.device_id is not None:
             raise ConfigError(f"camera {self.role} device_id must be absent while disabled")
 
@@ -171,20 +184,44 @@ class CamerasConfig:
         if self.max_pair_skew_s > self.max_age_s:
             raise ConfigError("camera max_pair_skew_s must not exceed max_age_s")
         if tuple(stream.role for stream in self.streams) != CAMERA_ROLES:
-            raise ConfigError("camera streams must define agent and wrist exactly once")
+            raise ConfigError("camera streams must define both wrists and agent exactly once")
+        if not any(stream.required_for_collection for stream in self.streams):
+            raise ConfigError("at least one camera must be required for collection")
         device_ids = [stream.device_id for stream in self.streams if stream.enabled]
         if len(device_ids) != len(set(device_ids)):
             raise ConfigError("enabled camera streams must have unique device identities")
 
     @property
     def collection_ready(self) -> bool:
-        return bool(self.streams) and all(stream.enabled for stream in self.streams)
+        return all(stream.enabled for stream in self.streams if stream.required_for_collection)
 
 
 @dataclass(frozen=True)
 class RuntimeConfig:
     transport: str
     socket_path: Path
+
+
+@dataclass(frozen=True)
+class TeleoperationConfig:
+    provider: str
+    mode: str
+    arm_type: str
+    sdk_version: str
+    source_revision: str
+    source_root: Path
+    state_protocol_version: int
+    state_socket_path: Path
+    publish_hz: int
+    state_timeout_s: float
+    max_side_skew_s: float
+    rt_priority: int
+    can_health_poll_s: float
+    commissioned: bool
+
+    @property
+    def blockers(self) -> tuple[str, ...]:
+        return () if self.commissioned else ("teleoperation_uncommissioned",)
 
 
 @dataclass(frozen=True)
@@ -215,6 +252,7 @@ class SystemConfig:
     control: Mapping[str, ControlProfile]
     joint_limits: Mapping[str, Mapping[str, JointLimit]]
     cameras: CamerasConfig
+    teleoperation: TeleoperationConfig
     runtime: RuntimeConfig
     operator_panel: OperatorPanelConfig
     lifecycle: LifecycleConfig
@@ -252,6 +290,7 @@ def load_system_config(path: Path) -> SystemConfig:
             "control",
             "joint_limits",
             "cameras",
+            "teleoperation",
             "runtime",
             "operator_panel",
             "lifecycle",
@@ -274,6 +313,7 @@ def load_system_config(path: Path) -> SystemConfig:
     control = _parse_control(root["control"], len(motors))
     joint_limits = _parse_joint_limits(root["joint_limits"])
     cameras = _parse_cameras(root["cameras"])
+    teleoperation = _parse_teleoperation(root["teleoperation"], config_path=resolved)
     runtime = _parse_runtime(root["runtime"])
     operator_panel = _parse_operator_panel(root["operator_panel"])
     lifecycle = _parse_lifecycle(root["lifecycle"])
@@ -301,6 +341,7 @@ def load_system_config(path: Path) -> SystemConfig:
             {side: MappingProxyType(dict(limits)) for side, limits in joint_limits.items()}
         ),
         cameras=cameras,
+        teleoperation=teleoperation,
         runtime=runtime,
         operator_panel=operator_panel,
         lifecycle=lifecycle,
@@ -511,10 +552,16 @@ def _parse_control(value: Any, motor_count: int) -> Mapping[str, ControlProfile]
     result: dict[str, ControlProfile] = {}
     for role in ROLES:
         table = _mapping(raw[role], f"control.{role}")
-        _exact_keys(table, {"kp", "kd"}, f"control.{role}")
+        _exact_keys(table, {"kp", "kd", "fc", "friction_k", "fv", "fo"}, f"control.{role}")
         kp = _number_vector(table["kp"], f"control.{role}.kp", motor_count, positive=True)
         kd = _number_vector(table["kd"], f"control.{role}.kd", motor_count, positive=True)
-        result[role] = ControlProfile(kp, kd)
+        fc = _number_vector(table["fc"], f"control.{role}.fc", motor_count, positive=False)
+        friction_k = _number_vector(
+            table["friction_k"], f"control.{role}.friction_k", motor_count, positive=True
+        )
+        fv = _number_vector(table["fv"], f"control.{role}.fv", motor_count, positive=False)
+        fo = _number_vector(table["fo"], f"control.{role}.fo", motor_count, positive=False)
+        result[role] = ControlProfile(kp, kd, fc, friction_k, fv, fo)
     return result
 
 
@@ -547,7 +594,12 @@ def _parse_cameras(value: Any) -> CamerasConfig:
     for role in CAMERA_ROLES:
         label = f"cameras.{role}"
         table = _mapping(raw[role], label)
-        _allowed_keys(table, {"enabled", "width", "height", "fps"}, {"device_id"}, label)
+        _allowed_keys(
+            table,
+            {"required_for_collection", "enabled", "width", "height", "fps", "driver"},
+            {"device_id"},
+            label,
+        )
         enabled = _boolean(table["enabled"], f"{label}.enabled")
         device = table.get("device_id")
         if enabled and device is None:
@@ -557,10 +609,14 @@ def _parse_cameras(value: Any) -> CamerasConfig:
         streams.append(
             CameraConfig(
                 role=role,
+                required_for_collection=_boolean(
+                    table["required_for_collection"], f"{label}.required_for_collection"
+                ),
                 enabled=enabled,
                 width=_integer(table["width"], f"{label}.width", minimum=1),
                 height=_integer(table["height"], f"{label}.height", minimum=1),
                 fps=_integer(table["fps"], f"{label}.fps", minimum=1),
+                driver=_choice(table["driver"], CAMERA_DRIVERS, f"{label}.driver"),
                 device_id=None if device is None else _text(device, f"{label}.device_id"),
             )
         )
@@ -575,6 +631,72 @@ def _parse_runtime(value: Any) -> RuntimeConfig:
     if not socket_path.is_absolute():
         raise ConfigError("runtime.socket_path must be absolute")
     return RuntimeConfig(transport, socket_path)
+
+
+def _parse_teleoperation(value: Any, *, config_path: Path) -> TeleoperationConfig:
+    raw = _mapping(value, "teleoperation")
+    keys = {
+        "provider",
+        "mode",
+        "arm_type",
+        "sdk_version",
+        "source_revision",
+        "source_root",
+        "state_protocol_version",
+        "state_socket_path",
+        "publish_hz",
+        "state_timeout_s",
+        "max_side_skew_s",
+        "rt_priority",
+        "can_health_poll_s",
+        "commissioned",
+    }
+    _exact_keys(raw, keys, "teleoperation")
+    revision = _text(raw["source_revision"], "teleoperation.source_revision")
+    if len(revision) != 40 or any(character not in "0123456789abcdef" for character in revision):
+        raise ConfigError("teleoperation.source_revision must be a lowercase full Git commit")
+    source_root = Path(_text(raw["source_root"], "teleoperation.source_root"))
+    if source_root.is_absolute():
+        raise ConfigError("teleoperation.source_root must be relative to the System config")
+    source_root = Path(os.path.abspath(config_path.parent / source_root))
+    state_socket_path = Path(_text(raw["state_socket_path"], "teleoperation.state_socket_path"))
+    if not state_socket_path.is_absolute():
+        raise ConfigError("teleoperation.state_socket_path must be absolute")
+    state_protocol_version = _integer(
+        raw["state_protocol_version"], "teleoperation.state_protocol_version", minimum=1
+    )
+    if state_protocol_version != 1:
+        raise ConfigError("unsupported teleoperation.state_protocol_version")
+    state_timeout_s = _positive_number(raw["state_timeout_s"], "teleoperation.state_timeout_s")
+    can_health_poll_s = _positive_number(
+        raw["can_health_poll_s"], "teleoperation.can_health_poll_s"
+    )
+    if can_health_poll_s > state_timeout_s:
+        raise ConfigError("teleoperation.can_health_poll_s must not exceed state_timeout_s")
+    for label, seconds in (
+        ("state_timeout_s", state_timeout_s),
+        ("can_health_poll_s", can_health_poll_s),
+    ):
+        if not (seconds * 1000).is_integer():
+            raise ConfigError(f"teleoperation.{label} must resolve to whole milliseconds")
+    return TeleoperationConfig(
+        provider=_choice(raw["provider"], ("x_air_sdk",), "teleoperation.provider"),
+        mode=_choice(raw["mode"], ("unilateral",), "teleoperation.mode"),
+        arm_type=_choice(raw["arm_type"], ("v10",), "teleoperation.arm_type"),
+        sdk_version=_text(raw["sdk_version"], "teleoperation.sdk_version"),
+        source_revision=revision,
+        source_root=source_root,
+        state_protocol_version=state_protocol_version,
+        state_socket_path=state_socket_path,
+        publish_hz=_integer(raw["publish_hz"], "teleoperation.publish_hz", minimum=1),
+        state_timeout_s=state_timeout_s,
+        max_side_skew_s=_positive_number(raw["max_side_skew_s"], "teleoperation.max_side_skew_s"),
+        rt_priority=_integer(
+            raw["rt_priority"], "teleoperation.rt_priority", minimum=1, maximum=99
+        ),
+        can_health_poll_s=can_health_poll_s,
+        commissioned=_boolean(raw["commissioned"], "teleoperation.commissioned"),
+    )
 
 
 def _parse_operator_panel(value: Any) -> OperatorPanelConfig:
@@ -737,7 +859,18 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
             (motor.name, motor.send_id, motor.receive_id, motor.motor_type)
             for motor in config.motors
         ),
-        tuple((role, config.control[role].kp, config.control[role].kd) for role in ROLES),
+        tuple(
+            (
+                role,
+                config.control[role].kp,
+                config.control[role].kd,
+                config.control[role].fc,
+                config.control[role].friction_k,
+                config.control[role].fv,
+                config.control[role].fo,
+            )
+            for role in ROLES
+        ),
         tuple(
             (
                 side,
@@ -758,14 +891,32 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
             tuple(
                 (
                     stream.role,
+                    stream.required_for_collection,
                     stream.enabled,
                     stream.width,
                     stream.height,
                     stream.fps,
+                    stream.driver,
                     stream.device_id,
                 )
                 for stream in config.cameras.streams
             ),
+        ),
+        (
+            config.teleoperation.provider,
+            config.teleoperation.mode,
+            config.teleoperation.arm_type,
+            config.teleoperation.sdk_version,
+            config.teleoperation.source_revision,
+            str(config.teleoperation.source_root),
+            config.teleoperation.state_protocol_version,
+            str(config.teleoperation.state_socket_path),
+            config.teleoperation.publish_hz,
+            config.teleoperation.state_timeout_s,
+            config.teleoperation.max_side_skew_s,
+            config.teleoperation.rt_priority,
+            config.teleoperation.can_health_poll_s,
+            config.teleoperation.commissioned,
         ),
         (config.runtime.transport, str(config.runtime.socket_path)),
         (config.operator_panel.bind, config.operator_panel.port),

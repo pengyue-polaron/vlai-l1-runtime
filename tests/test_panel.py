@@ -29,5 +29,5 @@ def test_panel_exposes_only_hardware_free_workflows() -> None:
 
 def test_panel_refuses_live_collection_with_tracked_blockers() -> None:
     adapter = L1OperatorPanelAdapter(ROOT, CONFIG)
-    with pytest.raises(RuntimeError, match="command_transport_unimplemented"):
+    with pytest.raises(RuntimeError, match="teleoperation_uncommissioned"):
         adapter.build_launch("collect", {})

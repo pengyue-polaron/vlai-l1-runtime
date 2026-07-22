@@ -92,7 +92,7 @@ def test_episode_publication_is_atomic_and_writes_provenance(tmp_path: Path) -> 
 
     provenance = json.loads((identity.target_root / "meta/vlai_l1.json").read_text())
     assert provenance["total_frames"] == 1
-    assert provenance["dataset_schema"] == "vlai_l1_lerobot_dataset_v3_v1"
+    assert provenance["dataset_schema"] == "vlai_l1_lerobot_dataset_v3_v2"
 
 
 def test_failed_episode_never_exposes_a_partial_dataset(tmp_path: Path) -> None:

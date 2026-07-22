@@ -12,14 +12,48 @@ VLAI workflows / embodied-ops adapter
 ```
 
 The pure configuration, public contracts, command-session state machine, and
-hardware-independent collection/dataset layer exist today. No arrow below the
-Runtime transport has been implemented.
+hardware-independent collection/dataset layer exist today. A candidate
+teleoperation observation path exists, while the independent policy-command
+transport remains unimplemented.
+
+## Teleoperation observation path
+
+The repository pins `x_air_sdk` by Git submodule revision. One native sidecar
+per side calls only its public unilateral C API and is the sole owner of that
+leader/follower CAN pair. It intentionally does not use the upstream ROS2 node:
+that node opens an additional leader-gripper CAN handle and exposes an
+unscoped motion service.
+
+The x_air callback supplies seven arm joints plus one gripper for the leader and
+follower in radians. The callback only copies finite values into a bounded
+slot. A non-realtime publisher thread emits a 152-byte, little-endian Unix
+datagram containing protocol version, side, source sequence, monotonic
+timestamp, and both eight-value vectors. A stale callback, wrong DOF, or
+non-finite value stops the candidate process. Missing datagram consumers never
+block the control loop.
+
+The Python adapter accepts only exact protocol packets, requires increasing
+per-side sequences and bounded left/right skew, then converts radians to the
+sixteen named degree-valued Runtime features. Leader positions become the
+collection action and follower positions become the observation. No positional
+slicing escapes this adapter.
+
+The native boundary also owns process scheduling and CAN health. It caps the
+SDK's internal FIFO request at the System-owned priority, verifies every thread,
+and polls both CAN controllers through rtnetlink. A live error counter or any
+increase in warning, passive, bus-off, bus-error, arbitration-loss, or restart
+statistics terminates the session and lets SDK destruction disable the motors.
+
+Teleoperation and policy commands are separate readiness domains. Collection
+depends on a commissioned teleoperation observer and commissioned cameras; it
+does not depend on a policy-command transport.
 
 ## Repository ownership
 
 The tracked System configuration owns the four CAN endpoint identities, common
-CAN-FD settings, motor identities, deployed gains, provisional joint limits,
-camera roles, local endpoints, service names, and command-readiness evidence.
+CAN-FD settings, motor identities, all deployed gain and friction vectors,
+provisional joint limits, the pinned teleoperation release, camera roles, local
+endpoints, service names, and readiness evidence.
 Loaders reject unknown or missing behavior-affecting keys.
 
 Robot observations and commands use the same sixteen named position features as
@@ -37,26 +71,28 @@ command resources before another lease can be granted.
 
 ## Cameras
 
-The Runtime repository owns the AgentView and wrist camera identities and their
-freshness/skew contract. A future Camera Bridge will open each physical device
-once, expose raw timestamped frames to collection/inference, and independently
-produce a lower-rate Web preview. `embodied-ops` receives only normalized health
-and preview URLs through its optional camera provider.
+The Runtime repository owns the left-wrist, right-wrist, and optional AgentView
+camera identities and their freshness/skew contract. The Camera Bridge opens
+each enabled RealSense exactly once and exposes timestamped RGB frames to live
+collection. `embodied-ops` receives only normalized health and preview URLs
+through an optional presentation provider; it never owns a camera.
 
 Each frame identifies its configured device and stream epoch. The bridge owns a
 stateful validator for sequence and timestamp continuity. After a deliberate
 stream restart, the bridge must declare each restarted role's new epoch before
 the validator will accept sequence or timestamp rollback.
 
-Both camera roles are currently uncommissioned and disabled. Collection is
-therefore unavailable by construction.
+Both required wrist roles are currently uncommissioned and disabled. AgentView
+is optional and has no assigned driver yet. Collection is therefore unavailable
+by construction, but adding AgentView later does not require mislabeling either
+wrist stream.
 
 ## Collection and datasets
 
 The collection dependency direction is:
 
 ```text
-future Runtime observer + Camera Bridge
+x_air state observer + Camera Bridge
   -> CollectionSample
   -> SampleAssembler
   -> DirectLeRobotEpisode
@@ -90,9 +126,9 @@ is the same as L1.
 
 ## Operator Panel
 
-The L1 adapter currently exposes three hardware-free workflows: collection
-configuration validation, canonical dataset doctor, and v2.1 export. It reports
-the tracked live-collection blockers and does not advertise a runnable collect,
-camera, reset, or motion action. When the Runtime observer and Camera Bridge are
-commissioned, the adapter may add collect and camera capabilities without any
-change to the reusable Web application.
+With the current uncommissioned configuration, the L1 adapter exposes three
+hardware-free workflows: collection configuration validation, canonical dataset
+doctor, and v2.1 export. It reports the tracked live-collection blockers and
+does not advertise camera, reset, or motion actions. Once the teleoperation and
+camera gates are commissioned, the same adapter adds its finite live-collection
+workflow without changing the reusable Web application.

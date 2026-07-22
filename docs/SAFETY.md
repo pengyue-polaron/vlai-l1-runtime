@@ -1,10 +1,14 @@
 # Safety
 
-The current repository is intentionally incapable of motion.
+The tracked Runtime CLI and Operator Panel cannot start motion. The native
+x_air sidecar is a commissioning candidate and is not installed as a Runtime
+entrypoint or system service.
 
 ## Command blockers
 
-- The production unilateral C++ source is not present in the onboard snapshot.
+- The selected x_air release still contains prebuilt Control, Dynamics,
+  JointMapper, and CAN libraries; its public wrapper is not complete controller
+  source.
 - J2 motor, URDF, and control coordinates have not been reconciled on all arms.
 - The previous `can2` bus-off event has not been closed out under sustained load.
 - The provisional joint limits have not been commissioned on this physical unit.
@@ -17,15 +21,22 @@ Schema version 1 rejects an implemented transport or `command_ready = true`, so
 enabling commands requires a deliberate schema and code review rather than a
 single configuration edit.
 
-The collection loader additionally requires both configured camera identities.
-The current config leaves them disabled, so `collection_ready` is false and the
-Operator Panel exposes no live collection or camera action. Synthetic sources
-exist only for pure integration tests and cannot enable the Runtime.
+The collection loader independently requires a commissioned teleoperation path
+and both configured camera identities. The current config leaves them disabled,
+so `collection_ready` is false and the Operator Panel exposes no live collection
+or camera action. Synthetic sources exist only for pure integration tests and
+cannot enable the Runtime.
 
 ## Live-work rules
 
 - Never run zeroing, calibration, gravity compensation, MIT motion, or torque
   commands without an explicit request and a clear physical workspace.
+- Treat `xarm_teleop_create_unilateral` as a motion operation: it initializes
+  and enables motors and calls position alignment before `xarm_teleop_start`.
+  It cannot be used for a read-only J2 check.
+- Commission the candidate one side at a time. Stop the existing teleoperation
+  service for that side first, and never let the old and candidate processes
+  own the same CAN endpoint concurrently.
 - The deployed systemd services and their stop hooks remain the only approved
   live teleoperation path until superseded deliberately.
 - Stop the deployed teleoperation services before any direct CAN investigation.
@@ -34,6 +45,12 @@ exist only for pure integration tests and cannot enable the Runtime.
   while accepting a new lease is process-fatal.
 - Preview, logging, policy inference, and camera encoding must never block the
   realtime command loop.
+- State publication runs outside the SDK callback. Missing consumers are
+  tolerated; malformed, non-finite, wrong-DOF, or stale callback data is fatal.
+- The candidate caps and verifies every SDK thread at the tracked FIFO priority.
+  It snapshots both CAN links before creation and stops on any live error
+  counter or cumulative warning, passive, bus-off, bus-error, arbitration-loss,
+  or restart increase.
 - The Operator Panel currently binds to the trusted robot LAN and has no user
   authentication or transport encryption. Do not expose it to an untrusted
   network.

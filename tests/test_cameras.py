@@ -84,7 +84,7 @@ def _frames(
     }
 
 
-def test_tracked_wrist_camera_mapping_is_commissioned() -> None:
+def test_tracked_camera_mapping_is_commissioned() -> None:
     system = load_system_config(ROOT / "configs/system/vlai_l1.toml")
     CameraSetValidator(system.cameras)
     assert {
@@ -94,6 +94,7 @@ def test_tracked_wrist_camera_mapping_is_commissioned() -> None:
     } == {
         "wrist_left": ("255323074436", 4),
         "wrist_right": ("255323074499", 4),
+        "agent": ("251643060089", 0),
     }
 
 

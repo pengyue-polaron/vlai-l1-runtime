@@ -73,14 +73,14 @@ setup-dataset:
 camera-list:
     #!/usr/bin/env bash
     set -euo pipefail
-    for path in /sys/bus/usb/devices/*; do
-        if [[ -r "${path}/idVendor" ]] \
-            && [[ "$(<"${path}/idVendor")" == "8086" ]] \
-            && [[ -r "${path}/idProduct" ]] \
-            && [[ "$(<"${path}/idProduct")" == "0b5b" ]]; then
-            printf '%s\n' "$(<"${path}/serial")"
-        fi
-    done
+    shopt -s nullglob
+    {
+        for path in /dev/v4l/by-id/*; do
+            device="$(readlink -f "${path}")"
+            udevadm info --query=property --name="${device}" \
+                | sed -n 's/^ID_SERIAL_SHORT=//p'
+        done
+    } | sort -u
 
 camera-check samples="30" timeout="0.25":
     {{ vpy }} -m vlai_l1_runtime.cli camera-check \

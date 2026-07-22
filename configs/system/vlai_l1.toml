@@ -187,11 +187,13 @@ video_index = 4
 
 [cameras.agent]
 required_for_collection = false
-enabled = false
+enabled = true
+device_id = "251643060089"
 width = 640
 height = 480
 fps = 30
-driver = "unassigned"
+driver = "v4l2"
+video_index = 0
 
 [teleoperation]
 provider = "x_air_sdk"

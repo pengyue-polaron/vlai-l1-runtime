@@ -11,8 +11,8 @@ silently choosing one.
 - Onboard host: `ssh sunrise@100.75.58.105`
 - Onboard workspace: `/home/sunrise/vlai-l1-runtime`
 - Development branch: `feat/runtime-foundation`
-- Snapshot commit: `fc3e80c7a5a2c87d8e6ee7f943891b14061628c1`
-- Snapshot date: 2026-07-23
+- Evidence baseline: `fc3e80c7a5a2c87d8e6ee7f943891b14061628c1`
+- Handoff updated: 2026-07-23
 
 Use SSH keys when possible. Never write the login password into a repository,
 shell history, service unit, or agent context file. An agent already running on
@@ -49,7 +49,7 @@ embodied-ops workflow and Operator Panel contracts
   -> VLAI L1 adapter and LeRobot dataset composition
   -> named VLAI L1 observation/action transport
   -> guarded x_air sidecars and camera owners
-  -> CAN and D405 devices
+  -> CAN and RealSense devices
 ```
 
 Repository responsibilities:
@@ -77,15 +77,16 @@ The verified CAN mapping is:
 | right | follower | `can2` | `1-1.4.3:1.0` |
 | left | follower | `can3` | `1-1.4.4:1.0` |
 
-The visually verified wrist cameras are:
+The visually verified cameras are:
 
-| Role | D405 serial | V4L2 stream |
-| --- | --- | --- |
-| `wrist_left` | `255323074436` | `video-index4` |
-| `wrist_right` | `255323074499` | `video-index4` |
+| Role | Model | Serial | V4L2 stream |
+| --- | --- | --- | --- |
+| `wrist_left` | D405 | `255323074436` | `video-index4` |
+| `wrist_right` | D405 | `255323074499` | `video-index4` |
+| `agent` | D455 | `251643060089` | `video-index0` |
 
-The optional AgentView camera is intentionally unassigned. It is not required
-for the first wrist-camera dataset.
+AgentView is an optional platform role, but it is enabled for this robot's
+current dataset contract.
 
 Do not copy these values into a new script. Their single runtime owner is
 [`configs/system/vlai_l1.toml`](../configs/system/vlai_l1.toml).
@@ -130,6 +131,8 @@ Camera and data evidence:
 - one longer dual-camera attempt preceded loss of host connectivity; causality
   was not proven, so USB power/topology and dual-stream stability remain open;
 - at the last 2026-07-23 inventory, neither D405 was enumerated;
+- the connected D455 AgentView produced 60 fresh 640x480 RGB `uint8` frames at
+  29.82 effective FPS over USB 3; the saved image was very dark but valid;
 - LeRobot 0.6.0 created, finalized and passed deep inspection of a temporary
   12-frame, two-video canonical v3 dataset on the onboard host;
 - the same source exported successfully to a two-video v2.1 derivative;
@@ -182,11 +185,11 @@ Before any candidate launch, both legacy teleoperation services must be
 inactive, no controller process may remain, and all four CAN links must be
 `DOWN` / `STOPPED`.
 
-### 2. Wrist cameras without arm motion
+### 2. Cameras without arm motion
 
-Connect both D405 units through a stable USB 3 path, preferably a powered hub
-or separate root hubs. Confirm that `just camera-list` prints exactly the two
-tracked serials, then run the bounded check:
+Connect both D405 units and the D455 through stable USB 3 paths, preferably a
+powered hub or separate root hubs. Confirm that `just camera-list` prints all
+three tracked serials, then run the bounded check:
 
 ```bash
 just camera-check
@@ -295,7 +298,7 @@ action rather than offering a broken button.
 The new teleoperation collection path is complete only when all of the
 following are evidenced:
 
-- both tracked D405 streams pass the bounded concurrent camera check;
+- all three enabled camera streams pass the bounded concurrent camera check;
 - left candidate runs a finite observation window with FIFO 20 and no CAN
   counter increase;
 - right candidate does the same, specifically closing the prior `can2`

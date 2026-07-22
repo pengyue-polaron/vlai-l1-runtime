@@ -87,9 +87,11 @@ ROS2 wrapper either; it opens an additional gripper handle on the leader bus.
 
 ## Camera and collection stage
 
-The two D405 streams were identified from live RGB frames: `255323074436` is the
-left wrist and `255323074499` is the right wrist. Both are enabled in System
-config; AgentView remains optional. Verify a short discard before saving data:
+The camera streams were identified from live RGB frames: D405 `255323074436` is
+the left wrist, D405 `255323074499` is the right wrist, and D455 `251643060089`
+is AgentView. All three are enabled in System config; AgentView remains an
+optional platform role but is part of the current dataset contract. Verify a
+short discard before saving data:
 
 ```bash
 just collect commissioning "hold position" 30 discard

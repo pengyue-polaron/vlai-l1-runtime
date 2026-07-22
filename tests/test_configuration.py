@@ -60,7 +60,7 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
     assert [(camera.role, camera.device_id) for camera in config.cameras.streams] == [
         ("wrist_left", "255323074436"),
         ("wrist_right", "255323074499"),
-        ("agent", None),
+        ("agent", "251643060089"),
     ]
 
 

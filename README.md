@@ -9,9 +9,9 @@ observation contract.
 
 The x_air integration is not commissioned yet. The tracked configuration keeps
 teleoperation and policy commands unavailable while J2 coordinates, `can2`
-stability, and joint limits remain unresolved. Both wrist-camera identities are
-commissioned. The existing onboard services remain the approved live path until
-staged tests close the remaining gates.
+stability, and joint limits remain unresolved. Both wrist cameras and the
+AgentView camera have commissioned identities. The existing onboard services
+remain the approved live path until staged tests close the remaining gates.
 
 ## Boundaries
 
@@ -34,8 +34,8 @@ The canonical dataset is written directly as LeRobot v3.0. Each frame contains:
 
 - `observation.state`: 16 named left/right joint and gripper positions in degrees;
 - `action`: the same 16-name, degree-valued convention;
-- `observation.images.wrist_left` and `observation.images.wrist_right`;
-- `observation.images.agent` when the optional AgentView camera is enabled;
+- `observation.images.wrist_left`, `observation.images.wrist_right`, and
+  `observation.images.agent`;
 - one normalized task string.
 
 Samples are accepted only when joint vectors are exact and finite, timestamps
@@ -90,14 +90,14 @@ with:
 just collect fruit_placement_v1 "place the fruit in the bowl" 300 save
 ```
 
-The live source owns both configured V4L2 streams, receives the two x_air sidecars on
-one Unix datagram endpoint, and writes the existing atomic canonical dataset
+The live source owns all enabled V4L2 streams, receives the two x_air sidecars
+on one Unix datagram endpoint, and writes the existing atomic canonical dataset
 transaction. The Operator Panel exposes the same workflow only when every
 tracked collection gate is ready.
 
-On the robot, `just camera-list` prints the connected D405 serials without
-opening their video streams. `just camera-check` opens both configured streams
-for a finite continuity, identity, format, freshness, and skew check.
+On the robot, `just camera-list` prints the serials of connected V4L cameras
+without opening their video streams. `just camera-check` opens every enabled
+stream for a finite continuity, identity, format, freshness, and skew check.
 `just sdk-status` inspects the deployed processes and CAN controllers, and
 `just sdk-stop` disables both pairs and returns all four links to `DOWN`.
 

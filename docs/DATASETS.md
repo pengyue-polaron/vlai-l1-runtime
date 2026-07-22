@@ -26,13 +26,13 @@ observation.state         float32[16], degrees
 action                    float32[16], degrees
 observation.images.wrist_left   video[height,width,3]
 observation.images.wrist_right  video[height,width,3]
-observation.images.agent        video[height,width,3], optional
+observation.images.agent        video[height,width,3]
 ```
 
 Only enabled camera roles are part of an experiment's feature contract. The two
-wrist cameras are required for collection on the current L1; AgentView is
-optional and can be enabled for a new experiment after its identity is
-commissioned.
+wrist roles are required by the platform configuration. AgentView remains an
+optional role, but its commissioned D455 is enabled in the current configuration
+and is therefore part of every newly collected frame.
 
 Both vectors use:
 

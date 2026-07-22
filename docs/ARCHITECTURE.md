@@ -83,9 +83,9 @@ stream restart, the bridge must declare each restarted role's new epoch before
 the validator will accept sequence or timestamp rollback.
 
 Both required wrist roles are mapped to their visually verified D405 serials
-and enabled. AgentView is optional and has no assigned driver yet. Collection
-remains unavailable until the independent teleoperation commissioning gate is
-closed; adding AgentView later does not require mislabeling either wrist stream.
+and enabled. The optional AgentView role is mapped to its verified D455 serial
+and enabled for the current dataset contract. Collection remains unavailable
+until the independent teleoperation commissioning gate is closed.
 
 ## Collection and datasets
 
@@ -100,11 +100,11 @@ x_air state observer + Camera Bridge
   -> independently generated v2.1 derivative
 ```
 
-`CollectionSample` holds named follower state, named leader action, and the two
-timestamped camera frames. `SampleAssembler` is the only place that combines
-freshness, skew, continuity, joint-limit, action-step, and image-shape checks.
-It stays free of LeRobot, NumPy, ROS, and device APIs. NumPy materialization
-happens only at the dataset writer boundary.
+`CollectionSample` holds named follower state, named leader action, and the
+enabled timestamped camera frames. `SampleAssembler` is the only place that
+combines freshness, skew, continuity, joint-limit, action-step, and image-shape
+checks. It stays free of LeRobot, NumPy, ROS, and device APIs. NumPy
+materialization happens only at the dataset writer boundary.
 
 The canonical dataset uses the same 16 degree-valued features at observation
 and action boundaries. It is not named after a policy and no model-specific

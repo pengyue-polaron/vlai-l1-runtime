@@ -22,10 +22,11 @@ enabling commands requires a deliberate schema and code review rather than a
 single configuration edit.
 
 The collection loader independently requires a commissioned teleoperation path
-and both configured camera identities. The wrist-camera identities are mapped,
-but teleoperation remains uncommissioned, so `collection_ready` is false and the
-Operator Panel exposes no live collection action. Synthetic sources exist only
-for pure integration tests and cannot enable the Runtime.
+and the configured camera identities. Both wrist identities and the enabled
+AgentView identity are mapped, but teleoperation remains uncommissioned, so
+`collection_ready` is false and the Operator Panel exposes no live collection
+action. Synthetic sources exist only for pure integration tests and cannot
+enable the Runtime.
 
 ## Live-work rules
 

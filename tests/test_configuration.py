@@ -56,10 +56,10 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         "follower_right_bus_stability_unverified",
         "joint_limits_unverified",
     )
-    assert config.cameras.collection_ready is False
+    assert config.cameras.collection_ready is True
     assert [(camera.role, camera.device_id) for camera in config.cameras.streams] == [
-        ("wrist_left", None),
-        ("wrist_right", None),
+        ("wrist_left", "255323074436"),
+        ("wrist_right", "255323074499"),
         ("agent", None),
     ]
 
@@ -76,11 +76,15 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         ("command_ready = false", "command_ready = true", "readiness gates"),
         ("maximum_deg = 9.0", "maximum_deg = -91.0", "minimum must be less"),
         (
-            "enabled = false\nwidth = 640",
-            'enabled = false\ndevice_id = "/dev/video0"\nwidth = 640',
+            'enabled = true\ndevice_id = "255323074436"',
+            'enabled = false\ndevice_id = "255323074436"',
             "must be absent",
         ),
-        ("enabled = false", "enabled = true", "device_id is required"),
+        (
+            'enabled = true\ndevice_id = "255323074436"',
+            "enabled = true",
+            "device_id is required",
+        ),
         (
             "kp = [240.0, 240.0, 240.0, 240.0, 24.0, 31.0, 25.0, 16.0]",
             "kp = [240.0]",

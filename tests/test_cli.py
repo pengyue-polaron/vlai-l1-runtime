@@ -48,6 +48,8 @@ def test_hardware_free_cli_validates_and_describes_collection(capsys) -> None:
     assert payload["collection_ready"] is False
     assert set(payload["features"]) == {
         "action",
+        "observation.images.wrist_left",
+        "observation.images.wrist_right",
         "observation.state",
     }
 

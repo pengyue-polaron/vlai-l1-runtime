@@ -78,10 +78,15 @@ def _frames(
     }
 
 
-def test_tracked_uncommissioned_cameras_block_collection() -> None:
+def test_tracked_wrist_camera_mapping_is_commissioned() -> None:
     system = load_system_config(ROOT / "configs/system/vlai_l1.toml")
-    with pytest.raises(CameraContractError, match="commissioned"):
-        CameraSetValidator(system.cameras)
+    CameraSetValidator(system.cameras)
+    assert {
+        stream.role: stream.device_id for stream in system.cameras.streams if stream.enabled
+    } == {
+        "wrist_left": "255323074436",
+        "wrist_right": "255323074499",
+    }
 
 
 def test_camera_set_validates_freshness_skew_and_identity() -> None:

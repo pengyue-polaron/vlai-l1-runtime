@@ -167,7 +167,8 @@ max_pair_skew_s = 0.05
 
 [cameras.wrist_left]
 required_for_collection = true
-enabled = false
+enabled = true
+device_id = "255323074436"
 width = 640
 height = 480
 fps = 30
@@ -175,7 +176,8 @@ driver = "realsense"
 
 [cameras.wrist_right]
 required_for_collection = true
-enabled = false
+enabled = true
+device_id = "255323074499"
 width = 640
 height = 480
 fps = 30

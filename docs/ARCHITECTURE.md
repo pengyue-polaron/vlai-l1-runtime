@@ -82,10 +82,10 @@ stateful validator for sequence and timestamp continuity. After a deliberate
 stream restart, the bridge must declare each restarted role's new epoch before
 the validator will accept sequence or timestamp rollback.
 
-Both required wrist roles are currently uncommissioned and disabled. AgentView
-is optional and has no assigned driver yet. Collection is therefore unavailable
-by construction, but adding AgentView later does not require mislabeling either
-wrist stream.
+Both required wrist roles are mapped to their visually verified D405 serials
+and enabled. AgentView is optional and has no assigned driver yet. Collection
+remains unavailable until the independent teleoperation commissioning gate is
+closed; adding AgentView later does not require mislabeling either wrist stream.
 
 ## Collection and datasets
 

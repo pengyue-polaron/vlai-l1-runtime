@@ -9,9 +9,9 @@ observation contract.
 
 The x_air integration is not commissioned yet. The tracked configuration keeps
 teleoperation and policy commands unavailable while J2 coordinates, `can2`
-stability, joint limits, and camera identities remain unresolved. The existing
-onboard services remain the approved live path until staged tests close those
-gates.
+stability, and joint limits remain unresolved. Both wrist-camera identities are
+commissioned. The existing onboard services remain the approved live path until
+staged tests close the remaining gates.
 
 ## Boundaries
 
@@ -52,15 +52,11 @@ layout, provenance, doctor behavior, and v2.1 derivatives are documented in
 ## Hardware-free operations
 
 ```bash
-vlai-l1 validate-config --config configs/system/vlai_l1.toml
-vlai-l1 describe --config configs/system/vlai_l1.toml
-vlai-l1 verify-xair --config configs/system/vlai_l1.toml
-vlai-l1 describe-xair --config configs/system/vlai_l1.toml --side right
-vlai-l1 validate-collection --config configs/collection/default.toml
-vlai-l1 describe-collection --config configs/collection/default.toml
-vlai-l1 dataset-doctor --config configs/collection/default.toml --experiment <name>
-vlai-l1 export-v21 --config configs/collection/default.toml --experiment <name>
-vlai-l1 panel --config configs/collection/default.toml
+just sdk-verify
+just sdk-describe right
+just panel
+just dataset-doctor <experiment>
+just export-v21 <experiment>
 ```
 
 Validation and description do not import LeRobot, Torch, camera libraries, or
@@ -76,7 +72,7 @@ uv sync --python 3.12 --extra collection
 The x_air dependency and native state sidecar can be built without hardware:
 
 ```bash
-./scripts/build_xair.sh
+just sdk-build
 ```
 
 The sidecar is deliberately not installed as a CLI or system service yet. The
@@ -89,18 +85,18 @@ After those tracked gates are commissioned, one finite episode can be recorded
 with:
 
 ```bash
-vlai-l1 collect \
-  --config configs/collection/default.toml \
-  --experiment fruit_placement_v1 \
-  --task "place the fruit in the bowl" \
-  --frames 300 \
-  --decision save
+just collect fruit_placement_v1 "place the fruit in the bowl" 300 save
 ```
 
 The live source owns both RealSense devices, receives the two x_air sidecars on
 one Unix datagram endpoint, and writes the existing atomic canonical dataset
 transaction. The Operator Panel exposes the same workflow only when every
 tracked collection gate is ready.
+
+On the robot, `just camera-list` prints the connected D405 serials without
+opening their video streams. `just sdk-status` inspects the deployed processes
+and CAN controllers, and `just sdk-stop` disables both pairs and returns all four
+links to `DOWN`.
 
 The repository pins `embodied-ops` as a submodule; initialize it before running
 repository commands. Runtime contracts remain importable on Python 3.10; the

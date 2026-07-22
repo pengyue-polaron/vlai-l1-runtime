@@ -145,7 +145,7 @@ def robot_description(config: SystemConfig) -> RobotDescription:
         command_ready=config.safety.command_ready,
         command_blockers=config.command_blockers,
         camera_roles=tuple(stream.role for stream in config.cameras.streams),
-        collection_ready=config.cameras.collection_ready,
+        collection_ready=not config.teleoperation.blockers and config.cameras.collection_ready,
     )
 
 

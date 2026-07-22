@@ -14,14 +14,12 @@ preserves the exact reviewed dependency even if the upstream repository moves.
 
 ```bash
 git submodule update --init --recursive
-vlai-l1 verify-xair --config configs/system/vlai_l1.toml
-./scripts/build_xair.sh
+just sdk-verify
+just sdk-build
 
 source /opt/ros/humble/setup.bash
 source build/xair-install/setup.bash
-vlai-l1 prepare-xair \
-  --config configs/system/vlai_l1.toml \
-  --output build/xair-assets
+just sdk-prepare
 ```
 
 The manifest records the selected revision, SDK version, architecture, library
@@ -40,12 +38,7 @@ entries.
 4. Start the state observer before the candidate:
 
    ```bash
-   sudo install -d -o sunrise -g sunrise /run/vlai-l1
-   vlai-l1 observe-xair \
-     --config configs/system/vlai_l1.toml \
-     --side bimanual \
-     --samples 20 \
-     --timeout 3
+   just sdk-observe 20 3
    ```
 
    `bimanual` waits for a fresh packet from both sidecars, checks the tracked
@@ -94,17 +87,12 @@ ROS2 wrapper either; it opens an additional gripper handle on the leader bus.
 
 ## Camera and collection stage
 
-Identify the two D405 serials physically as left wrist and right wrist, then set
-only those two tracked streams to enabled. AgentView remains optional. Verify a
-short discard before saving data:
+The two D405 streams were identified from live RGB frames: `255323074436` is the
+left wrist and `255323074499` is the right wrist. Both are enabled in System
+config; AgentView remains optional. Verify a short discard before saving data:
 
 ```bash
-vlai-l1 collect \
-  --config configs/collection/default.toml \
-  --experiment commissioning \
-  --task "hold position" \
-  --frames 30 \
-  --decision discard
+just collect commissioning "hold position" 30 discard
 ```
 
 Then record one short saved episode and run `dataset-doctor`. A successful

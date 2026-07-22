@@ -120,10 +120,7 @@ def test_collection_config_and_schema_have_one_complete_contract() -> None:
 
     assert config.collection_ready is False
     assert config.collection_blockers[0] == "teleoperation_uncommissioned"
-    assert config.collection_blockers[-2:] == (
-        "camera_wrist_left_uncommissioned",
-        "camera_wrist_right_uncommissioned",
-    )
+    assert config.collection_blockers == ("teleoperation_uncommissioned",)
     assert config.repo_id_for("pick_v1") == "pengyue-polaron/vlai-l1-pick_v1"
     assert set(contract.features()) == {
         STATE_KEY,

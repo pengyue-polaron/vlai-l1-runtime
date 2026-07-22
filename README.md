@@ -114,6 +114,7 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-Read [Architecture](docs/ARCHITECTURE.md), [Safety](docs/SAFETY.md),
+Start with the current [workspace handoff](docs/HANDOFF.md), then read
+[Architecture](docs/ARCHITECTURE.md), [Safety](docs/SAFETY.md),
 [Datasets](docs/DATASETS.md), [x_air commissioning](docs/COMMISSIONING.md), and
 [Source gaps](SOURCE_GAPS.md) before extending the Runtime.

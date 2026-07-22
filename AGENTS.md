@@ -1,5 +1,6 @@
 # VLAI L1 Runtime Agent Guide
 
+Read `docs/HANDOFF.md` for the current workspace state and next safe test stage.
 Read `docs/SAFETY.md` before changing runtime, lifecycle, command, calibration,
 or camera code. On the onboard deployment, the host-level
 `/home/sunrise/AGENTS.md` additionally governs live operations.

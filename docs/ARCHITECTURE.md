@@ -12,8 +12,8 @@ VLAI workflows / embodied-ops adapter
 ```
 
 The pure configuration, public contracts, command-session state machine, and
-hardware-independent collection/dataset layer exist today. A candidate
-teleoperation observation path exists, while the independent policy-command
+hardware-independent collection/dataset layer exist today. The teleoperation
+observation path is commissioned, while the independent policy-command
 transport remains unimplemented.
 
 ## Teleoperation observation path
@@ -29,7 +29,7 @@ follower in radians. The callback only copies finite values into a bounded
 slot. A non-realtime publisher thread emits a 152-byte, little-endian Unix
 datagram containing protocol version, side, source sequence, monotonic
 timestamp, and both eight-value vectors. A stale callback, wrong DOF, or
-non-finite value stops the candidate process. Missing datagram consumers never
+non-finite value stops the sidecar process. Missing datagram consumers never
 block the control loop.
 
 The Python adapter accepts only exact protocol packets, requires increasing
@@ -51,9 +51,9 @@ does not depend on a policy-command transport.
 ## Repository ownership
 
 The tracked System configuration owns the four CAN endpoint identities, common
-CAN-FD settings, motor identities, all deployed gain and friction vectors,
-provisional joint limits, the pinned teleoperation release, camera roles, local
-endpoints, service names, and readiness evidence.
+CAN-FD settings, motor identities, all deployed gain and friction vectors, the
+pinned teleoperation release, camera roles, local endpoints, service names, and
+readiness evidence.
 Loaders reject unknown or missing behavior-affecting keys.
 
 Robot observations and commands use the same sixteen named position features as
@@ -83,10 +83,18 @@ stateful validator for sequence and timestamp continuity. After a deliberate
 stream restart, the bridge must declare each restarted role's new epoch before
 the validator will accept sequence or timestamp rollback.
 
+Each capture begins with concurrent reads. If independently clocked cameras
+land outside the tracked group-skew window, the bridge advances only the
+lagging stream or streams until it forms a coherent set or the bounded capture
+deadline expires. Validation still rejects any incoherent set that crosses the
+bridge boundary.
+
 Both required wrist roles are mapped to their visually verified D405 serials
 and enabled. The optional AgentView role is mapped to its verified D455 serial
-and enabled for the current dataset contract. Collection remains unavailable
-until the independent teleoperation commissioning gate is closed.
+and enabled for the current dataset contract. The three-camera collection
+contract is commissioned. A physical USB disconnect still fails the current
+episode closed and requires the operator to restore the affected device before
+retrying.
 
 ## Collection and datasets
 
@@ -103,9 +111,15 @@ x_air state observer + Camera Bridge
 
 `CollectionSample` holds named follower state, named leader action, and the
 enabled timestamped camera frames. `SampleAssembler` is the only place that
-combines freshness, skew, continuity, joint-limit, action-step, and image-shape
-checks. It stays free of LeRobot, NumPy, ROS, and device APIs. NumPy
-materialization happens only at the dataset writer boundary.
+combines freshness, skew, continuity, finite-value, and image-shape checks. It
+stays free of LeRobot, NumPy, ROS, and device APIs. NumPy materialization happens
+only at the dataset writer boundary. The Runtime does not apply joint or gripper
+position ranges to observation or teleoperation action values.
+
+For each frame, live collection targets the midpoint of the earliest and latest
+camera timestamps and selects the complete left/right robot-state pair closest
+to that time. The configured robot/camera skew remains a validation boundary,
+not a queue-draining heuristic.
 
 The canonical dataset uses the same 16 degree-valued features at observation
 and action boundaries. It is not named after a policy and no model-specific
@@ -113,11 +127,22 @@ normalization is stored. The v2.1 exporter always reads the canonical v3
 dataset; one derivative never becomes the source of another derivative.
 
 Every saved episode is appended through a hidden sibling dataset snapshot.
-Existing data, video, and image payloads are hard-linked as immutable inputs;
-metadata is copied. LeRobot finalization, provenance generation, and a complete
-payload doctor run before the staging directory is atomically installed. A
-failed append leaves the prior complete dataset authoritative. Staging or backup
-leftovers block reuse until they are inspected.
+Camera frames enter LeRobot through the tracked asynchronous image writer, and
+the complete live loop must meet the tracked minimum capture rate. The robot
+and camera owners stop immediately after capture; encoding and publication run
+after hardware shutdown. Existing data, video, and image payloads are
+hard-linked as immutable inputs; metadata is copied. LeRobot finalization,
+provenance generation, and a complete payload doctor run before the staging
+directory is atomically installed. A failed append leaves the prior complete
+dataset authoritative. Staging or backup leftovers block reuse until they are
+inspected.
+
+Managed collection preflights cameras before motor enable, starts both guarded
+x_air runtimes, and waits for paired state. It then exposes one operator input
+gate through the terminal and Operator Panel. The operator uses teleoperation to
+place the robot at the episode start pose and presses Enter; the workflow
+rechecks all cameras before the first recorded frame. No automatic reset is
+claimed while the Runtime has no reviewed fixed-pose command transport.
 
 `embodied-ops` provides the generic episode decision, freshness/skew,
 transaction, and Panel contracts. This repository owns their L1 adapter and all
@@ -127,9 +152,8 @@ is the same as L1.
 
 ## Operator Panel
 
-With the current uncommissioned configuration, the L1 adapter exposes three
-hardware-free workflows: collection configuration validation, canonical dataset
-doctor, and v2.1 export. It reports the tracked live-collection blockers and
-does not advertise camera, reset, or motion actions. Once the teleoperation and
-camera gates are commissioned, the same adapter adds its finite live-collection
-workflow without changing the reusable Web application.
+The L1 adapter exposes hardware-free collection validation, canonical dataset
+doctor, and v2.1 export workflows, plus the commissioned finite live-collection
+workflow. The live workflow uses the same tracked readiness gates as the CLI
+and owns camera, teleoperation, collection, and shutdown lifecycle. It does not
+advertise reset or policy-motion actions.

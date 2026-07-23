@@ -8,10 +8,9 @@ silently choosing one.
 
 ## Start here
 
-- Onboard host: `ssh sunrise@100.75.58.105`
-- Onboard workspace: `/home/sunrise/vlai-l1-runtime`
-- Development branch: `feat/runtime-foundation`
-- Evidence baseline: `fc3e80c7a5a2c87d8e6ee7f943891b14061628c1`
+- Onboard host: `ssh nyush-robotics-dev`
+- Onboard workspace: `/home/nyu/vlai-l1-runtime`
+- Default branch: `main`
 - Handoff updated: 2026-07-23
 
 Use SSH keys when possible. Never write the login password into a repository,
@@ -21,8 +20,8 @@ the onboard host should work directly in the workspace above.
 Before doing anything:
 
 ```bash
-cd /home/sunrise/vlai-l1-runtime
-sed -n '1,400p' /home/sunrise/AGENTS.md
+cd /home/nyu/vlai-l1-runtime
+sed -n '1,260p' /home/nyu/AGENTS.md
 sed -n '1,240p' AGENTS.md
 git status --short
 git branch --show-current
@@ -32,7 +31,7 @@ git submodule status
 
 Read [Safety](SAFETY.md) before camera, lifecycle, CAN, calibration, or motion
 work. Read [Commissioning](COMMISSIONING.md) before starting either the legacy
-controller or the candidate x_air sidecar.
+controller or the commissioned x_air sidecar.
 
 ## Goal and design
 
@@ -72,10 +71,10 @@ The verified CAN mapping is:
 
 | Side | Role | Interface | USB parent |
 | --- | --- | --- | --- |
-| right | leader | `can0` | `1-1.4.1:1.0` |
-| left | leader | `can1` | `1-1.4.2:1.0` |
-| right | follower | `can2` | `1-1.4.3:1.0` |
-| left | follower | `can3` | `1-1.4.4:1.0` |
+| right | leader | `can0` | `1-2.2.1:1.0` |
+| left | leader | `can1` | `1-2.2.2:1.0` |
+| right | follower | `can2` | `1-2.2.3:1.0` |
+| left | follower | `can3` | `1-2.2.4:1.0` |
 
 The visually verified cameras are:
 
@@ -93,58 +92,72 @@ Do not copy these values into a new script. Their single runtime owner is
 
 ## Current readiness snapshot
 
-The legacy `/opt/xarm_teleop` systemd path has been used successfully for manual
-teleoperation. It is still the approved live path, but it does not publish the
-new Runtime state datagrams and therefore cannot drive the new collection
-pipeline by itself.
+The migrated x86_64 host uses the config-rendered `run-xair` lifecycle through
+`just sdk-start <left|right>`. It validates the pinned dependency and manifest,
+owns only the selected CAN pair, applies the tracked CAN-FD settings and TX
+queue length, launches the sidecar at FIFO 20, monitors qdisc drops, and
+disables the pair before returning both links to `DOWN`.
 
-The candidate `vlai_l1_xair_sidecar` has not been commissioned:
+Commissioning on 2026-07-23 found that `txqueuelen=10` dropped about 184k
+qdisc packets per active bus while the ordinary CAN counters remained at zero.
+The tracked queue length of 1000 eliminated new qdisc drops. Formal left,
+right, and simultaneous bimanual runs were subjectively smooth, kept all buses
+ERROR-ACTIVE with zero live CAN errors, and each completed its observer window.
+The bimanual observer completed 3000 paired 100 Hz samples.
 
-- a left-side run reproduced visible stutter because the opaque SDK raised
-  three 500 Hz workers from requested FIFO 20 to hard-coded FIFO 50;
-- the sidecar now caps and verifies every process thread at FIFO 20;
-- after that correction, the next left-side run stopped when `can3` reached
-  live TX/RX error counts 8/84 and its cumulative passive count rose from 1 to
-  4;
-- the CAN guard stopped the candidate and SDK destruction disabled the motors;
-- right-side and complete bimanual candidate tests have not passed.
-
-This priority cap is a deliberate containment boundary around an opaque
-dependency, not an upstream root-cause fix. Remove it only when a reviewed x_air
-release exposes or corrects the internal scheduling policy.
+The sidecar still caps and verifies every SDK thread at FIFO 20. This priority
+cap is a containment boundary around the opaque prebuilt dependency; remove it
+only when a reviewed x_air release exposes or corrects the internal scheduling
+policy.
 
 Tracked readiness is intentionally truthful:
 
-- `teleoperation.commissioned = false`;
-- collection blocker: `teleoperation_uncommissioned`;
+- `teleoperation.commissioned = true`;
+- teleoperation collection has no tracked readiness blocker;
 - policy command transport: unimplemented;
-- J2 coordinate, right-follower bus stability, and provisional joint limits:
-  unverified.
+- J2 coordinate and right-follower bus stability: unverified.
 
 Policy-command blockers do not prevent teleoperation collection. They do
 prevent claiming policy evaluation or production command readiness.
 
 Camera and data evidence:
 
-- both D405 identities were verified from saved RGB images;
-- a single left V4L2 stream produced 30 fresh 640x480 RGB `uint8` frames;
-- one longer dual-camera attempt preceded loss of host connectivity; causality
-  was not proven, so USB power/topology and dual-stream stability remain open;
-- at the last 2026-07-23 inventory, neither D405 was enumerated;
-- the connected D455 AgentView produced 60 fresh 640x480 RGB `uint8` frames at
-  29.82 effective FPS over USB 3; the saved image was very dark but valid;
-- repeated D455 opens took 0.49--0.58 seconds to produce their first frame and
-  then sustained 29.99--30.20 FPS, so camera startup has a separate tracked
-  warmup budget rather than weakening steady-state freshness;
+- both D405 identities were verified from saved RGB images and now enumerate
+  over USB 3 on the migrated host;
+- the D455 AgentView runs its RGB-only 640x480 YUYV stream over USB 2; a
+  900-frame isolated window sustained 29.99 FPS with no USB error;
+- both D405 streams and the D455 stream completed a concurrent 300-frame
+  640x480 YUYV window at 29.99 FPS with no stream failure or USB error;
+- the formal Runtime check captured 30 fresh 640x480 RGB `uint8` frames from
+  all three streams at 30.02 effective FPS with 21.36 ms maximum skew;
+- with both 500 Hz teleoperation sides and the 100 Hz bimanual observer active,
+  the parallel camera bridge captured 300 three-camera sets at 29.997 FPS with
+  32.88 ms maximum skew and no new CAN or qdisc drops;
+- a later whole-hub reset disconnected and re-enumerated both D405 cameras,
+  AgentView, and all four PCAN adapters together; the resulting
+  `VIDIOC_REQBUFS ... ENODEV` was a stale device node after the shared USB
+  transport failed, not a role-mapping error;
+- a later D455-only failure disconnected and re-enumerated AgentView three
+  times while the D405 and PCAN devices remained present; USB autosuspend was
+  disabled, so its cable, port, and power path remain an operational concern;
+- udev binds the D455's serial-less UVC color interface to the commissioned
+  AgentView identity and disables autosuspend for all RealSense and PEAK
+  devices;
 - LeRobot 0.6.0 created, finalized and passed deep inspection of a temporary
   12-frame, two-video canonical v3 dataset on the onboard host;
+- the first 300-frame managed three-camera save exposed synchronous PNG writes
+  that made wall-clock capture slower than the declared 30 FPS; that episode is
+  useful for image review but not timing evidence;
+- the collection path now uses the LeRobot-recommended asynchronous image
+  writer with four threads per camera, rejects capture below 27 FPS, and stops
+  hardware before encoding; a hardware-free 90-frame, three-camera benchmark
+  enqueued at over 10,000 frames/s and completed flush plus encoding in 2.98 s;
 - the same source exported successfully to a two-video v2.1 derivative;
 - the environment uses Python 3.12.13, OpenCV 4.13.0 and
   `torch 2.11.0+cpu`; CUDA is absent.
 
-The last full onboard software check passed 67 tests. Repository and submodule
-revisions were clean. About 6.7 GB remained on the root filesystem after cache
-cleanup. Do not treat that as long-term video capacity.
+The last full onboard software check passed 81 tests. About 75 GB remained on
+the migrated root filesystem before live camera commissioning.
 
 ## Test ladder
 
@@ -156,7 +169,7 @@ failure.
 These commands must not open cameras or CAN devices:
 
 ```bash
-cd /home/sunrise/vlai-l1-runtime
+cd /home/nyu/vlai-l1-runtime
 git pull --ff-only
 git submodule update --init --recursive
 just check
@@ -170,8 +183,8 @@ Expected baseline:
 - tests and Ruff pass;
 - the x_air revision and library hashes match tracked configuration;
 - left resolves to `can1 -> can3` and right to `can0 -> can2`;
-- `teleoperation_ready` and `collection_ready` remain false until live
-  evidence closes the teleoperation gate.
+- `teleoperation_ready` and `collection_ready` are true;
+- policy-command readiness remains false and independent.
 
 ### 1. Passive host inventory
 
@@ -184,7 +197,7 @@ just camera-list
 df -h /home/sunrise
 ```
 
-Before any candidate launch, both legacy teleoperation services must be
+Before any sidecar launch, both legacy teleoperation services must be
 inactive, no controller process may remain, and all four CAN links must be
 `DOWN` / `STOPPED`.
 
@@ -204,7 +217,7 @@ timeout. Record effective FPS and maximum skew. Stop and inspect kernel USB/UVC
 logs if the host disconnects, a camera re-enumerates, FPS collapses, or the
 check times out. Do not weaken the tracked checks to make it pass.
 
-### 3. Candidate x_air commissioning
+### 3. x_air recommissioning
 
 This stage causes immediate enable/alignment motion. It requires a fresh,
 explicit operator confirmation that the workspace is clear.
@@ -212,7 +225,7 @@ explicit operator confirmation that the workspace is clear.
 Follow [Commissioning](COMMISSIONING.md) one side at a time. Important rules:
 
 1. Stop the legacy services and verify exclusive ownership.
-2. Start the observer before the candidate.
+2. Start the observer before the sidecar.
 3. Test left `can1 -> can3`, stop and inspect all counters.
 4. Test right `can0 -> can2`, stop and inspect all counters.
 5. Run both only after both isolated stages pass.
@@ -236,7 +249,7 @@ Use `--side right` for the other isolated stage. For the final paired test:
 just sdk-observe 3000 15
 ```
 
-The candidate launch must be rendered from
+The sidecar launch must be rendered from
 `build/xair-assets/manifest.json` and tracked System configuration. Do not add
 hardware defaults or use the upstream `start_xarm_teleop_both.sh`/ROS wrapper.
 The creation call enables motors, so a launch command is never a read-only
@@ -249,20 +262,30 @@ just sdk-stop
 just sdk-status
 ```
 
-Require both services/processes inactive, no candidate remaining, and all four
+Require both services/processes inactive, no sidecar remaining, and all four
 links returned to `DOWN` / `STOPPED` before retrying or changing sides.
 
-### 4. Close only the teleoperation gate
+### 4. Teleoperation gate
 
-Only after left, right and paired evidence pass may a change set
-`teleoperation.commissioned = true`. That change must include the tracked
-config, loader/consumer expectations, relevant tests, commissioning evidence,
-and affected documentation in one reviewable commit.
+Left, right, and paired evidence passed and
+`teleoperation.commissioned = true`. Any future change to that gate must include
+the tracked config, loader/consumer expectations, relevant tests,
+commissioning evidence, and affected documentation in one reviewable commit.
 
-Do not change `command_ready`, policy transport, J2, bus-stability, or joint
-limit evidence merely to enable collection. Those are separate domains.
+Do not change `command_ready`, policy transport, J2, or bus-stability evidence
+merely to alter collection. Those are separate domains.
 
 ### 5. End-to-end collection
+
+Start with no manual x_air runtime, observer, camera reader, or competing
+controller active. `just collect` preflights all three cameras before motor
+enable, starts both configured runtimes, and waits for fresh paired state. Use
+teleoperation to place the robot at the episode start pose, then press Enter in
+the terminal or Start recording in the Panel. The workflow rechecks all cameras
+after confirmation, records, and owns the complete shutdown path. A normal
+return, error, or `Ctrl+C` disables both pairs and returns can0-can3 to `DOWN`.
+The input gate is not an automatic reset; no reviewed fixed-pose command path
+exists.
 
 First discard a finite episode:
 
@@ -285,7 +308,7 @@ authorization.
 
 ### 6. Operator Panel
 
-After collection readiness is truly closed:
+Collection readiness is commissioned:
 
 ```bash
 just panel
@@ -293,30 +316,32 @@ just panel
 
 The Panel binds to the trusted robot LAN at the tracked address and port. It
 has no authentication or transport encryption. Do not expose it to an
-untrusted network. Before commissioning, it correctly omits the live collection
-action rather than offering a broken button.
+untrusted network. Its collection action invokes the same managed session and
+is shown only when the tracked readiness gates permit it.
 
-## Definition of done for the next milestone
+## Current completion state
 
-The new teleoperation collection path is complete only when all of the
-following are evidenced:
+The teleoperation collection path has the following evidence:
 
 - all three enabled camera streams pass the bounded concurrent camera check;
-- left candidate runs a finite observation window with FIFO 20 and no CAN
+- left sidecar runs a finite observation window with FIFO 20 and no CAN
   counter increase;
-- right candidate does the same, specifically closing the prior `can2`
+- right sidecar does the same, specifically closing the prior `can2`
   concern;
 - paired sidecars complete the bimanual observer window with increasing
   sequences and bounded side skew;
 - stop/disable returns every owned resource to its inactive state;
-- the teleoperation gate is updated through a reviewed tracked change;
-- one discard and one saved real episode complete;
+- the teleoperation gate is tracked as commissioned;
+- discard and saved real episodes complete, including a 500-frame,
+  three-camera managed save;
 - the saved canonical v3 dataset passes doctor;
 - its independently generated v2.1 derivative validates;
-- repository, submodules and deployment checkout are clean and pushed.
+- operator confirmation is shared by terminal and Panel before recording.
 
-Passing legacy teleoperation alone does not satisfy this definition. Passing a
-synthetic dataset test alone does not satisfy it either.
+The remaining operational issue is intermittent RealSense USB transport
+stability, especially the D455 cable/port/power path. A mid-episode disconnect
+must continue to invalidate the transaction rather than trigger transparent
+recovery.
 
 ## Storage and cleanup context
 

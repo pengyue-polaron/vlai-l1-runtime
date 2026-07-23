@@ -1,7 +1,8 @@
 # x_air commissioning
 
-The pinned x_air build is a candidate until the tracked live gates are closed.
-Run the live stages only after the operator explicitly confirms a clear
+The pinned x_air build is the commissioned teleoperation runtime. Repeat live
+commissioning only after a behavior-affecting runtime, SDK, configuration, or
+hardware change, and only after the operator explicitly confirms a clear
 workspace. `xarm_teleop_create_unilateral` enables motors and performs position
 alignment before `start`, so launching the sidecar must be treated as immediate
 motion.
@@ -29,13 +30,13 @@ entries.
 
 ## Live sequence
 
-1. Stop both existing teleoperation services and confirm no old or candidate
-   controller process remains.
+1. Stop both existing teleoperation services and confirm no other controller
+   process remains.
 2. Verify all four CAN links are down. Bring up only the two links needed by the
    current side at the tracked 1 Mbit/s nominal and 5 Mbit/s data rate.
 3. Verify J2 direction without enabling teleoperation. The public teleoperation
    API is not a read-only probe and must not be used for this step.
-4. Start the state observer before the candidate:
+4. Start the state observer before the sidecar:
 
    ```bash
    just sdk-observe 20 3
@@ -97,21 +98,49 @@ short discard before saving data:
 just collect commissioning "hold position" 30 discard
 ```
 
+`just collect` owns the whole live session. It preflights the state socket and
+all three cameras before starting either robot runtime, starts the left and
+right runtimes, and waits for paired state. Use teleoperation to place the robot
+at the episode start pose, then press Enter in the terminal or Start recording
+in the Panel. Collection rechecks all cameras after confirmation, records, and
+always disables both pairs on completion, failure, or interruption. Start it
+with no manual `sdk-start`, observer, camera reader, or competing controller
+active.
+
 Then record one short saved episode and run `dataset-doctor`. A successful
 teleoperation commissioning changes only the teleoperation and hardware
 evidence gates; it does not make the separate policy-command transport ready.
 
 ## Current live evidence
 
-The 2026-07-22 left-side test first reproduced visible stutter while the public
-SDK internally raised its three 500 Hz workers from the requested FIFO 20 to
-hard-coded FIFO 50. That run also increased `can1` warning/passive counters.
+Commissioning completed on 2026-07-23. The original stutter reproduced with
+both the current sidecar and the legacy controller, ruling out the state
+callback and SDK wrapper. `tc -s qdisc` then exposed the hidden failure:
+`txqueuelen=10` had dropped about 184k packets on each active left bus even
+though ordinary CAN statistics reported zero drops. The tracked queue length
+of 1000 produced no new qdisc drops and restored smooth motion.
 
-After adding the process-level FIFO cap, all five candidate threads verified at
-FIFO 20. The next left-side run still failed immediately: `can3` reached live
-TX/RX error counts 8/84 and its cumulative passive count increased from 1 to 4.
-The new CAN guard detected the transition, stopped the SDK session, and SDK
-destruction disabled the motors. Repository cleanup then returned all buses to
-`DOWN/STOPPED`. This proves the scheduling and automatic-stop paths, but it does
-not commission teleoperation; inspect the left-follower power and physical CAN
-path before another motion test.
+Formal `just sdk-start` tests passed for left `can1 -> can3`, right
+`can0 -> can2`, and both sides simultaneously. Every active bus remained
+ERROR-ACTIVE with zero live CAN errors; the paired observer completed 3000
+samples at 100 Hz. With both 500 Hz controllers and that observer active, the
+parallel camera bridge captured 300 synchronized sets from both D405 cameras
+and AgentView at 29.997 FPS with 32.88 ms maximum skew. All stop paths disabled
+the motors, drained qdisc backlog to zero, and returned can0-can3 to
+DOWN/STOPPED.
+
+During a later collection attempt, the shared external USB hub reset as a
+whole: both wrist cameras, AgentView, and all four PCAN adapters disconnected
+and re-enumerated together. OpenCV then reported `ENODEV` for the stale
+`/dev/video4` node. This is a hub, upstream-cable, or hub-power failure, not a
+camera-role mapping error. The managed collection preflight now prevents motor
+startup when a camera is already unavailable and its cleanup stops the robot
+if a device disappears mid-session; repeated resets still require the physical
+USB path to be repaired.
+
+A later AgentView-only failure produced repeated USB disconnect and
+re-enumeration events for the D455 while its two D405 peers and PCAN adapters
+remained present. The D455 runs RGB-only at USB 2 speed with autosuspend
+disabled, so that event points to its cable, port, or power path rather than the
+camera-role mapping. An episode interrupted by any camera disconnect remains
+invalid and is never published.

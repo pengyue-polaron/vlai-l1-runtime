@@ -7,15 +7,13 @@ teleoperation integration is built against a pinned `x_air_sdk` checkout and
 converts its per-side full-state callback into one versioned, named bimanual
 observation contract.
 
-The x_air integration is not commissioned yet. The tracked configuration keeps
-teleoperation and policy commands unavailable while J2 coordinates, `can2`
-stability, and joint limits remain unresolved. Both wrist cameras and the
-AgentView camera have commissioned identities. The existing onboard services
-remain the approved live path until staged tests close the remaining gates.
+The x_air teleoperation and three-camera collection path is commissioned.
+Policy-command transport and policy evaluation remain separate, explicitly
+unavailable capabilities.
 
 ## Boundaries
 
-- This repository owns VLAI L1 devices, physical limits, lifecycle, safety,
+- This repository owns VLAI L1 devices, lifecycle, CAN safety,
   cameras, and robot-specific collection/evaluation composition.
 - The pinned x_air SDK owns each leader/follower CAN pair. The Runtime sidecar
   consumes its public callback; it does not open a second CAN handle or use the
@@ -25,8 +23,6 @@ remain the approved live path until staged tests close the remaining gates.
 - `embodied-ops` supplies reusable episode, timing, artifact, and Operator Panel
   primitives. L1 feature names, datasets, provenance, and hardware readiness
   remain here.
-- The existing `~/xarm_ros2_ws` deployment remains untouched and authoritative
-  for current manual teleoperation until the pinned candidate is commissioned.
 
 ## Dataset contract
 
@@ -40,10 +36,11 @@ The canonical dataset is written directly as LeRobot v3.0. Each frame contains:
 
 Samples are accepted only when joint vectors are exact and finite, timestamps
 are fresh, state/action, left/right arm, camera pairs, and robot/camera samples
-are synchronized, sequences increase, configured limits hold, and the action
-step stays within the tracked collection contract. An episode is finalized in
-a hidden sibling snapshot and becomes visible only through an atomic rename.
-Failed and discarded episodes never replace the last complete dataset.
+are synchronized, and sequences increase. The Runtime does not impose joint or
+gripper position ranges on observations or teleoperation actions. An episode is
+finalized in a hidden sibling snapshot and becomes visible only through an
+atomic rename. Failed and discarded episodes never replace the last complete
+dataset.
 
 The collection config is [default.toml](configs/collection/default.toml). Dataset
 layout, provenance, doctor behavior, and v2.1 derivatives are documented in
@@ -61,8 +58,8 @@ just export-v21 <experiment>
 
 Validation and description do not import LeRobot, Torch, camera libraries, or
 device APIs. Camera checks and dataset operations have separate optional
-dependencies. The Panel exposes only validation, doctor, and export while live
-readiness gates remain unresolved.
+dependencies. The Panel exposes only operations permitted by the tracked
+readiness gates.
 
 ```bash
 git submodule update --init --recursive
@@ -77,23 +74,29 @@ The x_air dependency and native state sidecar can be built without hardware:
 just sdk-build
 ```
 
-The sidecar is deliberately not installed as a CLI or system service yet. The
-SDK enables motors and performs position alignment while creating a session, so
-its first execution belongs to the staged live-commissioning procedure. The
-live collection command refuses to open devices until teleoperation and the
-required camera identities are commissioned.
-
-After those tracked gates are commissioned, one finite episode can be recorded
-with:
+A finite episode is recorded with:
 
 ```bash
 just collect fruit_placement_v1 "place the fruit in the bowl" 300 save
 ```
 
-The live source owns all enabled V4L2 streams, receives the two x_air sidecars
-on one Unix datagram endpoint, and writes the existing atomic canonical dataset
-transaction. The Operator Panel exposes the same workflow only when every
-tracked collection gate is ready.
+This is one managed session. It authorizes the privileged lifecycle, opens and
+preflights all three cameras before enabling motors, starts both x_air
+runtimes, and waits for fresh paired state. Use teleoperation to place the robot
+at the episode start pose, then press `Enter` in the terminal or **Start
+recording** in the Panel. The workflow rechecks all three cameras after that
+confirmation before recording the atomic canonical dataset transaction. Enter
+`q` at the terminal prompt to stop without recording.
+
+There is no automatic fixed-pose reset: the reviewed x_air interface currently
+provides teleoperation, not a Runtime-owned reset command. Camera images are
+written asynchronously so the live loop can maintain its tracked 30 FPS rate; a
+session below the tracked minimum is discarded instead of publishing
+time-compressed data. Normal completion, collection failure, startup failure
+after either side begins, and `Ctrl+C` all use the same fail-closed cleanup:
+motors are disabled and all four CAN links return to `DOWN`. Do not run `just
+sdk-start` or a separate observer before collection; those commands are for
+bounded commissioning and diagnostics.
 
 On the robot, `just camera-list` prints the serials of connected V4L cameras
 without opening their video streams. `just camera-check` opens every enabled

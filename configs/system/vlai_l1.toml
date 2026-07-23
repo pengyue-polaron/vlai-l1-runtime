@@ -1,4 +1,4 @@
-schema_version = 2
+schema_version = 3
 robot_id = "vlai_l1"
 topology_id = "vlai_l1_nyush_verified_2026_07_23"
 position_unit = "degree"
@@ -171,6 +171,13 @@ socket_path = "/run/vlai-l1/runtime.sock"
 [operator_panel]
 bind = "0.0.0.0"
 port = 8765
+
+[camera_preview]
+bind = "0.0.0.0"
+port = 8088
+fps = 10
+jpeg_quality = 80
+max_age_s = 0.5
 
 [lifecycle]
 startup = "manual"

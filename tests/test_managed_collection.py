@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,14 @@ from vlai_l1_runtime.collection.orchestration import EpisodeResult
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = load_collection_config(ROOT / "configs/collection/default.toml")
+
+
+@pytest.fixture(autouse=True)
+def _stub_camera_preview(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.CameraPreviewServer",
+        lambda _config, _cameras: nullcontext(),
+    )
 
 
 class _Process:
@@ -217,6 +226,17 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
         def __exit__(self, exc_type, exc, traceback):
             events.append("runtime_exit")
 
+    class Preview:
+        def __init__(self, config, cameras):
+            pass
+
+        def __enter__(self):
+            events.append("preview_enter")
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            events.append("preview_exit")
+
     class Sink:
         def __enter__(self):
             events.append("sink_enter")
@@ -245,6 +265,10 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed.DirectLeRobotEpisode",
         lambda **_kwargs: Sink(),
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.CameraPreviewServer",
+        Preview,
     )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed._preflight_cameras",
@@ -279,6 +303,7 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
         "authorize",
         "sink_enter",
         "source_enter",
+        "preview_enter",
         "camera_preflight",
         "runtime_enter",
         "runtime_ready",
@@ -287,6 +312,7 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
         "samples",
         "write",
         "runtime_exit",
+        "preview_exit",
         "source_exit",
         "complete",
         "sink_exit",
@@ -308,3 +334,42 @@ def test_capture_rate_gate_rejects_non_realtime_collection(monkeypatch) -> None:
                 minimum_fps=27.0,
             )
         )
+
+
+def test_capture_progress_is_published_to_the_panel(monkeypatch) -> None:
+    events: list[tuple[object, ...]] = []
+    times = iter((0.0, 0.1))
+    samples = [(object(), 0), (object(), 1), (object(), 2)]
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.time.monotonic",
+        lambda: next(times),
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.announce_progress",
+        lambda *args, **kwargs: events.append((*args, kwargs)),
+    )
+
+    assert (
+        list(
+            _with_progress(
+                samples,
+                3,
+                minimum_fps=27.0,
+            )
+        )
+        == samples
+    )
+    assert events[0] == (
+        "collection",
+        "Recording episode",
+        0,
+        3,
+        {"phase": "capture", "detail": "minimum 27.00 FPS", "force": True},
+    )
+    assert events[-1] == (
+        "collection",
+        "Recording episode",
+        3,
+        3,
+        {"phase": "complete", "detail": "30.00 FPS", "force": True},
+    )

@@ -34,6 +34,7 @@ class _Reader:
         self.capture_count = 0
         self.closed = False
         self.capture_barrier = capture_barrier
+        self._latest: CameraCapture | None = None
 
     def capture(self, *, timeout_s: float) -> CameraCapture:
         assert timeout_s > 0
@@ -41,7 +42,11 @@ class _Reader:
         if self.capture_barrier is not None and self.capture_count > 1:
             self.capture_barrier.wait(timeout_s)
         self.sequence += 1
-        return CameraCapture(self.sequence, time.monotonic_ns(), _Image())
+        self._latest = CameraCapture(self.sequence, time.monotonic_ns(), _Image())
+        return self._latest
+
+    def latest(self) -> CameraCapture | None:
+        return self._latest
 
     def close(self) -> None:
         self.closed = True
@@ -74,11 +79,20 @@ class _ScriptedReader:
         self._timestamps_ns = iter(timestamps_ns)
         self.capture_count = 0
         self.closed = False
+        self._latest: CameraCapture | None = None
 
     def capture(self, *, timeout_s: float) -> CameraCapture:
         assert timeout_s > 0
         self.capture_count += 1
-        return CameraCapture(self.capture_count, next(self._timestamps_ns), _Image())
+        self._latest = CameraCapture(
+            self.capture_count,
+            next(self._timestamps_ns),
+            _Image(),
+        )
+        return self._latest
+
+    def latest(self) -> CameraCapture | None:
+        return self._latest
 
     def close(self) -> None:
         self.closed = True
@@ -292,6 +306,11 @@ def test_v4l2_bridge_warms_and_owns_enabled_cameras_and_unwinds_partial_startup(
         samples = cameras.capture(timeout_s=0.1)
         assert tuple(samples) == ("wrist_left", "wrist_right")
         assert samples["wrist_left"].metadata.device_id == "left-by-id"
+        assert all(reader.capture_count == 2 for reader in backend.readers)
+        latest = cameras.latest()
+        assert latest["wrist_left"].metadata.source_sequence == (
+            samples["wrist_left"].metadata.source_sequence
+        )
         assert all(reader.capture_count == 2 for reader in backend.readers)
     assert all(reader.closed for reader in backend.readers)
 

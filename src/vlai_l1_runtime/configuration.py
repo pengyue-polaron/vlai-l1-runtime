@@ -239,6 +239,15 @@ class OperatorPanelConfig:
 
 
 @dataclass(frozen=True)
+class CameraPreviewConfig:
+    bind: str
+    port: int
+    fps: int
+    jpeg_quality: int
+    max_age_s: float
+
+
+@dataclass(frozen=True)
 class LifecycleConfig:
     startup: str
     can_setup_service: str
@@ -262,6 +271,7 @@ class SystemConfig:
     teleoperation: TeleoperationConfig
     runtime: RuntimeConfig
     operator_panel: OperatorPanelConfig
+    camera_preview: CameraPreviewConfig
     lifecycle: LifecycleConfig
     _validation_token: object | None = field(default=None, repr=False, compare=False)
     _validation_fingerprint: str = field(default="", repr=False, compare=False)
@@ -299,13 +309,14 @@ def load_system_config(path: Path) -> SystemConfig:
             "teleoperation",
             "runtime",
             "operator_panel",
+            "camera_preview",
             "lifecycle",
         },
         "root",
     )
 
     schema_version = _integer(root["schema_version"], "schema_version", minimum=1)
-    if schema_version != 2:
+    if schema_version != 3:
         raise ConfigError(f"unsupported schema_version: {schema_version}")
     robot_id = _text(root["robot_id"], "robot_id")
     topology_id = _text(root["topology_id"], "topology_id")
@@ -321,6 +332,9 @@ def load_system_config(path: Path) -> SystemConfig:
     teleoperation = _parse_teleoperation(root["teleoperation"], config_path=resolved)
     runtime = _parse_runtime(root["runtime"])
     operator_panel = _parse_operator_panel(root["operator_panel"])
+    camera_preview = _parse_camera_preview(root["camera_preview"])
+    if camera_preview.port == operator_panel.port:
+        raise ConfigError("camera_preview.port must differ from operator_panel.port")
     lifecycle = _parse_lifecycle(root["lifecycle"])
 
     blockers = _command_blockers(safety, runtime)
@@ -329,7 +343,7 @@ def load_system_config(path: Path) -> SystemConfig:
         raise ConfigError("command_ready must equal all independent readiness gates")
     if runtime.transport != "unimplemented" or safety.command_ready:
         raise ConfigError(
-            "system schema version 2 cannot enable the unimplemented command transport"
+            "system schema version 3 cannot enable the unimplemented command transport"
         )
 
     config = SystemConfig(
@@ -346,6 +360,7 @@ def load_system_config(path: Path) -> SystemConfig:
         teleoperation=teleoperation,
         runtime=runtime,
         operator_panel=operator_panel,
+        camera_preview=camera_preview,
         lifecycle=lifecycle,
     )
     object.__setattr__(config, "_validation_token", _LOADER_VALIDATION_TOKEN)
@@ -718,6 +733,27 @@ def _parse_operator_panel(value: Any) -> OperatorPanelConfig:
     )
 
 
+def _parse_camera_preview(value: Any) -> CameraPreviewConfig:
+    raw = _mapping(value, "camera_preview")
+    _exact_keys(
+        raw,
+        {"bind", "port", "fps", "jpeg_quality", "max_age_s"},
+        "camera_preview",
+    )
+    return CameraPreviewConfig(
+        bind=_text(raw["bind"], "camera_preview.bind"),
+        port=_integer(raw["port"], "camera_preview.port", minimum=1, maximum=65_535),
+        fps=_integer(raw["fps"], "camera_preview.fps", minimum=1, maximum=60),
+        jpeg_quality=_integer(
+            raw["jpeg_quality"],
+            "camera_preview.jpeg_quality",
+            minimum=1,
+            maximum=100,
+        ),
+        max_age_s=_positive_number(raw["max_age_s"], "camera_preview.max_age_s"),
+    )
+
+
 def _parse_lifecycle(value: Any) -> LifecycleConfig:
     raw = _mapping(value, "lifecycle")
     keys = {
@@ -853,6 +889,7 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
             config.can.nominal_bitrate,
             config.can.data_bitrate,
             config.can.restart_ms,
+            config.can.tx_queue_length,
             tuple(
                 (
                     endpoint.endpoint_id,
@@ -913,10 +950,19 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
             config.teleoperation.max_side_skew_s,
             config.teleoperation.rt_priority,
             config.teleoperation.can_health_poll_s,
+            config.teleoperation.startup_timeout_s,
+            config.teleoperation.shutdown_timeout_s,
             config.teleoperation.commissioned,
         ),
         (config.runtime.transport, str(config.runtime.socket_path)),
         (config.operator_panel.bind, config.operator_panel.port),
+        (
+            config.camera_preview.bind,
+            config.camera_preview.port,
+            config.camera_preview.fps,
+            config.camera_preview.jpeg_quality,
+            config.camera_preview.max_age_s,
+        ),
         (
             config.lifecycle.startup,
             config.lifecycle.can_setup_service,

@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "order": 10,
+  "id": "place_fruit_in_bowl",
+  "prompt": "place the fruit in the bowl",
+  "distribution": "train"
+}

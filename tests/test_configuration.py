@@ -49,7 +49,7 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
     assert config.teleoperation.startup_timeout_s == 45.0
     assert config.teleoperation.shutdown_timeout_s == 8.0
     assert config.teleoperation.blockers == ()
-    assert config.schema_version == 2
+    assert config.schema_version == 3
     assert config.safety.command_ready is False
     assert config.command_blockers == (
         "command_transport_unimplemented",
@@ -64,6 +64,11 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         ("wrist_right", "255323074499"),
         ("agent", "251643060089"),
     ]
+    assert config.operator_panel.port == 8765
+    assert config.camera_preview.port == 8088
+    assert config.camera_preview.fps == 10
+    assert config.camera_preview.jpeg_quality == 80
+    assert config.camera_preview.max_age_s == 0.5
 
 
 @pytest.mark.parametrize(
@@ -99,6 +104,7 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         ("rt_priority = 20", "rt_priority = 100", "outside the allowed range"),
         ("tx_queue_length = 1000", "tx_queue_length = 0", "outside the allowed range"),
         ("startup_timeout_s = 2.0", "startup_timeout_s = 0.0", "must be positive"),
+        ("port = 8088", "port = 8765", "must differ"),
         (
             "can_health_poll_s = 0.1",
             "can_health_poll_s = 0.2",

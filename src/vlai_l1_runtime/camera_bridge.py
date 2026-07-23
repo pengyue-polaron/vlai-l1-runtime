@@ -37,6 +37,8 @@ class CameraCapture:
 class CameraReader(Protocol):
     def capture(self, *, timeout_s: float) -> CameraCapture: ...
 
+    def latest(self) -> CameraCapture | None: ...
+
     def close(self) -> None: ...
 
 
@@ -144,6 +146,30 @@ class V4L2CameraSet:
                 capture.image,
             )
             for role, capture in captures.items()
+        }
+
+    def latest(self) -> dict[str, CameraSample]:
+        """Snapshot the newest frames without advancing collection delivery state."""
+
+        if len(self._readers) != len(self._streams) or self._executor is None:
+            raise RuntimeError("camera set is not open")
+        captures = {role: reader.latest() for role, reader in self._readers.items()}
+        if any(capture is None for capture in captures.values()):
+            return {}
+        stream_by_role = {stream.role: stream for stream in self._streams}
+        return {
+            role: CameraSample(
+                CameraFrameMetadata(
+                    role=role,
+                    device_id=str(stream_by_role[role].device_id),
+                    stream_epoch=self._epochs[role],
+                    source_sequence=capture.source_sequence,
+                    monotonic_ns=capture.monotonic_ns,
+                ),
+                capture.image,
+            )
+            for role, candidate in captures.items()
+            if (capture := candidate) is not None
         }
 
     def _capture_roles(
@@ -296,6 +322,14 @@ class _OpenCvReader:
             sample = self._latest
             self._last_delivered_sequence = sample.source_sequence
             return sample
+
+    def latest(self) -> CameraCapture | None:
+        with self._condition:
+            if self._error is not None:
+                raise self._error
+            if self._stop.is_set():
+                raise RuntimeError(f"{self._role} camera reader is closed")
+            return self._latest
 
     def close(self) -> None:
         if self._stop.is_set():

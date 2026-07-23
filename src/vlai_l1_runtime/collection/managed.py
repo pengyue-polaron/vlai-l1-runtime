@@ -14,10 +14,11 @@ from dataclasses import dataclass
 from typing import Protocol, TextIO
 
 from embodied_ops import EpisodeDecision
-from embodied_ops.operator_panel import announce_input
+from embodied_ops.operator_panel import announce_input, announce_progress
 
 from .. import console
 from ..camera_bridge import V4L2CameraSet
+from ..camera_preview import CameraPreviewServer
 from ..cameras import CameraSetValidator
 from ..teleoperation import XAirStateReceiver, describe_xair_side, verify_xair_dependency
 from .configuration import CollectionConfig
@@ -232,7 +233,8 @@ def collect_managed_episode(
     console.step("Preparing atomic dataset transaction")
     with sink:
         console.step("Preflighting state socket and three cameras")
-        with source:
+        with source, CameraPreviewServer(config.system, cameras):
+            console.success(f"Camera preview available on port {config.system.camera_preview.port}")
             _preflight_cameras(cameras, config)
             console.success("Three cameras are fresh, synchronized, and ready")
             with runtime_factory(config) as runtimes:
@@ -312,15 +314,41 @@ def _with_progress(
     status = console.LiveStatusLine()
     started = time.monotonic()
     captured = 0
+    announce_progress(
+        "collection",
+        "Recording episode",
+        0,
+        total,
+        phase="capture",
+        detail=f"minimum {minimum_fps:.2f} FPS",
+        force=True,
+    )
     try:
         for index, sample in enumerate(samples, start=1):
             status.update(f"Recording frame {index:>4}/{total}")
             captured = index
+            announce_progress(
+                "collection",
+                "Recording episode",
+                index,
+                total,
+                phase="capture",
+                detail=f"frame {index}/{total}",
+            )
             yield sample
     finally:
         status.close()
     elapsed_s = time.monotonic() - started
     effective_fps = captured / elapsed_s
+    announce_progress(
+        "collection",
+        "Recording episode",
+        captured,
+        total,
+        phase="complete" if captured == total else "stopped",
+        detail=f"{effective_fps:.2f} FPS",
+        force=True,
+    )
     console.info(f"Captured {captured} frames in {elapsed_s:.2f}s · {effective_fps:.2f} FPS")
     if effective_fps < minimum_fps:
         raise RuntimeError(

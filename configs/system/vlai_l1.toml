@@ -178,6 +178,9 @@ port = 8088
 fps = 10
 jpeg_quality = 80
 max_age_s = 0.5
+bridge_socket_path = "/run/vlai-l1/camera-bridge.sock"
+startup_timeout_s = 5.0
+shutdown_timeout_s = 5.0
 
 [lifecycle]
 startup = "manual"

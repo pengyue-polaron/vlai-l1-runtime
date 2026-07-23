@@ -77,7 +77,20 @@ class L1OperatorPanelAdapter:
                 for stream in config.system.cameras.streams
                 if stream.enabled
             ],
-            "camera_controls": [],
+            "camera_controls": [
+                {
+                    "label": "Start cameras",
+                    "workflow": "camera",
+                    "values": {"action": "start"},
+                },
+                {
+                    "label": "Stop cameras",
+                    "workflow": "camera",
+                    "values": {"action": "stop"},
+                    "tone": "danger",
+                    "confirm": "Stop the persistent read-only camera service?",
+                },
+            ],
             "readiness": {
                 "collection": config.collection_ready,
                 "blockers": list(config.collection_blockers),
@@ -124,7 +137,7 @@ class L1OperatorPanelAdapter:
             response = connection.getresponse()
             body = response.read(_CAMERA_HEALTH_MAX_BYTES + 1)
         except (OSError, TimeoutError):
-            return _camera_health_unavailable("Camera preview starts with collection.")
+            return _camera_health_unavailable("Camera service is not running.")
         finally:
             connection.close()
         if len(body) > _CAMERA_HEALTH_MAX_BYTES:
@@ -139,6 +152,15 @@ class L1OperatorPanelAdapter:
     def build_launch(self, workflow: str, values: dict[str, Any]) -> WorkflowLaunch:
         if not isinstance(values, dict):
             raise ValueError("workflow values must be an object")
+        if workflow == "camera":
+            if set(values) != {"action"} or values["action"] not in {"start", "stop"}:
+                raise ValueError("camera workflow requires action start or stop")
+            action = str(values["action"])
+            return WorkflowLaunch(
+                workflow,
+                f"camera:{action}",
+                (str(self.repo_root / "scripts/camera_service.sh"), action),
+            )
         base = (
             sys.executable,
             "-m",
@@ -176,7 +198,9 @@ class L1OperatorPanelAdapter:
                 workflow,
                 f"collect:{experiment}",
                 (
-                    *base,
+                    str(self.repo_root / "scripts/collect.sh"),
+                    "--config",
+                    str(self.collection_config.path),
                     "--experiment",
                     experiment,
                     "--task",

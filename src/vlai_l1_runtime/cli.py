@@ -67,6 +67,16 @@ def build_parser() -> argparse.ArgumentParser:
     camera_check.add_argument("--config", type=Path, required=True)
     camera_check.add_argument("--samples", type=int, required=True)
     camera_check.add_argument("--timeout", type=float, default=1.0)
+    camera_service = subparsers.add_parser(
+        "camera-service", help="manage the persistent read-only camera service"
+    )
+    camera_service.add_argument("--config", type=Path, required=True)
+    camera_service.add_argument("action", choices=("start", "stop", "status", "logs"))
+    camera_service_run = subparsers.add_parser(
+        "camera-service-run",
+        help="run the foreground camera owner (internal)",
+    )
+    camera_service_run.add_argument("--config", type=Path, required=True)
     for command, help_text in (
         ("validate-collection", "validate collection and System contracts"),
         ("describe-collection", "print the canonical dataset contract as JSON"),
@@ -95,6 +105,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_xair_side(load_system_config(args.config), args.side)
         if args.command == "camera-check":
             return _run_camera_check(args)
+        if args.command in {"camera-service", "camera-service-run"}:
+            return _run_camera_service_command(args)
         if args.command in {
             "validate-config",
             "describe",
@@ -324,13 +336,19 @@ def _run_xair_observer(args: argparse.Namespace) -> int:
 
 
 def _run_camera_check(args: argparse.Namespace) -> int:
-    from .camera_bridge import check_v4l2_cameras
+    from .camera_bridge import check_camera_source
+    from .camera_ipc import RawCameraBridgeClient
+    from .camera_service import CameraServiceController
 
-    report = check_v4l2_cameras(
-        load_system_config(args.config),
-        sample_count=args.samples,
-        timeout_s=args.timeout,
-    )
+    config = load_system_config(args.config)
+    CameraServiceController(config).start()
+    with RawCameraBridgeClient(config) as cameras:
+        report = check_camera_source(
+            config,
+            cameras,
+            sample_count=args.samples,
+            timeout_s=args.timeout,
+        )
     print(
         json.dumps(
             {
@@ -355,6 +373,49 @@ def _run_camera_check(args: argparse.Namespace) -> int:
         )
     )
     return 0
+
+
+def _run_camera_service_command(args: argparse.Namespace) -> int:
+    from .camera_service import CameraServiceController, run_camera_service
+
+    config = load_system_config(args.config)
+    if args.command == "camera-service-run":
+        return run_camera_service(config)
+    controller = CameraServiceController(config)
+    if args.action == "start":
+        console.step("Starting or verifying persistent camera service")
+        status = controller.start()
+        console.success(
+            f"Three-camera service ready · preview port {config.camera_preview.port} "
+            f"· pid {status.pid}"
+        )
+    elif args.action == "stop":
+        console.step("Stopping persistent camera service")
+        status = controller.stop()
+        console.success("Persistent camera service stopped")
+    elif args.action == "logs":
+        print(controller.log_tail())
+        return 0
+    else:
+        status = controller.status()
+        (console.success if status.healthy else console.info)(status.detail)
+    print(
+        json.dumps(
+            {
+                "status": "PASS" if status.healthy else "STOPPED",
+                "running": status.running,
+                "healthy": status.healthy,
+                "pid": status.pid,
+                "preview": (f"http://{config.camera_preview.bind}:{config.camera_preview.port}"),
+                "raw_socket": str(config.camera_preview.bridge_socket_path),
+                "log": str(status.log_path),
+                "detail": status.detail,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0 if args.action != "status" or status.healthy else 1
 
 
 def _description_json(description: RobotDescription) -> dict[str, object]:

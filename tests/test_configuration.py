@@ -69,6 +69,9 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
     assert config.camera_preview.fps == 10
     assert config.camera_preview.jpeg_quality == 80
     assert config.camera_preview.max_age_s == 0.5
+    assert config.camera_preview.bridge_socket_path == Path("/run/vlai-l1/camera-bridge.sock")
+    assert config.camera_preview.startup_timeout_s == 5.0
+    assert config.camera_preview.shutdown_timeout_s == 5.0
 
 
 @pytest.mark.parametrize(
@@ -105,6 +108,11 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         ("tx_queue_length = 1000", "tx_queue_length = 0", "outside the allowed range"),
         ("startup_timeout_s = 2.0", "startup_timeout_s = 0.0", "must be positive"),
         ("port = 8088", "port = 8765", "must differ"),
+        (
+            'bridge_socket_path = "/run/vlai-l1/camera-bridge.sock"',
+            'bridge_socket_path = "camera-bridge.sock"',
+            "must be absolute",
+        ),
         (
             "can_health_poll_s = 0.1",
             "can_health_poll_s = 0.2",

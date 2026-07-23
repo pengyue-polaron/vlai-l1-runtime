@@ -229,6 +229,24 @@ def check_v4l2_cameras(
 ) -> CameraHealthReport:
     """Open the configured cameras once and validate a finite live sample window."""
 
+    with V4L2CameraSet(config, backend=backend) as cameras:
+        return check_camera_source(
+            config,
+            cameras,
+            sample_count=sample_count,
+            timeout_s=timeout_s,
+        )
+
+
+def check_camera_source(
+    config: SystemConfig,
+    source: Any,
+    *,
+    sample_count: int,
+    timeout_s: float,
+) -> CameraHealthReport:
+    """Validate a finite sample window from an already-owned camera source."""
+
     if isinstance(sample_count, bool) or not isinstance(sample_count, int) or sample_count <= 0:
         raise ValueError("camera sample_count must be a positive integer")
     if (
@@ -246,21 +264,20 @@ def check_v4l2_cameras(
     shapes: dict[str, tuple[int, int, int]] = {}
     max_pair_skew_ns = 0
 
-    with V4L2CameraSet(config, backend=backend) as cameras:
-        started_ns = time.monotonic_ns()
-        for _ in range(sample_count):
-            samples = cameras.capture(timeout_s=timeout_s)
-            metadata = {role: sample.metadata for role, sample in samples.items()}
-            validator.validate(metadata, now_ns=time.monotonic_ns())
-            timestamps = [frame.monotonic_ns for frame in metadata.values()]
-            max_pair_skew_ns = max(max_pair_skew_ns, max(timestamps) - min(timestamps))
-            for role, sample in samples.items():
-                stream = stream_by_role[role]
-                validate_camera_image(sample.image, stream)
-                first_sequences.setdefault(role, sample.metadata.source_sequence)
-                last_sequences[role] = sample.metadata.source_sequence
-                shapes[role] = tuple(sample.image.shape)
-        elapsed_s = (time.monotonic_ns() - started_ns) / 1_000_000_000
+    started_ns = time.monotonic_ns()
+    for _ in range(sample_count):
+        samples = source.capture(timeout_s=timeout_s)
+        metadata = {role: sample.metadata for role, sample in samples.items()}
+        validator.validate(metadata, now_ns=time.monotonic_ns())
+        timestamps = [frame.monotonic_ns for frame in metadata.values()]
+        max_pair_skew_ns = max(max_pair_skew_ns, max(timestamps) - min(timestamps))
+        for role, sample in samples.items():
+            stream = stream_by_role[role]
+            validate_camera_image(sample.image, stream)
+            first_sequences.setdefault(role, sample.metadata.source_sequence)
+            last_sequences[role] = sample.metadata.source_sequence
+            shapes[role] = tuple(sample.image.shape)
+    elapsed_s = (time.monotonic_ns() - started_ns) / 1_000_000_000
 
     return CameraHealthReport(
         sample_count=sample_count,

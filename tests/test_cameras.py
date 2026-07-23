@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import signal
 import threading
 import time
 from dataclasses import replace
@@ -18,6 +19,12 @@ from vlai_l1_runtime.camera_bridge import (
     V4L2CameraSet,
     check_v4l2_cameras,
 )
+from vlai_l1_runtime.camera_ipc import (
+    RawCameraBridgeClient,
+    RawCameraBridgeServer,
+)
+from vlai_l1_runtime.camera_service import CameraServiceController
+from vlai_l1_runtime.collection.schema import CameraSample
 from vlai_l1_runtime.configuration import CameraConfig, CamerasConfig, ConfigError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -138,6 +145,65 @@ def _frames(
             "wrist_right", "right-by-id", epoch, right_sequence, right_ns
         ),
     }
+
+
+class _RawSource:
+    def __init__(self, system) -> None:
+        self._streams = tuple(stream for stream in system.cameras.streams if stream.enabled)
+        self._images = {
+            stream.role: _RawImage(
+                (stream.height, stream.width, 3),
+                bytes([index]) * (stream.height * stream.width * 3),
+            )
+            for index, stream in enumerate(self._streams, start=1)
+        }
+        self.sequence = 0
+
+    def latest(self) -> dict[str, CameraSample]:
+        self.sequence += 1
+        now_ns = time.monotonic_ns()
+        return {
+            stream.role: CameraSample(
+                CameraFrameMetadata(
+                    stream.role,
+                    str(stream.device_id),
+                    "owner-epoch",
+                    self.sequence,
+                    now_ns,
+                ),
+                self._images[stream.role],
+            )
+            for stream in self._streams
+        }
+
+
+class _RawImage:
+    dtype = "uint8"
+
+    def __init__(self, shape: tuple[int, int, int], data: bytes) -> None:
+        self.shape = shape
+        self.data = data
+
+
+class _RawCodec:
+    def encode(
+        self,
+        image: _RawImage,
+        *,
+        shape: tuple[int, int, int],
+    ) -> tuple[str, bytes]:
+        assert image.shape == shape
+        return "|u1", image.data
+
+    def decode(
+        self,
+        payload: bytes,
+        *,
+        shape: tuple[int, int, int],
+        dtype: str,
+    ) -> _RawImage:
+        assert dtype == "|u1"
+        return _RawImage(shape, payload)
 
 
 def test_tracked_camera_mapping_is_commissioned() -> None:
@@ -393,3 +459,158 @@ def test_camera_health_check_validates_a_finite_sample_window() -> None:
     assert report.streams["wrist_left"].last_sequence > report.streams["wrist_left"].first_sequence
     assert report.streams["wrist_right"].shape == (480, 640, 3)
     assert all(reader.closed for reader in backend.readers)
+
+
+def test_raw_camera_bridge_preserves_exact_frames_and_metadata(tmp_path: Path) -> None:
+    system = load_system_config(ROOT / "configs/system/vlai_l1.toml")
+    source = _RawSource(system)
+    socket_path = tmp_path / "camera.sock"
+    codec = _RawCodec()
+
+    with (
+        RawCameraBridgeServer(
+            system,
+            source,
+            socket_path=socket_path,
+            codec=codec,
+        ),
+        RawCameraBridgeClient(system, socket_path=socket_path, codec=codec) as client,
+    ):
+        first = client.capture(timeout_s=0.5)
+        second = client.capture(timeout_s=0.5)
+
+    assert tuple(first) == ("wrist_left", "wrist_right", "agent")
+    assert first["agent"].metadata.stream_epoch == "owner-epoch"
+    assert second["agent"].metadata.source_sequence > first["agent"].metadata.source_sequence
+    assert first["wrist_left"].image.data == source._images["wrist_left"].data
+    assert not socket_path.exists()
+
+
+def test_raw_camera_bridge_rejects_a_different_camera_contract(tmp_path: Path) -> None:
+    system = load_system_config(ROOT / "configs/system/vlai_l1.toml")
+    changed_streams = tuple(
+        replace(stream, device_id="different-agent") if stream.role == "agent" else stream
+        for stream in system.cameras.streams
+    )
+    client_system = replace(system, cameras=replace(system.cameras, streams=changed_streams))
+    socket_path = tmp_path / "camera.sock"
+    codec = _RawCodec()
+
+    with (
+        RawCameraBridgeServer(
+            system,
+            _RawSource(system),
+            socket_path=socket_path,
+            codec=codec,
+        ),
+        RawCameraBridgeClient(
+            client_system,
+            socket_path=socket_path,
+            codec=codec,
+        ) as client,
+        pytest.raises(RuntimeError, match="camera contract mismatch"),
+    ):
+        client.capture(timeout_s=0.5)
+
+
+def test_camera_service_controller_starts_one_marked_owner(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import sys
+
+    system = load_system_config(ROOT / "configs/system/vlai_l1.toml")
+    system = replace(
+        system,
+        camera_preview=replace(
+            system.camera_preview,
+            bridge_socket_path=tmp_path / "camera.sock",
+        ),
+    )
+    commands: list[tuple[str, ...]] = []
+
+    class Process:
+        pid = 4242
+        returncode = None
+
+        def poll(self):
+            return None
+
+    def popen(command, **kwargs):
+        assert kwargs["start_new_session"] is True
+        commands.append(tuple(command))
+        return Process()
+
+    expected_command = (
+        sys.executable,
+        "-m",
+        "vlai_l1_runtime.cli",
+        "camera-service-run",
+        "--config",
+        str(system.path),
+    )
+    monkeypatch.setattr("vlai_l1_runtime.camera_service.subprocess.Popen", popen)
+    monkeypatch.setattr(
+        "vlai_l1_runtime.camera_service._process_start_ticks",
+        lambda _pid: 77,
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.camera_service._process_command",
+        lambda _pid: expected_command,
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.camera_service._preview_endpoint_present",
+        lambda _config: False,
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.camera_service._preview_healthy",
+        lambda _config: True,
+    )
+    controller = CameraServiceController(system)
+
+    first = controller.start()
+    second = controller.start()
+
+    assert first.healthy is True
+    assert second.pid == 4242
+    assert commands == [expected_command]
+    assert controller.marker_path.is_file()
+
+    process_states = iter((True, True, False))
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        controller,
+        "_marker_process",
+        lambda _marker: next(process_states),
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.camera_service.os.killpg",
+        lambda pid, signum: signals.append((pid, signum)),
+    )
+
+    stopped = controller.stop()
+
+    assert stopped.running is False
+    assert signals == [(4242, signal.SIGINT)]
+    assert not controller.marker_path.exists()
+
+
+def test_camera_service_controller_refuses_an_unmanaged_preview(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    system = load_system_config(ROOT / "configs/system/vlai_l1.toml")
+    system = replace(
+        system,
+        camera_preview=replace(
+            system.camera_preview,
+            bridge_socket_path=tmp_path / "camera.sock",
+        ),
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.camera_service._preview_endpoint_present",
+        lambda _config: True,
+    )
+
+    with pytest.raises(RuntimeError, match="unmanaged process"):
+        CameraServiceController(system).start()

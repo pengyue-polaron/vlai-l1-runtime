@@ -72,13 +72,23 @@ command resources before another lease can be granted.
 ## Cameras
 
 The Runtime repository owns the left-wrist, right-wrist, and optional AgentView
-camera identities and their freshness/skew contract. The Camera Bridge opens
-each enabled V4L2 stream exactly once, completes a bounded configuration-owned
-warmup, and exposes timestamped RGB frames to live collection. The managed
-workflow attaches one read-only MJPEG presenter to those existing readers. Its
-lower-rate encoder snapshots the latest frames without advancing collection
-delivery state. `embodied-ops` receives only normalized health and preview URLs
-through the L1 presentation provider; it never owns a camera.
+camera identities and their freshness/skew contract. One marked persistent
+Camera Service opens each enabled V4L2 stream exactly once and completes a
+bounded configuration-owned warmup. It serves exact raw RGB frame sets over a
+versioned local Unix socket and read-only MJPEG from the same latest frames.
+Collection is a raw-frame client and never reopens a physical camera. The
+lower-rate preview encoder cannot advance collection delivery state.
+`embodied-ops` receives only normalized health, preview URLs, and explicit
+start/stop launches through the L1 presentation provider; it never owns a
+camera.
+
+The raw protocol binds every client to a digest of the tracked camera contract,
+requires every enabled role in configured order, preserves device identity,
+stream epoch, source sequence and monotonic timestamp, and validates exact
+`HxWx3 uint8` payload sizes before allocation. A mismatched configuration,
+truncated payload, stale sequence, incoherent set, or owner failure is
+fail-closed. Preview and raw consumers use independent threads, so a slow
+browser cannot block the physical readers or collection.
 
 Each frame identifies its configured device and stream epoch. The bridge owns a
 stateful validator for sequence and timestamp continuity. After a deliberate
@@ -130,21 +140,24 @@ dataset; one derivative never becomes the source of another derivative.
 
 Every saved episode is appended through a hidden sibling dataset snapshot.
 Camera frames enter LeRobot through the tracked asynchronous image writer, and
-the complete live loop must meet the tracked minimum capture rate. The robot
-and camera owners stop immediately after capture; encoding and publication run
-after hardware shutdown. Existing data, video, and image payloads are
+the complete live loop must meet the tracked minimum capture rate. Robot
+runtimes stop immediately after capture; encoding and publication run after
+motion shutdown while the read-only Camera Service may remain available.
+Existing data, video, and image payloads are
 hard-linked as immutable inputs; metadata is copied. LeRobot finalization,
 provenance generation, and a complete payload doctor run before the staging
 directory is atomically installed. A failed append leaves the prior complete
 dataset authoritative. Staging or backup leftovers block reuse until they are
 inspected.
 
-Managed collection preflights cameras before motor enable, starts both guarded
-x_air runtimes, and waits for paired state. It then exposes one operator input
-gate through the terminal and Operator Panel. The operator uses teleoperation to
-place the robot at the episode start pose and presses Enter; the workflow
-rechecks all cameras before the first recorded frame. No automatic reset is
-claimed while the Runtime has no reviewed fixed-pose command transport.
+Managed collection starts or verifies the marked Camera Service, connects one
+raw client, and preflights cameras before motor enable. It then starts both
+guarded x_air runtimes and waits for paired state. The operator uses
+teleoperation to place the robot at the episode start pose and presses Enter;
+the workflow rechecks all cameras before the first recorded frame. Collection
+shutdown closes only its raw client, so preview remains available. No automatic
+reset is claimed while the Runtime has no reviewed fixed-pose command
+transport.
 
 `embodied-ops` provides the generic episode decision, freshness/skew,
 transaction, and Panel contracts. This repository owns their L1 adapter and all
@@ -156,8 +169,11 @@ is the same as L1.
 
 The L1 adapter exposes hardware-free collection validation, canonical dataset
 doctor, and v2.1 export workflows, plus the commissioned finite live-collection
-workflow. The live workflow uses the same tracked readiness gates as the CLI
-and owns camera, preview, teleoperation, collection, and shutdown lifecycle.
+workflow. It also exposes explicit start/stop controls and normalized health
+for the persistent read-only Camera Service. The live workflow uses the same
+tracked readiness gates as the CLI and owns its camera client, teleoperation,
+collection, and motion shutdown lifecycle; it does not own the persistent
+camera process.
 Capture progress uses the `embodied-ops` latest-value protocol instead of
 durable terminal lines. The adapter also owns a strict create-only JSON prompt
 registry for collection task text. It does not advertise reset, checkpoint,

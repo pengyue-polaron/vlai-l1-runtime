@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import io
-from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from embodied_ops import EpisodeDecision
@@ -21,10 +21,17 @@ CONFIG = load_collection_config(ROOT / "configs/collection/default.toml")
 
 
 @pytest.fixture(autouse=True)
-def _stub_camera_preview(monkeypatch) -> None:
+def _stub_persistent_camera_service(monkeypatch) -> None:
+    class Controller:
+        def __init__(self, _config):
+            pass
+
+        def start(self):
+            return SimpleNamespace(pid=4321)
+
     monkeypatch.setattr(
-        "vlai_l1_runtime.collection.managed.CameraPreviewServer",
-        lambda _config, _cameras: nullcontext(),
+        "vlai_l1_runtime.collection.managed.CameraServiceController",
+        Controller,
     )
 
 
@@ -141,44 +148,21 @@ def test_partial_runtime_start_failure_stops_started_side(monkeypatch) -> None:
 def test_camera_startup_failure_never_starts_robot_runtimes(monkeypatch) -> None:
     entered_runtime = False
 
-    class State:
-        def __enter__(self):
-            return self
+    class Controller:
+        def __init__(self, _config):
+            pass
 
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-    class Camera:
-        def __enter__(self):
+        def start(self):
             raise RuntimeError("camera disappeared")
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
 
     class Runtime:
         def __init__(self, config):
             nonlocal entered_runtime
             entered_runtime = True
 
-    class Sink:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return None
-
-    monkeypatch.setattr(ManagedXAirRuntimes, "authorize", lambda: None)
     monkeypatch.setattr(
-        "vlai_l1_runtime.collection.managed.XAirStateReceiver",
-        lambda config: State(),
-    )
-    monkeypatch.setattr(
-        "vlai_l1_runtime.collection.managed.V4L2CameraSet",
-        lambda config: Camera(),
-    )
-    monkeypatch.setattr(
-        "vlai_l1_runtime.collection.managed.DirectLeRobotEpisode",
-        lambda **kwargs: Sink(),
+        "vlai_l1_runtime.collection.managed.CameraServiceController",
+        Controller,
     )
 
     with pytest.raises(RuntimeError, match="camera disappeared"):
@@ -199,7 +183,7 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
 
     class Source:
         def __init__(self, config, **kwargs):
-            pass
+            self.camera_source = object()
 
         def __enter__(self):
             events.append("source_enter")
@@ -226,17 +210,6 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
         def __exit__(self, exc_type, exc, traceback):
             events.append("runtime_exit")
 
-    class Preview:
-        def __init__(self, config, cameras):
-            pass
-
-        def __enter__(self):
-            events.append("preview_enter")
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            events.append("preview_exit")
-
     class Sink:
         def __enter__(self):
             events.append("sink_enter")
@@ -255,20 +228,12 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
         lambda _config: object(),
     )
     monkeypatch.setattr(
-        "vlai_l1_runtime.collection.managed.V4L2CameraSet",
-        lambda _config: object(),
-    )
-    monkeypatch.setattr(
         "vlai_l1_runtime.collection.live.LiveCollectionSource",
         Source,
     )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed.DirectLeRobotEpisode",
         lambda **_kwargs: Sink(),
-    )
-    monkeypatch.setattr(
-        "vlai_l1_runtime.collection.managed.CameraPreviewServer",
-        Preview,
     )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed._preflight_cameras",
@@ -303,7 +268,6 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
         "authorize",
         "sink_enter",
         "source_enter",
-        "preview_enter",
         "camera_preflight",
         "runtime_enter",
         "runtime_ready",
@@ -312,7 +276,6 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
         "samples",
         "write",
         "runtime_exit",
-        "preview_exit",
         "source_exit",
         "complete",
         "sink_exit",

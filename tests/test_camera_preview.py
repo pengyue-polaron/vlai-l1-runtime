@@ -32,7 +32,7 @@ class _Source:
         }
 
 
-def test_camera_preview_serves_collection_owned_frames_and_health() -> None:
+def test_camera_preview_serves_persistent_owner_frames_and_health() -> None:
     system = load_system_config(ROOT / "configs/system/vlai_l1.toml")
     system = replace(
         system,

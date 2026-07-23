@@ -48,8 +48,12 @@ sources exist only for pure integration tests and cannot enable the Runtime.
   while accepting a new lease is process-fatal.
 - Preview, logging, policy inference, and camera encoding must never block the
   realtime command loop.
-- The MJPEG preview may read only the collection-owned readers' latest frames.
-  It must not open cameras itself or advance the collection delivery sequence.
+- The marked persistent Camera Service is the only physical camera owner.
+  MJPEG and raw collection clients read its latest frames; neither may reopen a
+  device or advance another consumer's delivery sequence.
+- Collection shutdown leaves the read-only Camera Service running. Use
+  `just cameras stop` to release its handles. Never start a second camera reader
+  while the marked owner is active.
 - State publication runs outside the SDK callback. Missing consumers are
   tolerated; malformed, non-finite, wrong-DOF, or stale callback data is fatal.
 - The sidecar caps and verifies every SDK thread at the tracked FIFO priority.
@@ -58,7 +62,7 @@ sources exist only for pure integration tests and cannot enable the Runtime.
   or restart increase.
 - CAN health includes qdisc drops from `tc -s qdisc`; ordinary interface
   counters do not expose the queue drops that caused the original stutter.
-- The Operator Panel and collection-scoped MJPEG preview bind to the trusted
+- The Operator Panel and persistent MJPEG preview bind to the trusted
   robot LAN and have no user authentication or transport encryption. Do not
   expose either endpoint to an untrusted network.
 

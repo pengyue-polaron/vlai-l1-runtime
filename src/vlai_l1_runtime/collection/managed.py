@@ -17,8 +17,7 @@ from embodied_ops import EpisodeDecision
 from embodied_ops.operator_panel import announce_input, announce_progress
 
 from .. import console
-from ..camera_bridge import V4L2CameraSet
-from ..camera_preview import CameraPreviewServer
+from ..camera_service import CameraServiceController
 from ..cameras import CameraSetValidator
 from ..teleoperation import XAirStateReceiver, describe_xair_side, verify_xair_dependency
 from .configuration import CollectionConfig
@@ -29,7 +28,7 @@ from .dataset import (
     provenance_from_config,
 )
 from .orchestration import EpisodeResult, complete_episode, write_episode_frames
-from .schema import CollectionSample, SampleAssembler
+from .schema import CameraSample, CollectionSample, SampleAssembler
 
 _LEVEL = re.compile(r"^(INFO|STEP|PASS|WARN|FAIL)\s+(.*)$")
 
@@ -40,6 +39,10 @@ class RuntimeSession(Protocol):
     def wait_until_ready(self, receiver: XAirStateReceiver) -> None: ...
 
     def __exit__(self, exc_type, exc, traceback) -> None: ...
+
+
+class CameraCaptureSource(Protocol):
+    def capture(self, *, timeout_s: float) -> dict[str, CameraSample]: ...
 
 
 @dataclass
@@ -212,16 +215,20 @@ def collect_managed_episode(
         f"Collection session · experiment={experiment} · frames={frame_count} "
         f"· decision={EpisodeDecision(decision).value}"
     )
+    console.step("Starting or verifying persistent camera service")
+    camera_status = CameraServiceController(config.system).start()
+    console.success(
+        f"Three-camera service ready · preview port "
+        f"{config.system.camera_preview.port} · pid {camera_status.pid}"
+    )
     console.step("Authorizing realtime lifecycle")
     ManagedXAirRuntimes.authorize()
     receiver = XAirStateReceiver(config.system)
-    cameras = V4L2CameraSet(config.system)
     from .live import LiveCollectionSource
 
     source = LiveCollectionSource(
         config,
         state_source=receiver,
-        camera_source=cameras,
     )
     sink = DirectLeRobotEpisode(
         identity=identity_from_config(config, experiment),
@@ -233,9 +240,8 @@ def collect_managed_episode(
     console.step("Preparing atomic dataset transaction")
     with sink:
         console.step("Preflighting state socket and three cameras")
-        with source, CameraPreviewServer(config.system, cameras):
-            console.success(f"Camera preview available on port {config.system.camera_preview.port}")
-            _preflight_cameras(cameras, config)
+        with source:
+            _preflight_cameras(source.camera_source, config)
             console.success("Three cameras are fresh, synchronized, and ready")
             with runtime_factory(config) as runtimes:
                 runtimes.wait_until_ready(receiver)
@@ -243,7 +249,7 @@ def collect_managed_episode(
                     console.info("Collection cancelled before recording")
                     return EpisodeResult(EpisodeDecision.QUIT, 0, None)
                 console.step("Rechecking cameras after operator confirmation")
-                _preflight_cameras(cameras, config)
+                _preflight_cameras(source.camera_source, config)
                 console.success("Three cameras are fresh, synchronized, and ready to record")
                 console.step(f"Recording episode · target {config.fps} FPS")
                 progress = _with_progress(
@@ -295,7 +301,7 @@ def _wait_for_episode_start(
         console.warning("Press Enter to start recording, or enter q to quit")
 
 
-def _preflight_cameras(cameras: V4L2CameraSet, config: CollectionConfig) -> None:
+def _preflight_cameras(cameras: CameraCaptureSource, config: CollectionConfig) -> None:
     validator = CameraSetValidator(config.system.cameras)
     for _ in range(3):
         samples = cameras.capture(timeout_s=config.max_sample_age_s)

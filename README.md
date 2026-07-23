@@ -64,6 +64,7 @@ readiness gates.
 ```bash
 git submodule update --init --recursive
 just setup-camera
+just cameras
 just camera-check
 just setup-dataset
 ```
@@ -80,13 +81,14 @@ A finite episode is recorded with:
 just collect fruit_placement_v1 "place the fruit in the bowl" 300 save
 ```
 
-This is one managed session. It authorizes the privileged lifecycle, opens and
-preflights all three cameras before enabling motors, starts both x_air
-runtimes, and waits for fresh paired state. Use teleoperation to place the robot
-at the episode start pose, then press `Enter` in the terminal or **Start
-recording** in the Panel. The workflow rechecks all three cameras after that
-confirmation before recording the atomic canonical dataset transaction. Enter
-`q` at the terminal prompt to stop without recording.
+This is one managed session. It starts or verifies the persistent three-camera
+owner, authorizes the privileged robot lifecycle, preflights raw frames before
+enabling motors, starts both x_air runtimes, and waits for fresh paired state.
+Use teleoperation to place the robot at the episode start pose, then press
+`Enter` in the terminal or **Start recording** in the Panel. The workflow
+rechecks all three cameras after that confirmation before recording the atomic
+canonical dataset transaction. Enter `q` at the terminal prompt to stop without
+recording.
 
 The reusable `embodied-ops` Panel is available with:
 
@@ -94,13 +96,27 @@ The reusable `embodied-ops` Panel is available with:
 just panel
 ```
 
-It serves the L1 adapter on port 8765. During collection, the same process that
-owns the Camera Bridge publishes read-only left-wrist, right-wrist, and
-AgentView previews on port 8088. Preview encoding snapshots already-open frames
-at 10 FPS; it never opens another camera or advances the formal 30 FPS
-collection stream. The Panel reports camera health, shows capture progress
-without terminal spam, and provides a create-only prompt registry whose task
-text can be activated directly in the Collect form.
+It serves the L1 adapter on port 8765 without opening hardware. Use **Start
+cameras** in the Panel or `just cameras` to start the persistent read-only
+camera owner. Left-wrist, right-wrist, and AgentView previews then remain on
+port 8088 across collection runs. The owner opens each device exactly once,
+publishes exact raw RGB sets over a local Unix socket for collection, and
+encodes lower-rate MJPEG from the same latest frames. Preview never advances or
+blocks formal 30 FPS delivery. The Panel reports camera health, shows capture
+progress without terminal spam, and provides a create-only prompt registry
+whose task text can be activated directly in the Collect form.
+
+Camera lifecycle is explicit:
+
+```bash
+just cameras
+just cameras status
+just cameras logs
+just cameras stop
+```
+
+Stopping a collection leaves the read-only camera service available. Only
+`just cameras stop` releases the three camera handles.
 
 There is no automatic fixed-pose reset: the reviewed x_air interface currently
 provides teleoperation, not a Runtime-owned reset command. Camera images are
@@ -113,8 +129,9 @@ sdk-start` or a separate observer before collection; those commands are for
 bounded commissioning and diagnostics.
 
 On the robot, `just camera-list` prints the serials of connected V4L cameras
-without opening their video streams. `just camera-check` opens every enabled
-stream for a finite continuity, identity, format, freshness, and skew check.
+without opening their video streams. `just camera-check` starts or reuses the
+persistent owner and validates a finite raw-frame window through the same local
+bridge used by collection.
 `just sdk-status` inspects the deployed processes and CAN controllers, and
 `just sdk-stop` disables both pairs and returns all four links to `DOWN`.
 

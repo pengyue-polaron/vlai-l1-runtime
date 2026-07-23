@@ -50,13 +50,14 @@ per-frame action-delta limit; named state and action values must still be
 finite, fresh, synchronized, and increasing in sequence. The Runtime does not
 apply joint or gripper position ranges to collected values.
 
-Each episode is buffered by LeRobot inside a hidden sibling directory. The
-robot and cameras are stopped immediately after the last accepted frame.
-Saving then performs video encoding, LeRobot finalization, provenance writing,
-and a deep validation of task metadata, episode ranges, Parquet row counts and
-columns, and every referenced video. Only then is the complete directory
-renamed over the dataset target. Appending requires hard-link support so old
-large payloads stay immutable and are not copied on every episode.
+Each episode is buffered by LeRobot inside a hidden sibling directory. Robot
+runtimes stop immediately after the last accepted frame; the read-only
+persistent Camera Service may remain available between episodes. Saving then
+performs video encoding, LeRobot finalization, provenance writing, and a deep
+validation of task metadata, episode ranges, Parquet row counts and columns,
+and every referenced video. Only then is the complete directory renamed over
+the dataset target. Appending requires hard-link support so old large payloads
+stay immutable and are not copied on every episode.
 
 Discard clears the episode buffer and removes its staging directory. Any
 `.staging-*` or `.backup-*` sibling blocks future use until inspected. The tools

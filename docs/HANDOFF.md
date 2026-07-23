@@ -11,7 +11,7 @@ silently choosing one.
 - Onboard host: `ssh nyush-robotics-dev`
 - Onboard workspace: `/home/nyu/vlai-l1-runtime`
 - Default branch: `main`
-- Handoff updated: 2026-07-23
+- Handoff updated: 2026-07-24
 
 Use SSH keys when possible. Never write the login password into a repository,
 shell history, service unit, or agent context file. An agent already running on
@@ -133,10 +133,9 @@ Camera and data evidence:
 - with both 500 Hz teleoperation sides and the 100 Hz bimanual observer active,
   the parallel camera bridge captured 300 three-camera sets at 29.997 FPS with
   32.88 ms maximum skew and no new CAN or qdisc drops;
-- the collection-owned 10 FPS MJPEG preview and formal three-camera capture ran
-  together for 300 frames at 29.979 FPS with 32.38 ms maximum skew; all three
-  preview streams remained fresh at 9.99 FPS and no second camera owner was
-  created;
+- the 10 FPS MJPEG preview and formal three-camera capture ran together for 300
+  frames at 29.979 FPS with 32.38 ms maximum skew; all three preview streams
+  remained fresh at 9.99 FPS and no second camera owner was created;
 - a later whole-hub reset disconnected and re-enumerated both D405 cameras,
   AgentView, and all four PCAN adapters together; the resulting
   `VIDIOC_REQBUFS ... ENODEV` was a stale device node after the shared USB
@@ -160,7 +159,7 @@ Camera and data evidence:
 - the environment uses Python 3.12.13, OpenCV 4.13.0 and
   `torch 2.11.0+cpu`; CUDA is absent.
 
-The last full onboard software check passed 87 tests. About 75 GB remained on
+The last full onboard hardware-free software check passed 92 tests. About 75 GB remained on
 the migrated root filesystem before live camera commissioning.
 
 ## Test ladder
@@ -207,19 +206,22 @@ inactive, no controller process may remain, and all four CAN links must be
 
 ### 2. Cameras without arm motion
 
-Connect both D405 units and the D455 through stable USB 3 paths, preferably a
-powered hub or separate root hubs. Confirm that `just camera-list` prints all
-three tracked serials, then run the bounded check:
+Connect both D405 units through stable USB 3 paths. The commissioned RGB-only
+D455 may use its verified USB 2 path; prefer a powered hub or separate root
+hubs when available. Confirm that `just camera-list` prints all three tracked
+serials, then run the bounded check:
 
 ```bash
 just camera-check
 ```
 
-It opens each configured V4L2 stream once and validates identity, shape, dtype,
-freshness, continuity and pair skew for 30 samples with a 0.25 second per-set
-timeout. Record effective FPS and maximum skew. Stop and inspect kernel USB/UVC
-logs if the host disconnects, a camera re-enumerates, FPS collapses, or the
-check times out. Do not weaken the tracked checks to make it pass.
+It starts or reuses the marked persistent Camera Service, then validates
+identity, shape, dtype, freshness, continuity and pair skew for 30 raw frame
+sets over the same local bridge used by collection. Record effective FPS and
+maximum skew. Stop and inspect kernel USB/UVC logs if the host disconnects, a
+camera re-enumerates, FPS collapses, or the check times out. Do not weaken the
+tracked checks to make it pass. Use `just cameras stop` when the physical
+handles should be released.
 
 ### 3. x_air recommissioning
 
@@ -282,15 +284,15 @@ merely to alter collection. Those are separate domains.
 ### 5. End-to-end collection
 
 Start with no manual x_air runtime, observer, camera reader, or competing
-controller active. `just collect` preflights all three cameras before motor
-enable, exposes read-only previews from those same readers, starts both
-configured runtimes, and waits for fresh paired state. Use teleoperation to
-place the robot at the episode start pose, then press Enter in the terminal or
-Start recording in the Panel. The workflow rechecks all cameras after
-confirmation, records, and owns the complete shutdown path. A normal return,
-error, or `Ctrl+C` closes the preview, disables both pairs and returns
-can0-can3 to `DOWN`. The input gate is not an automatic reset; no reviewed
-fixed-pose command path exists.
+controller active. `just collect` starts or reuses the marked Camera Service,
+connects one raw client, preflights all three cameras before motor enable,
+starts both configured runtimes, and waits for fresh paired state. Use
+teleoperation to place the robot at the episode start pose, then press Enter in
+the terminal or Start recording in the Panel. The workflow rechecks all cameras
+after confirmation and records. A normal return, error, or `Ctrl+C` closes the
+collection client, disables both pairs and returns can0-can3 to `DOWN`; the
+read-only preview remains available. The input gate is not an automatic reset;
+no reviewed fixed-pose command path exists.
 
 First discard a finite episode:
 
@@ -321,11 +323,14 @@ just panel
 
 The Panel binds to the trusted robot LAN at the tracked address and port. It
 has no authentication or transport encryption. Do not expose it to an
-untrusted network. Its collection action invokes the same managed session and
-is shown only when the tracked readiness gates permit it. During collection it
-shows all three previews, normalized health, capture progress, and the guarded
-Start recording input. Prompt registration creates a new validated JSON record
-without modifying an existing prompt and can fill the Collect task field.
+untrusted network. Start the persistent preview with **Start cameras** or
+`just cameras`; stop it explicitly with **Stop cameras** or
+`just cameras stop`. Its collection action invokes the same managed session
+and is shown only when the tracked readiness gates permit it. All three
+previews and normalized health remain visible between collection runs. During
+capture it also shows progress and the guarded Start recording input. Prompt
+registration creates a new validated JSON record without modifying an existing
+prompt and can fill the Collect task field.
 
 ## Current completion state
 

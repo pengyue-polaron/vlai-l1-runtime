@@ -91,16 +91,20 @@ camera-list:
     } | sort -u
 
 camera-check samples="30" timeout="0.25":
+    {{ repo }}/scripts/camera_service.sh start
     {{ vpy }} -m vlai_l1_runtime.cli camera-check \
         --config {{ system_config }} \
         --samples "{{ samples }}" \
         --timeout "{{ timeout }}"
 
+cameras action="start":
+    {{ repo }}/scripts/camera_service.sh "{{ action }}"
+
 panel:
     {{ vpy }} -m vlai_l1_runtime.cli panel --config {{ collection_config }}
 
 collect experiment task frames="300" decision="save":
-    {{ vpy }} -m vlai_l1_runtime.cli collect \
+    {{ repo }}/scripts/collect.sh \
         --config {{ collection_config }} \
         --experiment "{{ experiment }}" \
         --task "{{ task }}" \

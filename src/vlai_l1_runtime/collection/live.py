@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from contextlib import ExitStack
 from typing import Protocol
 
-from ..camera_bridge import V4L2CameraSet
+from ..camera_ipc import RawCameraBridgeClient
 from ..contracts import NamedJointVector
 from ..teleoperation import XAirStateReceiver
 from .configuration import CollectionConfig
@@ -36,7 +36,7 @@ class CameraSource(Protocol):
 
 
 class LiveCollectionSource:
-    """Own cameras and the x_air observation socket for one collection run."""
+    """Consume persistent cameras and the x_air observation socket for one run."""
 
     def __init__(
         self,
@@ -53,7 +53,7 @@ class LiveCollectionSource:
             )
         self._config = config
         self._state_source = state_source or XAirStateReceiver(config.system)
-        self._camera_source = camera_source or V4L2CameraSet(config.system)
+        self._camera_source = camera_source or RawCameraBridgeClient(config.system)
         self._stack: ExitStack | None = None
 
     def __enter__(self) -> LiveCollectionSource:
@@ -68,6 +68,12 @@ class LiveCollectionSource:
             raise
         self._stack = stack
         return self
+
+    @property
+    def camera_source(self) -> CameraSource:
+        if self._stack is None:
+            raise RuntimeError("live collection source is not open")
+        return self._camera_source
 
     def samples(self, frame_count: int) -> Iterator[tuple[CollectionSample, int]]:
         if self._stack is None:

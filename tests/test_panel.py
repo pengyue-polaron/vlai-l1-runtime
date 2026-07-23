@@ -26,6 +26,9 @@ def test_panel_exposes_the_commissioned_collection_stack() -> None:
         ("agent", 8088, "/agent.mjpg"),
     }
     assert [registration["id"] for registration in catalog["registrations"]] == ["prompt"]
+    assert [
+        (control["label"], control["values"]["action"]) for control in catalog["camera_controls"]
+    ] == [("Start cameras", "start"), ("Stop cameras", "stop")]
     assert {workflow["id"] for workflow in catalog["workflows"]} == {
         "validate-collection",
         "collect",
@@ -35,6 +38,11 @@ def test_panel_exposes_the_commissioned_collection_stack() -> None:
     launch = adapter.build_launch("dataset-doctor", {"experiment": "pick_v1"})
     assert launch.command[:3] == (sys.executable, "-m", "vlai_l1_runtime.cli")
     assert launch.command[-2:] == ("--experiment", "pick_v1")
+    camera = adapter.build_launch("camera", {"action": "start"})
+    assert camera.command == (
+        str(ROOT / "scripts/camera_service.sh"),
+        "start",
+    )
 
 
 def test_panel_builds_live_collection_from_tracked_contract() -> None:
@@ -48,6 +56,7 @@ def test_panel_builds_live_collection_from_tracked_contract() -> None:
             "decision": "discard",
         },
     )
+    assert launch.command[0] == str(ROOT / "scripts/collect.sh")
     assert launch.command[-8:] == (
         "--experiment",
         "pick_v1",

@@ -1,4 +1,4 @@
-"""Read-only MJPEG presentation for the collection-owned camera bridge."""
+"""Read-only MJPEG presentation for the persistent camera owner."""
 
 from __future__ import annotations
 

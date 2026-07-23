@@ -245,6 +245,9 @@ class CameraPreviewConfig:
     fps: int
     jpeg_quality: int
     max_age_s: float
+    bridge_socket_path: Path
+    startup_timeout_s: float
+    shutdown_timeout_s: float
 
 
 @dataclass(frozen=True)
@@ -737,9 +740,21 @@ def _parse_camera_preview(value: Any) -> CameraPreviewConfig:
     raw = _mapping(value, "camera_preview")
     _exact_keys(
         raw,
-        {"bind", "port", "fps", "jpeg_quality", "max_age_s"},
+        {
+            "bind",
+            "port",
+            "fps",
+            "jpeg_quality",
+            "max_age_s",
+            "bridge_socket_path",
+            "startup_timeout_s",
+            "shutdown_timeout_s",
+        },
         "camera_preview",
     )
+    bridge_socket_path = Path(_text(raw["bridge_socket_path"], "camera_preview.bridge_socket_path"))
+    if not bridge_socket_path.is_absolute():
+        raise ConfigError("camera_preview.bridge_socket_path must be absolute")
     return CameraPreviewConfig(
         bind=_text(raw["bind"], "camera_preview.bind"),
         port=_integer(raw["port"], "camera_preview.port", minimum=1, maximum=65_535),
@@ -751,6 +766,15 @@ def _parse_camera_preview(value: Any) -> CameraPreviewConfig:
             maximum=100,
         ),
         max_age_s=_positive_number(raw["max_age_s"], "camera_preview.max_age_s"),
+        bridge_socket_path=bridge_socket_path,
+        startup_timeout_s=_positive_number(
+            raw["startup_timeout_s"],
+            "camera_preview.startup_timeout_s",
+        ),
+        shutdown_timeout_s=_positive_number(
+            raw["shutdown_timeout_s"],
+            "camera_preview.shutdown_timeout_s",
+        ),
     )
 
 
@@ -962,6 +986,9 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
             config.camera_preview.fps,
             config.camera_preview.jpeg_quality,
             config.camera_preview.max_age_s,
+            str(config.camera_preview.bridge_socket_path),
+            config.camera_preview.startup_timeout_s,
+            config.camera_preview.shutdown_timeout_s,
         ),
         (
             config.lifecycle.startup,

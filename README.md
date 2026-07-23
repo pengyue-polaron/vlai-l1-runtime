@@ -88,6 +88,20 @@ recording** in the Panel. The workflow rechecks all three cameras after that
 confirmation before recording the atomic canonical dataset transaction. Enter
 `q` at the terminal prompt to stop without recording.
 
+The reusable `embodied-ops` Panel is available with:
+
+```bash
+just panel
+```
+
+It serves the L1 adapter on port 8765. During collection, the same process that
+owns the Camera Bridge publishes read-only left-wrist, right-wrist, and
+AgentView previews on port 8088. Preview encoding snapshots already-open frames
+at 10 FPS; it never opens another camera or advances the formal 30 FPS
+collection stream. The Panel reports camera health, shows capture progress
+without terminal spam, and provides a create-only prompt registry whose task
+text can be activated directly in the Collect form.
+
 There is no automatic fixed-pose reset: the reviewed x_air interface currently
 provides teleoperation, not a Runtime-owned reset command. Camera images are
 written asynchronously so the live loop can maintain its tracked 30 FPS rate; a

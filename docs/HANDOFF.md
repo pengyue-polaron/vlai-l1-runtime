@@ -133,6 +133,10 @@ Camera and data evidence:
 - with both 500 Hz teleoperation sides and the 100 Hz bimanual observer active,
   the parallel camera bridge captured 300 three-camera sets at 29.997 FPS with
   32.88 ms maximum skew and no new CAN or qdisc drops;
+- the collection-owned 10 FPS MJPEG preview and formal three-camera capture ran
+  together for 300 frames at 29.979 FPS with 32.38 ms maximum skew; all three
+  preview streams remained fresh at 9.99 FPS and no second camera owner was
+  created;
 - a later whole-hub reset disconnected and re-enumerated both D405 cameras,
   AgentView, and all four PCAN adapters together; the resulting
   `VIDIOC_REQBUFS ... ENODEV` was a stale device node after the shared USB
@@ -156,7 +160,7 @@ Camera and data evidence:
 - the environment uses Python 3.12.13, OpenCV 4.13.0 and
   `torch 2.11.0+cpu`; CUDA is absent.
 
-The last full onboard software check passed 81 tests. About 75 GB remained on
+The last full onboard software check passed 87 tests. About 75 GB remained on
 the migrated root filesystem before live camera commissioning.
 
 ## Test ladder
@@ -279,13 +283,14 @@ merely to alter collection. Those are separate domains.
 
 Start with no manual x_air runtime, observer, camera reader, or competing
 controller active. `just collect` preflights all three cameras before motor
-enable, starts both configured runtimes, and waits for fresh paired state. Use
-teleoperation to place the robot at the episode start pose, then press Enter in
-the terminal or Start recording in the Panel. The workflow rechecks all cameras
-after confirmation, records, and owns the complete shutdown path. A normal
-return, error, or `Ctrl+C` disables both pairs and returns can0-can3 to `DOWN`.
-The input gate is not an automatic reset; no reviewed fixed-pose command path
-exists.
+enable, exposes read-only previews from those same readers, starts both
+configured runtimes, and waits for fresh paired state. Use teleoperation to
+place the robot at the episode start pose, then press Enter in the terminal or
+Start recording in the Panel. The workflow rechecks all cameras after
+confirmation, records, and owns the complete shutdown path. A normal return,
+error, or `Ctrl+C` closes the preview, disables both pairs and returns
+can0-can3 to `DOWN`. The input gate is not an automatic reset; no reviewed
+fixed-pose command path exists.
 
 First discard a finite episode:
 
@@ -317,7 +322,10 @@ just panel
 The Panel binds to the trusted robot LAN at the tracked address and port. It
 has no authentication or transport encryption. Do not expose it to an
 untrusted network. Its collection action invokes the same managed session and
-is shown only when the tracked readiness gates permit it.
+is shown only when the tracked readiness gates permit it. During collection it
+shows all three previews, normalized health, capture progress, and the guarded
+Start recording input. Prompt registration creates a new validated JSON record
+without modifying an existing prompt and can fill the Collect task field.
 
 ## Current completion state
 
@@ -336,7 +344,9 @@ The teleoperation collection path has the following evidence:
   three-camera managed save;
 - the saved canonical v3 dataset passes doctor;
 - its independently generated v2.1 derivative validates;
-- operator confirmation is shared by terminal and Panel before recording.
+- operator confirmation is shared by terminal and Panel before recording;
+- collection preview, camera health, capture progress, and create-only prompt
+  registration are composed through `embodied-ops`.
 
 The remaining operational issue is intermittent RealSense USB transport
 stability, especially the D455 cable/port/power path. A mid-episode disconnect

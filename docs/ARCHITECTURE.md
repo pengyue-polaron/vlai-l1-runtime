@@ -74,9 +74,11 @@ command resources before another lease can be granted.
 The Runtime repository owns the left-wrist, right-wrist, and optional AgentView
 camera identities and their freshness/skew contract. The Camera Bridge opens
 each enabled V4L2 stream exactly once, completes a bounded configuration-owned
-warmup, and exposes timestamped RGB frames to live collection. `embodied-ops`
-receives only normalized health and preview URLs through an optional
-presentation provider; it never owns a camera.
+warmup, and exposes timestamped RGB frames to live collection. The managed
+workflow attaches one read-only MJPEG presenter to those existing readers. Its
+lower-rate encoder snapshots the latest frames without advancing collection
+delivery state. `embodied-ops` receives only normalized health and preview URLs
+through the L1 presentation provider; it never owns a camera.
 
 Each frame identifies its configured device and stream epoch. The bridge owns a
 stateful validator for sequence and timestamp continuity. After a deliberate
@@ -155,5 +157,8 @@ is the same as L1.
 The L1 adapter exposes hardware-free collection validation, canonical dataset
 doctor, and v2.1 export workflows, plus the commissioned finite live-collection
 workflow. The live workflow uses the same tracked readiness gates as the CLI
-and owns camera, teleoperation, collection, and shutdown lifecycle. It does not
-advertise reset or policy-motion actions.
+and owns camera, preview, teleoperation, collection, and shutdown lifecycle.
+Capture progress uses the `embodied-ops` latest-value protocol instead of
+durable terminal lines. The adapter also owns a strict create-only JSON prompt
+registry for collection task text. It does not advertise reset, checkpoint,
+evaluation, or policy-motion actions while command transport is unimplemented.

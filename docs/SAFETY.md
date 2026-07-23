@@ -16,7 +16,7 @@ motion. Policy-command transport remains unavailable.
 The tracked configuration records these gates separately and sets
 `command_ready = false`. A future change may enable commands only when every gate
 is supported by evidence, corresponding tests, and a reviewed live adapter.
-System schema version 2 rejects an implemented transport or `command_ready = true`, so
+System schema version 3 rejects an implemented transport or `command_ready = true`, so
 enabling commands requires a deliberate schema and code review rather than a
 single configuration edit.
 
@@ -48,6 +48,8 @@ sources exist only for pure integration tests and cannot enable the Runtime.
   while accepting a new lease is process-fatal.
 - Preview, logging, policy inference, and camera encoding must never block the
   realtime command loop.
+- The MJPEG preview may read only the collection-owned readers' latest frames.
+  It must not open cameras itself or advance the collection delivery sequence.
 - State publication runs outside the SDK callback. Missing consumers are
   tolerated; malformed, non-finite, wrong-DOF, or stale callback data is fatal.
 - The sidecar caps and verifies every SDK thread at the tracked FIFO priority.
@@ -56,9 +58,9 @@ sources exist only for pure integration tests and cannot enable the Runtime.
   or restart increase.
 - CAN health includes qdisc drops from `tc -s qdisc`; ordinary interface
   counters do not expose the queue drops that caused the original stutter.
-- The Operator Panel currently binds to the trusted robot LAN and has no user
-  authentication or transport encryption. Do not expose it to an untrusted
-  network.
+- The Operator Panel and collection-scoped MJPEG preview bind to the trusted
+  robot LAN and have no user authentication or transport encryption. Do not
+  expose either endpoint to an untrusted network.
 
 Dataset doctor and v2.1 export read local artifacts only. They must not be given
 device paths, and neither operation authorizes deletion or replacement of a

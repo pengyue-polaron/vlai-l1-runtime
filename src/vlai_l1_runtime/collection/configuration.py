@@ -41,10 +41,11 @@ class CollectionConfig:
     derivative_root: Path
     repo_id_prefix: str
     fps: int
+    minimum_capture_fps: float
+    image_writer_threads: int
     max_sample_age_s: float
     max_state_action_skew_s: float
     max_robot_camera_skew_s: float
-    max_action_step_deg: float
     config_sha256: str
     system_config_sha256: str
 
@@ -94,10 +95,11 @@ def load_collection_config(path: Path) -> CollectionConfig:
         "derivative_root",
         "repo_id_prefix",
         "fps",
+        "minimum_capture_fps",
+        "image_writer_threads",
         "max_sample_age_s",
         "max_state_action_skew_s",
         "max_robot_camera_skew_s",
-        "max_action_step_deg",
     }
     _exact_keys(root, keys, "collection")
     schema_version = _integer(root["schema_version"], "schema_version", minimum=1)
@@ -120,6 +122,18 @@ def load_collection_config(path: Path) -> CollectionConfig:
     if _REPO_PREFIX.fullmatch(prefix) is None:
         raise ConfigError("repo_id_prefix must be a portable 'owner/name' prefix")
     fps = _integer(root["fps"], "fps", minimum=1, maximum=240)
+    minimum_capture_fps = _positive_number(
+        root["minimum_capture_fps"],
+        "minimum_capture_fps",
+    )
+    if minimum_capture_fps > fps:
+        raise ConfigError("minimum_capture_fps must not exceed fps")
+    image_writer_threads = _integer(
+        root["image_writer_threads"],
+        "image_writer_threads",
+        minimum=1,
+        maximum=128,
+    )
     sample_age = _positive_number(root["max_sample_age_s"], "max_sample_age_s")
     state_action_skew = _positive_number(root["max_state_action_skew_s"], "max_state_action_skew_s")
     if state_action_skew > sample_age:
@@ -137,10 +151,11 @@ def load_collection_config(path: Path) -> CollectionConfig:
         derivative_root=derivative_root,
         repo_id_prefix=prefix,
         fps=fps,
+        minimum_capture_fps=minimum_capture_fps,
+        image_writer_threads=image_writer_threads,
         max_sample_age_s=sample_age,
         max_state_action_skew_s=state_action_skew,
         max_robot_camera_skew_s=robot_camera_skew,
-        max_action_step_deg=_positive_number(root["max_action_step_deg"], "max_action_step_deg"),
         config_sha256=hashlib.sha256(content).hexdigest(),
         system_config_sha256=hashlib.sha256(
             _read_local_regular_file(system_path, label="system config")

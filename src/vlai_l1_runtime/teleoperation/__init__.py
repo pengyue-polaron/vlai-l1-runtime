@@ -1,5 +1,6 @@
 """VLAI L1 teleoperation adapters."""
 
+from .lifecycle import run_xair_side
 from .xair import (
     XAirBimanualAssembler,
     XAirDependencyReport,
@@ -19,5 +20,6 @@ __all__ = [
     "describe_xair_side",
     "prepare_xair_assets",
     "render_xair_control_config",
+    "run_xair_side",
     "verify_xair_dependency",
 ]

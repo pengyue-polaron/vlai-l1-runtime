@@ -7,14 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from embodied_ops import validate_experiment_name
-from embodied_ops.operator_panel import PanelCapabilities, WorkflowLaunch
+from embodied_ops.operator_panel import InputAction, PanelCapabilities, WorkflowLaunch
 
 from .collection.configuration import load_collection_config
 from .collection.schema import normalize_task
 
 
 class L1OperatorPanelAdapter:
-    """Expose hardware-free dataset workflows while live collection is blocked."""
+    """Expose collection and dataset workflows from tracked readiness."""
 
     def __init__(self, repo_root: Path, collection_config: Path) -> None:
         self.repo_root = repo_root.expanduser().resolve()
@@ -134,6 +134,7 @@ class L1OperatorPanelAdapter:
                     "--decision",
                     decision,
                 ),
+                input_actions=(InputAction("enter", "Start recording", "\n", "primary"),),
             )
         raise ValueError(f"unknown operator workflow: {workflow!r}")
 

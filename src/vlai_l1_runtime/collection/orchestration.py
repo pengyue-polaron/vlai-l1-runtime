@@ -41,16 +41,47 @@ def record_episode(
 ) -> EpisodeResult:
     """Validate and write one finite sample stream, then save or discard explicitly."""
 
+    with sink:
+        frames = write_episode_frames(
+            samples=samples,
+            assembler=assembler,
+            sink=sink,
+            task=task,
+        )
+        return complete_episode(sink=sink, frame_count=frames, decision=decision)
+
+
+def write_episode_frames(
+    *,
+    samples: Iterable[tuple[CollectionSample, int]],
+    assembler: SampleAssembler,
+    sink: EpisodeSink,
+    task: str,
+) -> int:
+    """Validate and append one finite sample stream to an already-open sink."""
+
+    frames = 0
+    for sample, now_ns in samples:
+        sink.add_frame(assembler.validate(sample, now_ns=now_ns).lerobot_frame(task=task))
+        frames += 1
+    if frames == 0:
+        raise ValueError("an episode must contain at least one frame")
+    return frames
+
+
+def complete_episode(
+    *,
+    sink: EpisodeSink,
+    frame_count: int,
+    decision: EpisodeDecision,
+) -> EpisodeResult:
+    """Commit or discard frames after the live hardware session has stopped."""
+
     if not isinstance(decision, EpisodeDecision):
         decision = EpisodeDecision(decision)
-    frames = 0
-    with sink:
-        for sample, now_ns in samples:
-            sink.add_frame(assembler.validate(sample, now_ns=now_ns).lerobot_frame(task=task))
-            frames += 1
-        if frames == 0:
-            raise ValueError("an episode must contain at least one frame")
-        if decision is EpisodeDecision.SAVE:
-            return EpisodeResult(decision, frames, sink.commit())
-        sink.discard()
-        return EpisodeResult(decision, frames, None)
+    if isinstance(frame_count, bool) or not isinstance(frame_count, int) or frame_count <= 0:
+        raise ValueError("frame_count must be a positive integer")
+    if decision is EpisodeDecision.SAVE:
+        return EpisodeResult(decision, frame_count, sink.commit())
+    sink.discard()
+    return EpisodeResult(decision, frame_count, None)

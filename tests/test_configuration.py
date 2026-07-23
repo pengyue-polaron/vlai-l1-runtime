@@ -22,11 +22,12 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         "can3",
     ]
     assert [endpoint.parentdev for endpoint in config.can.endpoints] == [
-        "1-1.4.1:1.0",
-        "1-1.4.2:1.0",
-        "1-1.4.3:1.0",
-        "1-1.4.4:1.0",
+        "1-2.2.1:1.0",
+        "1-2.2.2:1.0",
+        "1-2.2.3:1.0",
+        "1-2.2.4:1.0",
     ]
+    assert config.can.tx_queue_length == 1000
     assert tuple(motor.name for motor in config.motors) == MOTOR_NAMES
     assert tuple(motor.send_id for motor in config.motors) == tuple(range(1, 9))
     assert tuple(motor.receive_id for motor in config.motors) == tuple(range(0x11, 0x19))
@@ -45,16 +46,16 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
     assert config.teleoperation.state_timeout_s == 0.1
     assert config.teleoperation.rt_priority == 20
     assert config.teleoperation.can_health_poll_s == 0.1
-    assert config.teleoperation.blockers == ("teleoperation_uncommissioned",)
-    assert config.joint_limits["left"]["joint_2"].maximum_deg == 9.0
-    assert config.joint_limits["right"]["joint_2"].minimum_deg == -9.0
+    assert config.teleoperation.startup_timeout_s == 45.0
+    assert config.teleoperation.shutdown_timeout_s == 8.0
+    assert config.teleoperation.blockers == ()
+    assert config.schema_version == 2
     assert config.safety.command_ready is False
     assert config.command_blockers == (
         "command_transport_unimplemented",
         "production_source_unavailable",
         "j2_coordinate_unverified",
         "follower_right_bus_stability_unverified",
-        "joint_limits_unverified",
     )
     assert config.cameras.collection_ready is True
     assert config.cameras.startup_timeout_s == 2.0
@@ -75,7 +76,6 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         ),
         ('interface = "can1"', 'interface = "can0"', "interfaces must be unique"),
         ("command_ready = false", "command_ready = true", "readiness gates"),
-        ("maximum_deg = 9.0", "maximum_deg = -91.0", "minimum must be less"),
         (
             'enabled = true\ndevice_id = "255323074436"',
             'enabled = false\ndevice_id = "255323074436"',
@@ -97,6 +97,7 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
             "full Git commit",
         ),
         ("rt_priority = 20", "rt_priority = 100", "outside the allowed range"),
+        ("tx_queue_length = 1000", "tx_queue_length = 0", "outside the allowed range"),
         ("startup_timeout_s = 2.0", "startup_timeout_s = 0.0", "must be positive"),
         (
             "can_health_poll_s = 0.1",
@@ -139,9 +140,9 @@ def test_system_config_rejects_special_files_before_opening(tmp_path: Path) -> N
 
 
 def test_tracked_config_is_the_physical_identity_authority(tmp_path: Path) -> None:
-    content = SYSTEM_CONFIG.read_text().replace("1-1.4.1:1.0", "1-1.4.9:1.0", 1)
+    content = SYSTEM_CONFIG.read_text().replace("1-2.2.1:1.0", "1-2.2.9:1.0", 1)
     candidate = tmp_path / "system.toml"
     candidate.write_text(content)
 
     config = load_system_config(candidate)
-    assert config.can.endpoints[0].parentdev == "1-1.4.9:1.0"
+    assert config.can.endpoints[0].parentdev == "1-2.2.9:1.0"

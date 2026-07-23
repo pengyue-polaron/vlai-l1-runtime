@@ -1,15 +1,15 @@
-"""Hardware-free command line interface."""
+"""VLAI L1 command line interface."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import math
-import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
 
+from . import console
 from .collection.configuration import load_collection_config
 from .collection.dataset import (
     identity_from_config,
@@ -24,6 +24,7 @@ from .teleoperation import (
     XAirStateReceiver,
     describe_xair_side,
     prepare_xair_assets,
+    run_xair_side,
     verify_xair_dependency,
 )
 
@@ -55,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
     observe_xair.add_argument("--side", choices=("left", "right", "bimanual"), required=True)
     observe_xair.add_argument("--samples", type=int, required=True)
     observe_xair.add_argument("--timeout", type=float, default=1.0)
+    run_xair = subparsers.add_parser(
+        "run-xair", help="run one configured live x_air teleoperation side"
+    )
+    run_xair.add_argument("--config", type=Path, required=True)
+    run_xair.add_argument("--side", choices=("left", "right"), required=True)
     camera_check = subparsers.add_parser(
         "camera-check", help="validate a finite live camera sample window"
     )
@@ -85,6 +91,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "observe-xair":
             return _run_xair_observer(args)
+        if args.command == "run-xair":
+            return run_xair_side(load_system_config(args.config), args.side)
         if args.command == "camera-check":
             return _run_camera_check(args)
         if args.command in {
@@ -101,8 +109,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 output=getattr(args, "output", None),
             )
         return _run_collection_command(args)
+    except KeyboardInterrupt:
+        console.warning("Interrupted by operator")
+        return 130
     except (ConfigError, ValueError, RuntimeError, OSError) as exc:
-        print(f"FAIL {exc}", file=sys.stderr)
+        console.failure(str(exc))
         return 2
 
 
@@ -186,9 +197,9 @@ def _run_collection_command(args: argparse.Namespace) -> int:
     if args.command == "collect":
         from embodied_ops import EpisodeDecision
 
-        from .collection.live import collect_live_episode
+        from .collection.managed import collect_managed_episode
 
-        result = collect_live_episode(
+        result = collect_managed_episode(
             config,
             experiment=args.experiment,
             task=args.task,

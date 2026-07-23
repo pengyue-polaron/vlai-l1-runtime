@@ -3,20 +3,16 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from types import MappingProxyType
 
-from .configuration import JointLimit, SystemConfig, _is_loader_validated
+from .configuration import SystemConfig, _is_loader_validated
 from .contracts import (
-    FEATURE_NAMES,
     CommandEnvelope,
     ContractError,
     NamedJointVector,
     _snapshot_command_envelope,
     _snapshot_named_joint_vector,
-    limits_by_feature,
     validate_contiguous_command,
     validate_first_command_hold,
     validate_named_values,
@@ -84,46 +80,23 @@ class CommandSession:
             ),
             first_command_hold_tolerance_deg=(config.safety.first_command_hold_tolerance_deg),
         )
-        self._initialize(policy, limits_by_feature(config))
+        self._initialize(policy)
 
     @classmethod
     def _for_hardware_free_test(
         cls,
         policy: _SessionPolicy,
-        limits: Mapping[str, JointLimit],
     ) -> CommandSession:
         """Build the pure state machine without weakening the production constructor."""
 
         session = cls.__new__(cls)
-        session._initialize(policy, limits)
+        session._initialize(policy)
         return session
 
-    def _initialize(
-        self,
-        policy: _SessionPolicy,
-        limits: Mapping[str, JointLimit],
-    ) -> None:
+    def _initialize(self, policy: _SessionPolicy) -> None:
         if not isinstance(policy, _SessionPolicy):
             raise TypeError("policy must be a _SessionPolicy")
-        if not isinstance(limits, Mapping) or set(limits) != set(FEATURE_NAMES):
-            raise ValueError("command sessions require limits for every exact named feature")
-        checked_limits: dict[str, JointLimit] = {}
-        for name in FEATURE_NAMES:
-            limit = limits[name]
-            if (
-                not isinstance(limit, JointLimit)
-                or isinstance(limit.minimum_deg, bool)
-                or not isinstance(limit.minimum_deg, (int, float))
-                or isinstance(limit.maximum_deg, bool)
-                or not isinstance(limit.maximum_deg, (int, float))
-                or not math.isfinite(limit.minimum_deg)
-                or not math.isfinite(limit.maximum_deg)
-                or limit.minimum_deg >= limit.maximum_deg
-            ):
-                raise ValueError(f"invalid command limit for {name}")
-            checked_limits[name] = limit
         self.policy = policy
-        self.limits = MappingProxyType(checked_limits)
         self.mode = SessionMode.DISCONNECTED
         self.lease_id: str | None = None
         self.last_heartbeat_ns: int | None = None
@@ -156,7 +129,7 @@ class CommandSession:
             raise SessionError("lease_id must be normalized non-empty text")
         try:
             measured_snapshot = _snapshot_named_joint_vector(measured)
-            validate_named_values(measured_snapshot.values, limits=self.limits)
+            validate_named_values(measured_snapshot.values)
         except ContractError as exc:
             raise SessionError(str(exc)) from exc
         if measured_snapshot.metadata.monotonic_ns > now_ns:
@@ -205,7 +178,7 @@ class CommandSession:
         if self.mode is not SessionMode.COMMAND:
             raise SessionError(f"command lease was released: {self.release_reason}")
         try:
-            validate_named_values(command_snapshot.action, limits=self.limits)
+            validate_named_values(command_snapshot.action)
             validate_contiguous_command(
                 command_snapshot,
                 previous_sequence=self.previous_sequence,
@@ -276,7 +249,7 @@ class CommandSession:
         snapshot = _snapshot_named_joint_vector(feedback)
         if self._previous_feedback_sequence is None or self._previous_feedback_monotonic_ns is None:
             raise ContractError("previous command feedback is unavailable")
-        validate_named_values(snapshot.values, limits=self.limits)
+        validate_named_values(snapshot.values)
         metadata = snapshot.metadata
         if metadata.source_sequence <= self._previous_feedback_sequence:
             raise ContractError("command feedback sequence did not increase")

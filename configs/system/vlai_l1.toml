@@ -1,6 +1,6 @@
-schema_version = 1
+schema_version = 2
 robot_id = "vlai_l1"
-topology_id = "vlai_l1_verified_2026_07_06"
+topology_id = "vlai_l1_nyush_verified_2026_07_23"
 position_unit = "degree"
 
 [safety]
@@ -8,7 +8,6 @@ command_ready = false
 production_source_available = false
 j2_coordinate_verified = false
 follower_right_bus_stability_verified = false
-joint_limits_verified = false
 first_command_hold_tolerance_deg = 0.1
 session_liveness_timeout_s = 1.0
 command_inactivity_timeout_s = 0.25
@@ -18,32 +17,33 @@ fd = true
 nominal_bitrate = 1000000
 data_bitrate = 5000000
 restart_ms = 100
+tx_queue_length = 1000
 
 [[can.endpoints]]
 id = "leader_right"
 interface = "can0"
-parentdev = "1-1.4.1:1.0"
+parentdev = "1-2.2.1:1.0"
 side = "right"
 role = "leader"
 
 [[can.endpoints]]
 id = "leader_left"
 interface = "can1"
-parentdev = "1-1.4.2:1.0"
+parentdev = "1-2.2.2:1.0"
 side = "left"
 role = "leader"
 
 [[can.endpoints]]
 id = "follower_right"
 interface = "can2"
-parentdev = "1-1.4.3:1.0"
+parentdev = "1-2.2.3:1.0"
 side = "right"
 role = "follower"
 
 [[can.endpoints]]
 id = "follower_left"
 interface = "can3"
-parentdev = "1-1.4.4:1.0"
+parentdev = "1-2.2.4:1.0"
 side = "left"
 role = "follower"
 
@@ -111,56 +111,6 @@ friction_k = [28.417, 28.417, 29.065, 130.038, 151.771, 242.287, 7.888, 4.000]
 fv = [0.063, 0.0630, 0.604, 0.813, 0.029, 0.072, 0.084, 0.084]
 fo = [0.088, 0.088, 0.008, -0.058, 0.005, 0.009, -0.059, -0.050]
 
-[joint_limits.left.joint_1]
-minimum_deg = -75.0
-maximum_deg = 75.0
-[joint_limits.left.joint_2]
-minimum_deg = -90.0
-maximum_deg = 9.0
-[joint_limits.left.joint_3]
-minimum_deg = -85.0
-maximum_deg = 85.0
-[joint_limits.left.joint_4]
-minimum_deg = 0.0
-maximum_deg = 135.0
-[joint_limits.left.joint_5]
-minimum_deg = -85.0
-maximum_deg = 85.0
-[joint_limits.left.joint_6]
-minimum_deg = -40.0
-maximum_deg = 40.0
-[joint_limits.left.joint_7]
-minimum_deg = -80.0
-maximum_deg = 80.0
-[joint_limits.left.gripper]
-minimum_deg = -65.0
-maximum_deg = 0.0
-
-[joint_limits.right.joint_1]
-minimum_deg = -75.0
-maximum_deg = 75.0
-[joint_limits.right.joint_2]
-minimum_deg = -9.0
-maximum_deg = 90.0
-[joint_limits.right.joint_3]
-minimum_deg = -85.0
-maximum_deg = 85.0
-[joint_limits.right.joint_4]
-minimum_deg = 0.0
-maximum_deg = 135.0
-[joint_limits.right.joint_5]
-minimum_deg = -85.0
-maximum_deg = 85.0
-[joint_limits.right.joint_6]
-minimum_deg = -40.0
-maximum_deg = 40.0
-[joint_limits.right.joint_7]
-minimum_deg = -80.0
-maximum_deg = 80.0
-[joint_limits.right.gripper]
-minimum_deg = -65.0
-maximum_deg = 0.0
-
 [cameras]
 max_age_s = 0.5
 max_pair_skew_s = 0.05
@@ -210,7 +160,9 @@ state_timeout_s = 0.1
 max_side_skew_s = 0.05
 rt_priority = 20
 can_health_poll_s = 0.1
-commissioned = false
+startup_timeout_s = 45.0
+shutdown_timeout_s = 8.0
+commissioned = true
 
 [runtime]
 transport = "unimplemented"

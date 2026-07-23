@@ -43,6 +43,12 @@ sdk-observe samples="3000" timeout="15":
         --samples "{{ samples }}" \
         --timeout "{{ timeout }}"
 
+sdk-start side="left":
+    {{ vpy }} -m vlai_l1_runtime.cli verify-xair --config {{ system_config }}
+    sudo {{ vpy }} -m vlai_l1_runtime.cli run-xair \
+        --config {{ system_config }} \
+        --side "{{ side }}"
+
 sdk-status:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -52,11 +58,13 @@ sdk-status:
     for interface in can0 can1 can2 can3; do
         echo "### ${interface}"
         ip -details -statistics link show "${interface}" | sed -n '1,18p'
+        tc -s qdisc show dev "${interface}"
     done
 
 sdk-stop:
     #!/usr/bin/env bash
     set -euo pipefail
+    sudo pkill -INT -f '[v]lai_l1_runtime.cli run-xair' || true
     sudo pkill -INT -f '^{{ repo }}/build/xair-sidecar/vlai_l1_xair_sidecar ' || true
     sleep 2
     sudo /opt/xarm_teleop/disable_unilateral_pair.sh left_arm

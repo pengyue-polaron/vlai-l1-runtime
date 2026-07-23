@@ -162,7 +162,13 @@ class CameraSetValidator:
 
         max_skew_ns = int(self._config.max_pair_skew_s * 1_000_000_000)
         if max(timestamps) - min(timestamps) > max_skew_ns:
-            raise CameraContractError("camera frame skew exceeds the tracked limit")
+            earliest = min(current.values(), key=lambda frame: frame.monotonic_ns)
+            latest = max(current.values(), key=lambda frame: frame.monotonic_ns)
+            actual_ms = (latest.monotonic_ns - earliest.monotonic_ns) / 1_000_000
+            raise CameraContractError(
+                f"camera frame skew {actual_ms:.3f} ms between "
+                f"{earliest.role} and {latest.role} exceeds the tracked limit"
+            )
         self._previous = MappingProxyType(
             {
                 role: _CameraContinuity(

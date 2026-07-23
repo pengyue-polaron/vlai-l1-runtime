@@ -11,7 +11,7 @@ from embodied_ops import require_fresh_sample, require_pair_skew
 
 from ..cameras import CameraFrameMetadata, CameraSetValidator
 from ..configuration import CameraConfig, SystemConfig
-from ..contracts import FEATURE_NAMES, NamedJointVector, limits_by_feature, validate_named_values
+from ..contracts import FEATURE_NAMES, NamedJointVector, validate_named_values
 from .configuration import CollectionConfig
 from .dependencies import collection_dependency_error, require_collection_python
 
@@ -134,9 +134,7 @@ class SampleAssembler:
         if not isinstance(config, CollectionConfig):
             raise TypeError("SampleAssembler requires CollectionConfig")
         self._config = config
-        self._limits = limits_by_feature(config.system)
         self._camera_validator = CameraSetValidator(config.system.cameras)
-        self._previous_action: tuple[float, ...] | None = None
         self._last_observation_sequence: int | None = None
         self._last_action_sequence: int | None = None
 
@@ -179,16 +177,10 @@ class SampleAssembler:
             label="leader action",
         )
 
-        state_values = validate_named_values(sample.observation.values, limits=self._limits)
-        action_values = validate_named_values(sample.action.values, limits=self._limits)
+        state_values = validate_named_values(sample.observation.values)
+        action_values = validate_named_values(sample.action.values)
         state = tuple(state_values[name] for name in FEATURE_NAMES)
         candidate_action = tuple(action_values[name] for name in FEATURE_NAMES)
-        if self._previous_action is not None:
-            for name, previous, candidate in zip(
-                FEATURE_NAMES, self._previous_action, candidate_action, strict=True
-            ):
-                if abs(candidate - previous) > self._config.max_action_step_deg:
-                    raise CollectionContractError(f"{name} action step exceeds max_action_step_deg")
 
         images: dict[str, Any] = {}
         stream_by_role = {stream.role: stream for stream in self._config.system.cameras.streams}
@@ -203,14 +195,22 @@ class SampleAssembler:
         metadata = {role: camera.metadata for role, camera in sample.cameras.items()}
         self._camera_validator.validate(metadata, now_ns=now_ns)
         max_robot_camera_skew_ns = int(self._config.max_robot_camera_skew_s * 1_000_000_000)
-        if any(
-            abs(camera.monotonic_ns - sample.observation.metadata.monotonic_ns)
-            > max_robot_camera_skew_ns
-            for camera in metadata.values()
-        ):
-            raise CollectionContractError("robot/camera sample skew exceeds the tracked limit")
+        camera, actual_skew_ns = max(
+            (
+                (
+                    camera,
+                    abs(camera.monotonic_ns - sample.observation.metadata.monotonic_ns),
+                )
+                for camera in metadata.values()
+            ),
+            key=lambda item: item[1],
+        )
+        if actual_skew_ns > max_robot_camera_skew_ns:
+            raise CollectionContractError(
+                f"robot/{camera.role} sample skew {actual_skew_ns / 1_000_000:.3f} ms "
+                f"exceeds {self._config.max_robot_camera_skew_s * 1000:.3f} ms"
+            )
 
-        self._previous_action = candidate_action
         self._last_observation_sequence = observation.seq
         self._last_action_sequence = action.seq
         return ValidatedSample(state, candidate_action, MappingProxyType(images))

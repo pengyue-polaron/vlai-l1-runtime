@@ -13,7 +13,6 @@ from vlai_l1_runtime import (
     SampleMetadata,
     SessionError,
     SessionMode,
-    limits_by_feature,
     load_system_config,
 )
 from vlai_l1_runtime.session import _SessionPolicy
@@ -39,8 +38,7 @@ def _session(*, ready: bool = True) -> CommandSession:
             liveness_timeout_ns=1_000,
             command_inactivity_timeout_ns=100,
             first_command_hold_tolerance_deg=0.1,
-        ),
-        limits_by_feature(BASE_CONFIG),
+        )
     )
 
 

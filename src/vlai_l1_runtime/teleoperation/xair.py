@@ -218,6 +218,38 @@ class XAirStateReceiver:
             return None
         return XAirStatePacket.decode(self._socket.recv(_PACKET.size + 1))
 
+    def receive_closest(
+        self,
+        *,
+        target_monotonic_ns: int,
+        timeout_s: float,
+    ) -> tuple[NamedJointVector, NamedJointVector] | None:
+        """Return the queued complete pair closest to the requested sample time."""
+
+        if (
+            isinstance(target_monotonic_ns, bool)
+            or not isinstance(target_monotonic_ns, int)
+            or target_monotonic_ns < 0
+        ):
+            raise ValueError("target_monotonic_ns must be a non-negative integer")
+        _require_timeout(timeout_s)
+        closest: tuple[NamedJointVector, NamedJointVector] | None = None
+        closest_key: tuple[int, int] | None = None
+        while True:
+            packet = self.receive_packet(timeout_s=0)
+            if packet is None:
+                break
+            candidate = self._assembler.accept(packet)
+            if candidate is not None:
+                timestamp_ns = candidate[0].metadata.monotonic_ns
+                key = (abs(timestamp_ns - target_monotonic_ns), -timestamp_ns)
+                if closest_key is None or key < closest_key:
+                    closest = candidate
+                    closest_key = key
+        if closest is not None:
+            return closest
+        return self.receive(timeout_s=timeout_s)
+
     def __exit__(self, exc_type, exc, traceback) -> None:
         receiver, self._socket = self._socket, None
         if receiver is not None:
@@ -253,6 +285,11 @@ def describe_xair_side(config: SystemConfig, side: str) -> dict[str, object]:
         "arm_side": f"{side}_arm",
         "leader_can": leader.interface,
         "follower_can": follower.interface,
+        "can_fd": config.can.fd,
+        "can_nominal_bitrate": config.can.nominal_bitrate,
+        "can_data_bitrate": config.can.data_bitrate,
+        "can_restart_ms": config.can.restart_ms,
+        "can_tx_queue_length": config.can.tx_queue_length,
         "state_socket_path": str(teleop.state_socket_path),
         "publish_hz": teleop.publish_hz,
         "state_timeout_ms": round(teleop.state_timeout_s * 1000),

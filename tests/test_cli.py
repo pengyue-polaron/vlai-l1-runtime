@@ -17,9 +17,9 @@ def test_hardware_free_cli_validates_and_describes(capsys) -> None:
 
     assert main(["describe", "--config", str(SYSTEM_CONFIG)]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["teleoperation_ready"] is False
+    assert payload["teleoperation_ready"] is True
     assert payload["command_ready"] is False
-    assert payload["collection_ready"] is False
+    assert payload["collection_ready"] is True
     assert len(payload["action_features"]) == 16
 
     assert (
@@ -45,7 +45,7 @@ def test_hardware_free_cli_validates_and_describes_collection(capsys) -> None:
     assert main(["describe-collection", "--config", str(COLLECTION_CONFIG)]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["dataset_schema"] == "vlai_l1_lerobot_dataset_v3_v2"
-    assert payload["collection_ready"] is False
+    assert payload["collection_ready"] is True
     assert set(payload["features"]) == {
         "action",
         "observation.images.agent",

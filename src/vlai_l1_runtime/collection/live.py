@@ -7,25 +7,22 @@ from collections.abc import Iterator
 from contextlib import ExitStack
 from typing import Protocol
 
-from embodied_ops import EpisodeDecision
-
 from ..camera_bridge import V4L2CameraSet
 from ..contracts import NamedJointVector
 from ..teleoperation import XAirStateReceiver
 from .configuration import CollectionConfig
-from .dataset import (
-    DirectLeRobotEpisode,
-    identity_from_config,
-    provenance_from_config,
-)
-from .orchestration import EpisodeResult, record_episode
-from .schema import CameraSample, CollectionSample, SampleAssembler
+from .schema import CameraSample, CollectionSample
 
 
 class StateSource(Protocol):
     def __enter__(self) -> StateSource: ...
 
-    def receive(self, *, timeout_s: float) -> tuple[NamedJointVector, NamedJointVector] | None: ...
+    def receive_closest(
+        self,
+        *,
+        target_monotonic_ns: int,
+        timeout_s: float,
+    ) -> tuple[NamedJointVector, NamedJointVector] | None: ...
 
     def __exit__(self, exc_type, exc, traceback) -> None: ...
 
@@ -82,7 +79,12 @@ class LiveCollectionSource:
         next_tick = time.monotonic_ns()
         for _ in range(frame_count):
             cameras = self._camera_source.capture(timeout_s=timeout_s)
-            robot = self._state_source.receive(timeout_s=timeout_s)
+            camera_timestamps = [sample.metadata.monotonic_ns for sample in cameras.values()]
+            target_monotonic_ns = (min(camera_timestamps) + max(camera_timestamps)) // 2
+            robot = self._state_source.receive_closest(
+                target_monotonic_ns=target_monotonic_ns,
+                timeout_s=timeout_s,
+            )
             if robot is None:
                 raise TimeoutError("timed out waiting for paired x_air state")
             observation, action = robot
@@ -97,29 +99,3 @@ class LiveCollectionSource:
         stack, self._stack = self._stack, None
         if stack is not None:
             stack.__exit__(exc_type, exc, traceback)
-
-
-def collect_live_episode(
-    config: CollectionConfig,
-    *,
-    experiment: str,
-    task: str,
-    frame_count: int,
-    decision: EpisodeDecision,
-) -> EpisodeResult:
-    """Record one finite live episode after every readiness gate is commissioned."""
-
-    source = LiveCollectionSource(config)
-    sink = DirectLeRobotEpisode(
-        identity=identity_from_config(config, experiment),
-        task=task,
-        provenance=provenance_from_config(config),
-    )
-    with source:
-        return record_episode(
-            samples=source.samples(frame_count),
-            assembler=SampleAssembler(config),
-            sink=sink,
-            task=task,
-            decision=decision,
-        )

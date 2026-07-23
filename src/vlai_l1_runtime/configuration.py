@@ -61,7 +61,6 @@ class SafetyConfig:
     production_source_available: bool
     j2_coordinate_verified: bool
     follower_right_bus_stability_verified: bool
-    joint_limits_verified: bool
     first_command_hold_tolerance_deg: float
     session_liveness_timeout_s: float
     command_inactivity_timeout_s: float
@@ -75,7 +74,6 @@ class SafetyConfig:
                 "follower_right_bus_stability_unverified",
                 self.follower_right_bus_stability_verified,
             ),
-            ("joint_limits_unverified", self.joint_limits_verified),
         )
         return tuple(name for name, ready in gates if not ready)
 
@@ -95,6 +93,7 @@ class CanConfig:
     nominal_bitrate: int
     data_bitrate: int
     restart_ms: int
+    tx_queue_length: int
     endpoints: tuple[CanEndpointConfig, ...]
 
 
@@ -114,12 +113,6 @@ class ControlProfile:
     friction_k: tuple[float, ...]
     fv: tuple[float, ...]
     fo: tuple[float, ...]
-
-
-@dataclass(frozen=True)
-class JointLimit:
-    minimum_deg: float
-    maximum_deg: float
 
 
 @dataclass(frozen=True)
@@ -230,6 +223,8 @@ class TeleoperationConfig:
     max_side_skew_s: float
     rt_priority: int
     can_health_poll_s: float
+    startup_timeout_s: float
+    shutdown_timeout_s: float
     commissioned: bool
 
     @property
@@ -263,7 +258,6 @@ class SystemConfig:
     can: CanConfig
     motors: tuple[MotorConfig, ...]
     control: Mapping[str, ControlProfile]
-    joint_limits: Mapping[str, Mapping[str, JointLimit]]
     cameras: CamerasConfig
     teleoperation: TeleoperationConfig
     runtime: RuntimeConfig
@@ -301,7 +295,6 @@ def load_system_config(path: Path) -> SystemConfig:
             "can",
             "motors",
             "control",
-            "joint_limits",
             "cameras",
             "teleoperation",
             "runtime",
@@ -312,7 +305,7 @@ def load_system_config(path: Path) -> SystemConfig:
     )
 
     schema_version = _integer(root["schema_version"], "schema_version", minimum=1)
-    if schema_version != 1:
+    if schema_version != 2:
         raise ConfigError(f"unsupported schema_version: {schema_version}")
     robot_id = _text(root["robot_id"], "robot_id")
     topology_id = _text(root["topology_id"], "topology_id")
@@ -324,7 +317,6 @@ def load_system_config(path: Path) -> SystemConfig:
     can = _parse_can(root["can"])
     motors = _parse_motors(root["motors"])
     control = _parse_control(root["control"], len(motors))
-    joint_limits = _parse_joint_limits(root["joint_limits"])
     cameras = _parse_cameras(root["cameras"])
     teleoperation = _parse_teleoperation(root["teleoperation"], config_path=resolved)
     runtime = _parse_runtime(root["runtime"])
@@ -337,7 +329,7 @@ def load_system_config(path: Path) -> SystemConfig:
         raise ConfigError("command_ready must equal all independent readiness gates")
     if runtime.transport != "unimplemented" or safety.command_ready:
         raise ConfigError(
-            "schema version 1 is a hardware-free foundation and cannot enable commands"
+            "system schema version 2 cannot enable the unimplemented command transport"
         )
 
     config = SystemConfig(
@@ -350,9 +342,6 @@ def load_system_config(path: Path) -> SystemConfig:
         can=can,
         motors=motors,
         control=MappingProxyType(dict(control)),
-        joint_limits=MappingProxyType(
-            {side: MappingProxyType(dict(limits)) for side, limits in joint_limits.items()}
-        ),
         cameras=cameras,
         teleoperation=teleoperation,
         runtime=runtime,
@@ -452,7 +441,6 @@ def _parse_safety(value: Any) -> SafetyConfig:
         "production_source_available",
         "j2_coordinate_verified",
         "follower_right_bus_stability_verified",
-        "joint_limits_verified",
         "first_command_hold_tolerance_deg",
         "session_liveness_timeout_s",
         "command_inactivity_timeout_s",
@@ -469,9 +457,6 @@ def _parse_safety(value: Any) -> SafetyConfig:
         follower_right_bus_stability_verified=_boolean(
             raw["follower_right_bus_stability_verified"],
             "safety.follower_right_bus_stability_verified",
-        ),
-        joint_limits_verified=_boolean(
-            raw["joint_limits_verified"], "safety.joint_limits_verified"
         ),
         first_command_hold_tolerance_deg=_positive_number(
             raw["first_command_hold_tolerance_deg"],
@@ -494,11 +479,23 @@ def _command_blockers(safety: SafetyConfig, runtime: RuntimeConfig) -> tuple[str
 
 def _parse_can(value: Any) -> CanConfig:
     raw = _mapping(value, "can")
-    _exact_keys(raw, {"fd", "nominal_bitrate", "data_bitrate", "restart_ms", "endpoints"}, "can")
+    _exact_keys(
+        raw,
+        {
+            "fd",
+            "nominal_bitrate",
+            "data_bitrate",
+            "restart_ms",
+            "tx_queue_length",
+            "endpoints",
+        },
+        "can",
+    )
     fd = _boolean(raw["fd"], "can.fd")
     nominal = _integer(raw["nominal_bitrate"], "can.nominal_bitrate", minimum=1)
     data = _integer(raw["data_bitrate"], "can.data_bitrate", minimum=1)
     restart_ms = _integer(raw["restart_ms"], "can.restart_ms", minimum=1)
+    tx_queue_length = _integer(raw["tx_queue_length"], "can.tx_queue_length", minimum=1)
     if fd and data < nominal:
         raise ConfigError("CAN-FD data bitrate must not be lower than the nominal bitrate")
 
@@ -528,7 +525,7 @@ def _parse_can(value: Any) -> CanConfig:
     expected_roles = {(side, role) for side in SIDES for role in ROLES}
     if {(item.side, item.role) for item in endpoints} != expected_roles:
         raise ConfigError("CAN endpoints must cover each side and role exactly once")
-    return CanConfig(fd, nominal, data, restart_ms, tuple(endpoints))
+    return CanConfig(fd, nominal, data, restart_ms, tx_queue_length, tuple(endpoints))
 
 
 def _parse_motors(value: Any) -> tuple[MotorConfig, ...]:
@@ -575,26 +572,6 @@ def _parse_control(value: Any, motor_count: int) -> Mapping[str, ControlProfile]
         fv = _number_vector(table["fv"], f"control.{role}.fv", motor_count, positive=False)
         fo = _number_vector(table["fo"], f"control.{role}.fo", motor_count, positive=False)
         result[role] = ControlProfile(kp, kd, fc, friction_k, fv, fo)
-    return result
-
-
-def _parse_joint_limits(value: Any) -> Mapping[str, Mapping[str, JointLimit]]:
-    raw = _mapping(value, "joint_limits")
-    _exact_keys(raw, set(SIDES), "joint_limits")
-    result: dict[str, dict[str, JointLimit]] = {}
-    for side in SIDES:
-        side_table = _mapping(raw[side], f"joint_limits.{side}")
-        _exact_keys(side_table, set(MOTOR_NAMES), f"joint_limits.{side}")
-        result[side] = {}
-        for motor in MOTOR_NAMES:
-            label = f"joint_limits.{side}.{motor}"
-            table = _mapping(side_table[motor], label)
-            _exact_keys(table, {"minimum_deg", "maximum_deg"}, label)
-            minimum = _number(table["minimum_deg"], f"{label}.minimum_deg")
-            maximum = _number(table["maximum_deg"], f"{label}.maximum_deg")
-            if minimum >= maximum:
-                raise ConfigError(f"{label} minimum must be less than maximum")
-            result[side][motor] = JointLimit(minimum, maximum)
     return result
 
 
@@ -672,6 +649,8 @@ def _parse_teleoperation(value: Any, *, config_path: Path) -> TeleoperationConfi
         "max_side_skew_s",
         "rt_priority",
         "can_health_poll_s",
+        "startup_timeout_s",
+        "shutdown_timeout_s",
         "commissioned",
     }
     _exact_keys(raw, keys, "teleoperation")
@@ -693,6 +672,12 @@ def _parse_teleoperation(value: Any, *, config_path: Path) -> TeleoperationConfi
     state_timeout_s = _positive_number(raw["state_timeout_s"], "teleoperation.state_timeout_s")
     can_health_poll_s = _positive_number(
         raw["can_health_poll_s"], "teleoperation.can_health_poll_s"
+    )
+    startup_timeout_s = _positive_number(
+        raw["startup_timeout_s"], "teleoperation.startup_timeout_s"
+    )
+    shutdown_timeout_s = _positive_number(
+        raw["shutdown_timeout_s"], "teleoperation.shutdown_timeout_s"
     )
     if can_health_poll_s > state_timeout_s:
         raise ConfigError("teleoperation.can_health_poll_s must not exceed state_timeout_s")
@@ -718,6 +703,8 @@ def _parse_teleoperation(value: Any, *, config_path: Path) -> TeleoperationConfi
             raw["rt_priority"], "teleoperation.rt_priority", minimum=1, maximum=99
         ),
         can_health_poll_s=can_health_poll_s,
+        startup_timeout_s=startup_timeout_s,
+        shutdown_timeout_s=shutdown_timeout_s,
         commissioned=_boolean(raw["commissioned"], "teleoperation.commissioned"),
     )
 
@@ -857,7 +844,6 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
             config.safety.production_source_available,
             config.safety.j2_coordinate_verified,
             config.safety.follower_right_bus_stability_verified,
-            config.safety.joint_limits_verified,
             config.safety.first_command_hold_tolerance_deg,
             config.safety.session_liveness_timeout_s,
             config.safety.command_inactivity_timeout_s,
@@ -893,20 +879,6 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
                 config.control[role].fo,
             )
             for role in ROLES
-        ),
-        tuple(
-            (
-                side,
-                tuple(
-                    (
-                        motor,
-                        config.joint_limits[side][motor].minimum_deg,
-                        config.joint_limits[side][motor].maximum_deg,
-                    )
-                    for motor in MOTOR_NAMES
-                ),
-            )
-            for side in SIDES
         ),
         (
             config.cameras.max_age_s,

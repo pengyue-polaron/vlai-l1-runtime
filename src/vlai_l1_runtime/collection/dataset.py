@@ -96,8 +96,19 @@ class DirectDatasetState:
     task: str | None
 
 
+@dataclass(frozen=True)
 class LeRobotBackendFactory:
     """Load LeRobot only when a real dataset transaction starts."""
+
+    image_writer_threads: int
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.image_writer_threads, bool)
+            or not isinstance(self.image_writer_threads, int)
+            or self.image_writer_threads <= 0
+        ):
+            raise ValueError("image_writer_threads must be a positive integer")
 
     def create(self, identity: DirectDatasetIdentity, root: Path) -> DatasetBackend:
         require_collection_python()
@@ -112,6 +123,7 @@ class LeRobotBackendFactory:
             robot_type="vlai_l1",
             features=identity.contract.features(),
             use_videos=True,
+            image_writer_threads=self.image_writer_threads,
         )
 
     def resume(self, identity: DirectDatasetIdentity, root: Path) -> DatasetBackend:
@@ -120,7 +132,11 @@ class LeRobotBackendFactory:
             from lerobot.datasets.lerobot_dataset import LeRobotDataset
         except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
             raise collection_dependency_error() from exc
-        return LeRobotDataset.resume(repo_id=identity.repo_id, root=root)
+        return LeRobotDataset.resume(
+            repo_id=identity.repo_id,
+            root=root,
+            image_writer_threads=self.image_writer_threads,
+        )
 
 
 class DirectLeRobotEpisode:
@@ -132,7 +148,7 @@ class DirectLeRobotEpisode:
         identity: DirectDatasetIdentity,
         task: str,
         provenance: Mapping[str, Any],
-        backend_factory: DatasetBackendFactory | None = None,
+        backend_factory: DatasetBackendFactory,
         inspector: Callable[..., DirectDatasetState] | None = None,
     ) -> None:
         self.identity = identity
@@ -152,7 +168,7 @@ class DirectLeRobotEpisode:
         except (TypeError, ValueError) as exc:
             raise ValueError("collection provenance must contain finite JSON values") from exc
         self.provenance = snapshot
-        self._factory = backend_factory or LeRobotBackendFactory()
+        self._factory = backend_factory
         self._inspector = inspector or inspect_direct_dataset
         self._transaction: OutputDirectoryTransaction | None = None
         self._dataset: DatasetBackend | None = None

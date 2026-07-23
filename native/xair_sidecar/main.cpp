@@ -393,6 +393,8 @@ int run(const Options& options) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    std::cout << std::unitbuf;
+    std::cerr << std::unitbuf;
     std::signal(SIGINT, on_signal);
     std::signal(SIGTERM, on_signal);
     try {

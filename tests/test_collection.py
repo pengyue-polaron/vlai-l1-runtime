@@ -46,9 +46,14 @@ class _ContextSource:
 
 
 class _StateSource(_ContextSource):
-    def receive(self, *, timeout_s: float):
+    def __init__(self, value):
+        super().__init__(value)
+        self.targets = []
+
+    def receive_closest(self, *, target_monotonic_ns: int, timeout_s: float):
         assert self.open
         assert timeout_s > 0
+        self.targets.append(target_monotonic_ns)
         return self.value
 
 
@@ -137,9 +142,10 @@ def test_collection_config_and_schema_have_one_complete_contract() -> None:
     config = load_collection_config(COLLECTION_CONFIG)
     contract = canonical_dataset_contract(_commissioned_config().system)
 
-    assert config.collection_ready is False
-    assert config.collection_blockers[0] == "teleoperation_uncommissioned"
-    assert config.collection_blockers == ("teleoperation_uncommissioned",)
+    assert config.collection_ready is True
+    assert config.collection_blockers == ()
+    assert config.minimum_capture_fps == 27.0
+    assert config.image_writer_threads == 12
     assert config.repo_id_for("pick_v1") == "pengyue-polaron/vlai-l1-pick_v1"
     assert set(contract.features()) == {
         STATE_KEY,
@@ -168,6 +174,18 @@ def test_collection_config_rejects_unknown_or_overlapping_roots(tmp_path: Path) 
     with pytest.raises(ConfigError, match="must not contain"):
         load_collection_config(candidate)
 
+    content = COLLECTION_CONFIG.read_text().replace(
+        "minimum_capture_fps = 27.0",
+        "minimum_capture_fps = 31.0",
+    )
+    content = content.replace(
+        'system_config = "../system/vlai_l1.toml"',
+        'system_config = "../system/system.toml"',
+    )
+    candidate.write_text(content)
+    with pytest.raises(ConfigError, match="must not exceed fps"):
+        load_collection_config(candidate)
+
 
 def test_sample_assembler_validates_fresh_named_synchronized_samples() -> None:
     assembler = SampleAssembler(_commissioned_config())
@@ -178,8 +196,11 @@ def test_sample_assembler_validates_fresh_named_synchronized_samples() -> None:
 
     jump = _pose()
     jump["left_joint_1.pos"] = 21.0
-    with pytest.raises(CollectionContractError, match="action step"):
-        assembler.validate(_sample(2, 1_020_000_000, action=jump), now_ns=1_020_000_000)
+    second = assembler.validate(
+        _sample(2, 1_020_000_000, action=jump),
+        now_ns=1_020_000_000,
+    )
+    assert second.action[0] == 21.0
 
 
 def test_invalid_image_does_not_advance_camera_continuity() -> None:
@@ -195,7 +216,10 @@ def test_invalid_image_does_not_advance_camera_continuity() -> None:
 
 def test_sample_assembler_rejects_robot_camera_skew() -> None:
     assembler = SampleAssembler(_commissioned_config())
-    with pytest.raises(CollectionContractError, match="robot/camera sample skew"):
+    with pytest.raises(
+        CollectionContractError,
+        match=r"robot/wrist_left sample skew 60\.000 ms exceeds 50\.000 ms",
+    ):
         assembler.validate(
             _sample(1, 1_000_000_000, camera_timestamp_ns=1_060_000_000),
             now_ns=1_060_000_000,
@@ -221,6 +245,13 @@ def test_synthetic_source_exercises_the_same_sample_boundary() -> None:
 def test_live_source_composes_one_owned_robot_and_camera_sample() -> None:
     config = _commissioned_config()
     sample = _sample(1, 1_000_000_000)
+    right = sample.cameras["wrist_right"]
+    cameras = dict(sample.cameras)
+    cameras["wrist_right"] = CameraSample(
+        replace(right.metadata, monotonic_ns=1_008_000_000),
+        right.image,
+    )
+    sample = CollectionSample(sample.observation, sample.action, cameras)
     state = _StateSource((sample.observation, sample.action))
     cameras = _CameraSource(sample.cameras)
 
@@ -230,6 +261,7 @@ def test_live_source_composes_one_owned_robot_and_camera_sample() -> None:
         assert captured.action == sample.action
         assert captured.cameras == sample.cameras
         assert now_ns > 0
+        assert state.targets == [1_004_000_000]
 
     assert state.open is False
     assert cameras.open is False
@@ -237,5 +269,12 @@ def test_live_source_composes_one_owned_robot_and_camera_sample() -> None:
 
 def test_live_source_refuses_uncommissioned_hardware() -> None:
     config = load_collection_config(COLLECTION_CONFIG)
+    config = replace(
+        config,
+        system=replace(
+            config.system,
+            teleoperation=replace(config.system.teleoperation, commissioned=False),
+        ),
+    )
     with pytest.raises(ValueError, match="teleoperation_uncommissioned"):
         LiveCollectionSource(config)

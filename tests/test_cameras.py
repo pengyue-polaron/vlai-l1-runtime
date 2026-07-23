@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -28,14 +29,17 @@ class _Image:
 
 
 class _Reader:
-    def __init__(self, sequence: int) -> None:
+    def __init__(self, sequence: int, *, capture_barrier: threading.Barrier | None = None) -> None:
         self.sequence = sequence
         self.capture_count = 0
         self.closed = False
+        self.capture_barrier = capture_barrier
 
     def capture(self, *, timeout_s: float) -> CameraCapture:
         assert timeout_s > 0
         self.capture_count += 1
+        if self.capture_barrier is not None and self.capture_count > 1:
+            self.capture_barrier.wait(timeout_s)
         self.sequence += 1
         return CameraCapture(self.sequence, time.monotonic_ns(), _Image())
 
@@ -44,15 +48,50 @@ class _Reader:
 
 
 class _Backend:
-    def __init__(self, *, fail_role: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_role: str | None = None,
+        capture_barrier: threading.Barrier | None = None,
+    ) -> None:
         self.fail_role = fail_role
+        self.capture_barrier = capture_barrier
         self.readers: list[_Reader] = []
 
     def open(self, stream: CameraConfig) -> _Reader:
         if stream.role == self.fail_role:
             raise RuntimeError("camera open failed")
-        reader = _Reader(len(self.readers) + 1)
+        reader = _Reader(
+            len(self.readers) + 1,
+            capture_barrier=self.capture_barrier,
+        )
         self.readers.append(reader)
+        return reader
+
+
+class _ScriptedReader:
+    def __init__(self, timestamps_ns: list[int]) -> None:
+        self._timestamps_ns = iter(timestamps_ns)
+        self.capture_count = 0
+        self.closed = False
+
+    def capture(self, *, timeout_s: float) -> CameraCapture:
+        assert timeout_s > 0
+        self.capture_count += 1
+        return CameraCapture(self.capture_count, next(self._timestamps_ns), _Image())
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _ScriptedBackend:
+    def __init__(self, timestamps_by_role: dict[str, list[int]]) -> None:
+        self._timestamps_by_role = timestamps_by_role
+        self.readers: dict[str, _ScriptedReader] = {}
+
+    def open(self, stream: CameraConfig) -> _ScriptedReader:
+        reader = _ScriptedReader(self._timestamps_by_role[stream.role])
+        self.readers[stream.role] = reader
         return reader
 
 
@@ -263,6 +302,53 @@ def test_v4l2_bridge_warms_and_owns_enabled_cameras_and_unwinds_partial_startup(
     ):
         pass
     assert failing.readers[0].closed is True
+
+
+def test_v4l2_bridge_requests_each_camera_frame_concurrently() -> None:
+    system = replace(
+        load_system_config(ROOT / "configs/system/vlai_l1.toml"),
+        cameras=_commissioned(),
+    )
+    backend = _Backend(capture_barrier=threading.Barrier(2))
+
+    with V4L2CameraSet(system, backend=backend) as cameras:
+        assert tuple(cameras.capture(timeout_s=0.1)) == (
+            "wrist_left",
+            "wrist_right",
+        )
+
+
+def test_v4l2_bridge_advances_lagging_frames_to_form_a_synchronized_set() -> None:
+    cameras = CamerasConfig(
+        max_age_s=0.5,
+        max_pair_skew_s=0.05,
+        startup_timeout_s=2.0,
+        streams=(
+            CameraConfig("wrist_left", True, True, 640, 480, 30, "v4l2", "left-by-id", 4),
+            CameraConfig("wrist_right", True, True, 640, 480, 30, "v4l2", "right-by-id", 4),
+            CameraConfig("agent", False, True, 640, 480, 30, "v4l2", "agent-by-id", 0),
+        ),
+    )
+    system = replace(
+        load_system_config(ROOT / "configs/system/vlai_l1.toml"),
+        cameras=cameras,
+    )
+    backend = _ScriptedBackend(
+        {
+            "wrist_left": [1, 1_000_000_000, 1_066_000_000],
+            "wrist_right": [2, 1_010_000_000, 1_070_000_000],
+            "agent": [3, 1_060_291_000],
+        }
+    )
+
+    with V4L2CameraSet(system, backend=backend) as camera_set:
+        samples = camera_set.capture(timeout_s=0.1)
+
+    timestamps = [sample.metadata.monotonic_ns for sample in samples.values()]
+    assert max(timestamps) - min(timestamps) == 9_709_000
+    assert backend.readers["wrist_left"].capture_count == 3
+    assert backend.readers["wrist_right"].capture_count == 3
+    assert backend.readers["agent"].capture_count == 2
 
 
 def test_camera_health_check_validates_a_finite_sample_window() -> None:

@@ -6,6 +6,7 @@ import math
 import threading
 import time
 import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,9 +75,11 @@ class V4L2CameraSet:
         if unsupported:
             raise ValueError(f"enabled camera roles require unsupported drivers: {unsupported}")
         self._startup_timeout_s = config.cameras.startup_timeout_s
+        self._max_pair_skew_ns = int(config.cameras.max_pair_skew_s * 1_000_000_000)
         self._backend = backend or _OpenCvBackend()
         self._readers: dict[str, CameraReader] = {}
         self._epochs: dict[str, str] = {}
+        self._executor: ThreadPoolExecutor | None = None
 
     def __enter__(self) -> V4L2CameraSet:
         if self._readers:
@@ -92,6 +95,10 @@ class V4L2CameraSet:
                     raise TimeoutError("camera set startup timed out")
                 capture = self._readers[stream.role].capture(timeout_s=remaining)
                 validate_camera_image(capture.image, stream)
+            self._executor = ThreadPoolExecutor(
+                max_workers=len(self._streams),
+                thread_name_prefix="vlai-camera-set",
+            )
         except BaseException:
             with suppress(RuntimeError):
                 self._close()
@@ -99,7 +106,7 @@ class V4L2CameraSet:
         return self
 
     def capture(self, *, timeout_s: float) -> dict[str, CameraSample]:
-        if len(self._readers) != len(self._streams):
+        if len(self._readers) != len(self._streams) or self._executor is None:
             raise RuntimeError("camera set is not open")
         if (
             isinstance(timeout_s, bool)
@@ -109,34 +116,79 @@ class V4L2CameraSet:
         ):
             raise ValueError("camera capture timeout must be finite and positive")
         deadline = time.monotonic() + timeout_s
-        samples: dict[str, CameraSample] = {}
-        for stream in self._streams:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError("camera set capture timed out")
-            capture = self._readers[stream.role].capture(timeout_s=remaining)
-            samples[stream.role] = CameraSample(
+        captures = self._capture_roles(
+            tuple(stream.role for stream in self._streams),
+            deadline=deadline,
+        )
+        while True:
+            latest_ns = max(capture.monotonic_ns for capture in captures.values())
+            lagging_roles = tuple(
+                role
+                for role, capture in captures.items()
+                if latest_ns - capture.monotonic_ns > self._max_pair_skew_ns
+            )
+            if not lagging_roles:
+                break
+            captures.update(self._capture_roles(lagging_roles, deadline=deadline))
+
+        stream_by_role = {stream.role: stream for stream in self._streams}
+        return {
+            role: CameraSample(
                 CameraFrameMetadata(
-                    role=stream.role,
-                    device_id=str(stream.device_id),
-                    stream_epoch=self._epochs[stream.role],
+                    role=role,
+                    device_id=str(stream_by_role[role].device_id),
+                    stream_epoch=self._epochs[role],
                     source_sequence=capture.source_sequence,
                     monotonic_ns=capture.monotonic_ns,
                 ),
                 capture.image,
             )
-        return samples
+            for role, capture in captures.items()
+        }
+
+    def _capture_roles(
+        self,
+        roles: tuple[str, ...],
+        *,
+        deadline: float,
+    ) -> dict[str, CameraCapture]:
+        assert self._executor is not None
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("camera set synchronization timed out")
+        futures: dict[str, Future[CameraCapture]] = {
+            role: self._executor.submit(
+                self._readers[role].capture,
+                timeout_s=remaining,
+            )
+            for role in roles
+        }
+        captures: dict[str, CameraCapture] = {}
+        try:
+            for role, future in futures.items():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("camera set synchronization timed out")
+                captures[role] = future.result(timeout=remaining)
+        except BaseException:
+            for future in futures.values():
+                future.cancel()
+            raise
+        return captures
 
     def __exit__(self, exc_type, exc, traceback) -> None:
         self._close()
 
     def _close(self) -> None:
         errors: list[BaseException] = []
+        executor, self._executor = self._executor, None
         for role in reversed(tuple(self._readers)):
             try:
                 self._readers.pop(role).close()
             except BaseException as error:
                 errors.append(error)
+        if executor is not None:
+            executor.shutdown(wait=True, cancel_futures=True)
         self._epochs.clear()
         if errors:
             raise RuntimeError(f"failed to stop {len(errors)} camera stream(s)") from errors[0]
@@ -203,10 +255,11 @@ def check_v4l2_cameras(
 
 
 class _OpenCvReader:
-    def __init__(self, capture: Any, cv2: Any, *, role: str) -> None:
+    def __init__(self, capture: Any, cv2: Any, *, role: str, device: Path) -> None:
         self._capture = capture
         self._cv2 = cv2
         self._role = role
+        self._device = device
         self._condition = threading.Condition()
         self._stop = threading.Event()
         self._latest: CameraCapture | None = None
@@ -234,7 +287,10 @@ class _OpenCvReader:
                     break
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise TimeoutError(f"{self._role} camera capture timed out")
+                    raise TimeoutError(
+                        f"{self._role} camera {self._device} produced no frame within "
+                        f"{timeout_s:.2f}s; check the shared USB hub, cable, and power"
+                    )
                 self._condition.wait(remaining)
             assert self._latest is not None
             sample = self._latest
@@ -258,14 +314,22 @@ class _OpenCvReader:
             try:
                 ok, image = self._capture.read()
             except Exception as exc:  # pragma: no cover - native backend failure
-                error = RuntimeError(f"{self._role} camera read failed")
+                error = RuntimeError(
+                    f"{self._role} camera {self._device} read failed; "
+                    "check the shared USB hub, cable, and power"
+                )
                 error.__cause__ = exc
                 self._fail(error)
                 return
             captured_ns = time.monotonic_ns()
             if not ok or image is None:
                 if not self._stop.is_set():
-                    self._fail(RuntimeError(f"{self._role} camera read failed"))
+                    self._fail(
+                        RuntimeError(
+                            f"{self._role} camera {self._device} disappeared or stopped "
+                            "delivering frames; check the shared USB hub, cable, and power"
+                        )
+                    )
                 return
             try:
                 image = self._cv2.cvtColor(image, self._cv2.COLOR_BGR2RGB)
@@ -312,7 +376,7 @@ class _OpenCvBackend:
             expected = (stream.width, stream.height, stream.fps)
             if actual != expected:
                 raise RuntimeError(f"{stream.role} V4L2 mode is {actual}, expected {expected}")
-            return _OpenCvReader(capture, cv2, role=stream.role)
+            return _OpenCvReader(capture, cv2, role=stream.role, device=device)
         except BaseException:
             capture.release()
             raise

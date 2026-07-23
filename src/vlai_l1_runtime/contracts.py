@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from .configuration import MOTOR_NAMES, SIDES, JointLimit, SystemConfig
+from .configuration import MOTOR_NAMES, SIDES, SystemConfig
 
 FEATURE_NAMES = tuple(f"{side}_{motor}.pos" for side in SIDES for motor in MOTOR_NAMES)
 
@@ -149,19 +149,7 @@ def robot_description(config: SystemConfig) -> RobotDescription:
     )
 
 
-def limits_by_feature(config: SystemConfig) -> Mapping[str, JointLimit]:
-    return MappingProxyType(
-        {
-            f"{side}_{motor}.pos": config.joint_limits[side][motor]
-            for side in SIDES
-            for motor in MOTOR_NAMES
-        }
-    )
-
-
-def validate_named_values(
-    values: Mapping[str, float], *, limits: Mapping[str, JointLimit] | None = None
-) -> dict[str, float]:
+def validate_named_values(values: Mapping[str, float]) -> dict[str, float]:
     if not isinstance(values, Mapping):
         raise ContractError("joint values must be a mapping")
     if not all(isinstance(name, str) for name in values):
@@ -180,14 +168,6 @@ def validate_named_values(
         number = float(value)
         if not math.isfinite(number):
             raise ContractError(f"{name} must be finite")
-        if limits is not None:
-            if name not in limits:
-                raise ContractError(f"no limit is defined for {name}")
-            limit = limits[name]
-            if not limit.minimum_deg <= number <= limit.maximum_deg:
-                raise ContractError(
-                    f"{name}={number} is outside [{limit.minimum_deg}, {limit.maximum_deg}]"
-                )
         result[name] = number
     return result
 

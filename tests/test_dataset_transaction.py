@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +13,7 @@ from vlai_l1_runtime.collection.dataset import (
     GENERATED_FEATURES,
     DirectDatasetState,
     DirectLeRobotEpisode,
+    LeRobotBackendFactory,
     identity_from_config,
     provenance_from_config,
 )
@@ -116,3 +119,30 @@ def test_failed_episode_never_exposes_a_partial_dataset(tmp_path: Path) -> None:
             episode.commit()
     assert not identity.target_root.exists()
     assert not list(tmp_path.glob(".dataset.staging-*"))
+
+
+def test_lerobot_factory_configures_async_image_writers(monkeypatch, tmp_path: Path) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class LeRobotDataset:
+        @staticmethod
+        def create(**kwargs):
+            calls.append(("create", kwargs))
+            return object()
+
+        @staticmethod
+        def resume(**kwargs):
+            calls.append(("resume", kwargs))
+            return object()
+
+    module = types.ModuleType("lerobot.datasets.lerobot_dataset")
+    module.LeRobotDataset = LeRobotDataset
+    monkeypatch.setitem(sys.modules, "lerobot.datasets.lerobot_dataset", module)
+    identity = identity_from_config(CONFIG, "writer_test")
+    factory = LeRobotBackendFactory(image_writer_threads=12)
+
+    factory.create(identity, tmp_path / "new")
+    factory.resume(identity, tmp_path / "existing")
+
+    assert [kind for kind, _ in calls] == ["create", "resume"]
+    assert [kwargs["image_writer_threads"] for _, kwargs in calls] == [12, 12]

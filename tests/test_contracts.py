@@ -10,7 +10,6 @@ from vlai_l1_runtime import (
     ContractError,
     NamedJointVector,
     SampleMetadata,
-    limits_by_feature,
     load_system_config,
     robot_description,
 )
@@ -36,15 +35,18 @@ def test_description_is_lerobot_compatible_and_fail_closed() -> None:
     assert description.action_features[0].name == "left_joint_1.pos"
     assert description.action_features[-1].name == "right_gripper.pos"
     assert {feature.unit for feature in description.action_features} == {"degree"}
-    assert description.teleoperation_ready is False
-    assert description.teleoperation_blockers == ("teleoperation_uncommissioned",)
+    assert description.teleoperation_ready is True
+    assert description.teleoperation_blockers == ()
     assert description.command_ready is False
-    assert description.collection_ready is False
+    assert description.collection_ready is True
 
 
 def test_named_joint_vector_requires_exact_finite_features() -> None:
     vector = NamedJointVector(_pose(), SampleMetadata(4, 50))
     assert tuple(vector.values) == FEATURE_NAMES
+    unrestricted = _pose()
+    unrestricted["right_joint_7.pos"] = -84.5098554684869
+    validate_named_values(unrestricted)
 
     missing = _pose()
     missing.pop(FEATURE_NAMES[0])
@@ -61,13 +63,6 @@ def test_named_joint_vector_requires_exact_finite_features() -> None:
         validate_named_values(non_text_name)
     with pytest.raises(ContractError, match="metadata must be SampleMetadata"):
         NamedJointVector(_pose(), None)
-
-
-def test_joint_limits_are_named_and_never_clamped() -> None:
-    invalid = _pose()
-    invalid["right_joint_2.pos"] = 91.0
-    with pytest.raises(ContractError, match="outside"):
-        validate_named_values(invalid, limits=limits_by_feature(CONFIG))
 
 
 def test_command_sequence_timestamp_and_first_hold_are_explicit() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
+from embodied_ops.operator_panel import InputAction
 
 from vlai_l1_runtime.panel import L1OperatorPanelAdapter
 
@@ -16,9 +16,10 @@ def test_panel_exposes_only_hardware_free_workflows() -> None:
     catalog = adapter.catalog()
 
     assert catalog["product"] == {"brand": "VLAI L1", "title": "Operations"}
-    assert catalog["readiness"]["collection"] is False
+    assert catalog["readiness"]["collection"] is True
     assert {workflow["id"] for workflow in catalog["workflows"]} == {
         "validate-collection",
+        "collect",
         "dataset-doctor",
         "export-v21",
     }
@@ -27,7 +28,25 @@ def test_panel_exposes_only_hardware_free_workflows() -> None:
     assert launch.command[-2:] == ("--experiment", "pick_v1")
 
 
-def test_panel_refuses_live_collection_with_tracked_blockers() -> None:
+def test_panel_builds_live_collection_from_tracked_contract() -> None:
     adapter = L1OperatorPanelAdapter(ROOT, CONFIG)
-    with pytest.raises(RuntimeError, match="teleoperation_uncommissioned"):
-        adapter.build_launch("collect", {})
+    launch = adapter.build_launch(
+        "collect",
+        {
+            "experiment": "pick_v1",
+            "task": "pick up the object",
+            "frames": "300",
+            "decision": "discard",
+        },
+    )
+    assert launch.command[-8:] == (
+        "--experiment",
+        "pick_v1",
+        "--task",
+        "pick up the object",
+        "--frames",
+        "300",
+        "--decision",
+        "discard",
+    )
+    assert launch.input_actions == (InputAction("enter", "Start recording", "\n", "primary"),)

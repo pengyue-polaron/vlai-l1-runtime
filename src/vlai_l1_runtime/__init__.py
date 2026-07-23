@@ -9,7 +9,6 @@ from .contracts import (
     NamedJointVector,
     RobotDescription,
     SampleMetadata,
-    limits_by_feature,
     robot_description,
 )
 from .session import CommandSession, SessionError, SessionMode
@@ -29,7 +28,6 @@ __all__ = [
     "SessionError",
     "SessionMode",
     "SystemConfig",
-    "limits_by_feature",
     "load_system_config",
     "robot_description",
 ]

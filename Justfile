@@ -61,7 +61,7 @@ sdk-status:
         tc -s qdisc show dev "${interface}"
     done
 
-sdk-stop:
+stop:
     #!/usr/bin/env bash
     set -euo pipefail
     sudo pkill -INT -f '[v]lai_l1_runtime.cli run-xair' || true
@@ -103,13 +103,11 @@ cameras action="start":
 panel:
     {{ vpy }} -m vlai_l1_runtime.cli panel --config {{ collection_config }}
 
-collect experiment task frames="300" decision="save":
+collect experiment task:
     {{ repo }}/scripts/collect.sh \
         --config {{ collection_config }} \
         --experiment "{{ experiment }}" \
-        --task "{{ task }}" \
-        --frames "{{ frames }}" \
-        --decision "{{ decision }}"
+        --task "{{ task }}"
 
 dataset-doctor experiment:
     {{ vpy }} -m vlai_l1_runtime.cli dataset-doctor \

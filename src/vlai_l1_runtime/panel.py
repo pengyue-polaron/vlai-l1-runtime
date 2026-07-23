@@ -2,22 +2,25 @@
 
 from __future__ import annotations
 
-import json
-import math
 import sys
-from http.client import HTTPConnection
 from pathlib import Path
 from typing import Any
 
-from embodied_ops import validate_experiment_name
-from embodied_ops.operator_panel import InputAction, PanelCapabilities, WorkflowLaunch
+from embodied_ops import (
+    TaskCatalog,
+    load_task_catalog,
+    register_task_prompt,
+    validate_experiment_name,
+)
+from embodied_ops.operator_panel import (
+    InputAction,
+    PanelCapabilities,
+    WorkflowLaunch,
+    fetch_camera_health,
+)
 
 from .collection.configuration import load_collection_config
 from .collection.schema import normalize_task
-from .tasks import TaskCatalog, load_task_catalog, register_task_prompt
-
-_CAMERA_HEALTH_TIMEOUT_S = 0.4
-_CAMERA_HEALTH_MAX_BYTES = 64 * 1024
 
 
 class L1OperatorPanelAdapter:
@@ -127,27 +130,7 @@ class L1OperatorPanelAdapter:
         }
 
     def camera_health(self) -> dict[str, Any]:
-        connection = HTTPConnection(
-            "127.0.0.1",
-            self.collection_config.system.camera_preview.port,
-            timeout=_CAMERA_HEALTH_TIMEOUT_S,
-        )
-        try:
-            connection.request("GET", "/healthz", headers={"Cache-Control": "no-store"})
-            response = connection.getresponse()
-            body = response.read(_CAMERA_HEALTH_MAX_BYTES + 1)
-        except (OSError, TimeoutError):
-            return _camera_health_unavailable("Camera service is not running.")
-        finally:
-            connection.close()
-        if len(body) > _CAMERA_HEALTH_MAX_BYTES:
-            return _camera_health_unavailable("Camera preview health response is too large.")
-        if response.status not in {200, 503}:
-            return _camera_health_unavailable("Camera preview health request failed.")
-        try:
-            return _normalize_camera_health(json.loads(body))
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return _camera_health_unavailable("Camera preview returned invalid health data.")
+        return fetch_camera_health(self.collection_config.system.camera_preview.port)
 
     def build_launch(self, workflow: str, values: dict[str, Any]) -> WorkflowLaunch:
         if not isinstance(values, dict):
@@ -186,14 +169,10 @@ class L1OperatorPanelAdapter:
             if not self.collection_config.collection_ready:
                 blockers = ", ".join(self.collection_config.collection_blockers)
                 raise RuntimeError(f"live collection is unavailable: {blockers}")
-            if set(values) != {"experiment", "task", "frames", "decision"}:
-                raise ValueError("collect requires experiment, task, frames, and decision")
+            if set(values) != {"experiment", "task"}:
+                raise ValueError("collect requires experiment and task")
             experiment = validate_experiment_name(_text(values["experiment"], "experiment"))
             task = normalize_task(values["task"])
-            frames = _positive_integer_text(values["frames"], "frames")
-            decision = _text(values["decision"], "decision")
-            if decision not in {"save", "discard"}:
-                raise ValueError("decision must be save or discard")
             return WorkflowLaunch(
                 workflow,
                 f"collect:{experiment}",
@@ -205,12 +184,12 @@ class L1OperatorPanelAdapter:
                     experiment,
                     "--task",
                     task,
-                    "--frames",
-                    str(frames),
-                    "--decision",
-                    decision,
                 ),
-                input_actions=(InputAction("enter", "Start recording", "\n", "primary"),),
+                input_actions=(
+                    InputAction("enter", "Next / Save", "\n", "primary"),
+                    InputAction("discard", "Discard", "d\n", "danger"),
+                    InputAction("quit", "Quit", "q\n", "quiet"),
+                ),
             )
         raise ValueError(f"unknown operator workflow: {workflow!r}")
 
@@ -293,8 +272,8 @@ def _collect_workflow() -> dict[str, Any]:
         "id": "collect",
         "label": "Collect",
         "eyebrow": "LIVE",
-        "title": "Record one episode",
-        "description": "Capture paired teleoperation state and commissioned cameras.",
+        "title": "Collect episodes",
+        "description": "Record save/discard episodes with paired state and three cameras.",
         "submit_label": "Start collection",
         "fields": [
             {
@@ -310,24 +289,6 @@ def _collect_workflow() -> dict[str, Any]:
                 "type": "text",
                 "required": True,
                 "placeholder": "place the fruit in the bowl",
-            },
-            {
-                "name": "frames",
-                "label": "Frames",
-                "type": "text",
-                "required": True,
-                "default": "300",
-            },
-            {
-                "name": "decision",
-                "label": "After capture",
-                "type": "select",
-                "required": True,
-                "default": "save",
-                "options": [
-                    {"value": "save", "label": "Save episode"},
-                    {"value": "discard", "label": "Discard episode"},
-                ],
             },
         ],
     }
@@ -398,56 +359,7 @@ def _camera_label(role: str) -> str:
     }[role]
 
 
-def _normalize_camera_health(payload: Any) -> dict[str, Any]:
-    if not isinstance(payload, dict) or not isinstance(payload.get("ok"), bool):
-        raise ValueError("camera health must contain a boolean ok value")
-    raw_streams = payload.get("streams")
-    if not isinstance(raw_streams, dict):
-        raise ValueError("camera health streams must be an object")
-    streams: dict[str, dict[str, Any]] = {}
-    for role, raw in raw_streams.items():
-        if not isinstance(role, str) or not isinstance(raw, dict):
-            raise ValueError("camera health stream is invalid")
-        ready = raw.get("ready")
-        fresh = raw.get("fresh")
-        error = raw.get("error")
-        if not isinstance(ready, bool) or not isinstance(fresh, bool):
-            raise ValueError("camera health readiness values must be booleans")
-        if error is not None and not isinstance(error, str):
-            raise ValueError("camera health error must be text or null")
-        streams[role] = {
-            "ready": ready,
-            "fresh": fresh,
-            "preview_fps": _optional_nonnegative(raw.get("preview_fps")),
-            "age_s": _optional_nonnegative(raw.get("age_s")),
-            "error": error,
-        }
-    return {"available": True, "ok": payload["ok"], "streams": streams}
-
-
-def _optional_nonnegative(value: Any) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError("camera health values must be numeric or null")
-    number = float(value)
-    if not math.isfinite(number) or number < 0:
-        raise ValueError("camera health values must be finite and non-negative")
-    return number
-
-
-def _camera_health_unavailable(reason: str) -> dict[str, Any]:
-    return {"available": False, "ok": False, "streams": {}, "reason": reason}
-
-
 def _text(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value or value != value.strip():
         raise ValueError(f"{label} must be normalized non-empty text")
     return value
-
-
-def _positive_integer_text(value: Any, label: str) -> int:
-    text = _text(value, label)
-    if not text.isascii() or not text.isdigit() or int(text) <= 0:
-        raise ValueError(f"{label} must be a positive integer")
-    return int(text)

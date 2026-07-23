@@ -41,6 +41,7 @@ class CollectionConfig:
     derivative_root: Path
     repo_id_prefix: str
     fps: int
+    max_episode_frames: int
     minimum_capture_fps: float
     image_writer_threads: int
     max_sample_age_s: float
@@ -95,6 +96,7 @@ def load_collection_config(path: Path) -> CollectionConfig:
         "derivative_root",
         "repo_id_prefix",
         "fps",
+        "max_episode_frames",
         "minimum_capture_fps",
         "image_writer_threads",
         "max_sample_age_s",
@@ -103,7 +105,7 @@ def load_collection_config(path: Path) -> CollectionConfig:
     }
     _exact_keys(root, keys, "collection")
     schema_version = _integer(root["schema_version"], "schema_version", minimum=1)
-    if schema_version != 1:
+    if schema_version != 2:
         raise ConfigError(f"unsupported collection schema_version: {schema_version}")
 
     system_path = _relative_path(root["system_config"], "system_config", resolved.parent)
@@ -122,6 +124,11 @@ def load_collection_config(path: Path) -> CollectionConfig:
     if _REPO_PREFIX.fullmatch(prefix) is None:
         raise ConfigError("repo_id_prefix must be a portable 'owner/name' prefix")
     fps = _integer(root["fps"], "fps", minimum=1, maximum=240)
+    max_episode_frames = _integer(
+        root["max_episode_frames"],
+        "max_episode_frames",
+        minimum=1,
+    )
     minimum_capture_fps = _positive_number(
         root["minimum_capture_fps"],
         "minimum_capture_fps",
@@ -151,6 +158,7 @@ def load_collection_config(path: Path) -> CollectionConfig:
         derivative_root=derivative_root,
         repo_id_prefix=prefix,
         fps=fps,
+        max_episode_frames=max_episode_frames,
         minimum_capture_fps=minimum_capture_fps,
         image_writer_threads=image_writer_threads,
         max_sample_age_s=sample_age,

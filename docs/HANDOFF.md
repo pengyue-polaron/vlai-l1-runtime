@@ -56,7 +56,7 @@ Repository responsibilities:
 | Component | Owns | Must not own |
 | --- | --- | --- |
 | `vlai-l1-runtime` | L1 topology, safety, devices, sidecars, camera identities, named state/action schema, dataset composition and readiness | Generic cross-robot workflow policy |
-| pinned `external/embodied-ops` | Generic episode, transaction, timing, artifact and Operator Panel primitives | L1 CAN, joints, cameras or readiness decisions |
+| pinned `external/embodied-ops` | Generic episode, task registry, transaction, timing, artifact, camera-health presentation and Operator Panel primitives | L1 CAN, joints, cameras or readiness decisions |
 | pinned `external/x-air-sdk` | Reviewed x_air public ABI and opaque controller dependency | Runtime orchestration or dataset behavior |
 | LeRobot plugins outside this workspace | Thin Robot/Teleoperator clients of Runtime contracts | Direct ownership of CAN or cameras |
 
@@ -264,7 +264,7 @@ probe.
 After every stage:
 
 ```bash
-just sdk-stop
+just stop
 just sdk-status
 ```
 

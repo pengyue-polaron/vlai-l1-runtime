@@ -91,8 +91,6 @@ def build_parser() -> argparse.ArgumentParser:
             child.add_argument("--experiment", required=True)
         if command == "collect":
             child.add_argument("--task", required=True)
-            child.add_argument("--frames", type=int, required=True)
-            child.add_argument("--decision", choices=("save", "discard"), required=True)
     return parser
 
 
@@ -207,25 +205,27 @@ def _run_collection_command(args: argparse.Namespace) -> int:
             port=adapter.panel_port,
         )
     if args.command == "collect":
-        from embodied_ops import EpisodeDecision
+        from .collection.managed import collect_managed_session
 
-        from .collection.managed import collect_managed_episode
-
-        result = collect_managed_episode(
+        results = collect_managed_session(
             config,
             experiment=args.experiment,
             task=args.task,
-            frame_count=args.frames,
-            decision=EpisodeDecision(args.decision),
         )
         print(
             json.dumps(
                 {
-                    "decision": result.decision.value,
-                    "frames": result.frame_count,
-                    "dataset_root": None
-                    if result.dataset_root is None
-                    else str(result.dataset_root),
+                    "saved": sum(result.decision.value == "save" for result in results),
+                    "discarded": sum(result.decision.value == "discard" for result in results),
+                    "frames": sum(result.frame_count for result in results),
+                    "dataset_root": next(
+                        (
+                            str(result.dataset_root)
+                            for result in reversed(results)
+                            if result.dataset_root is not None
+                        ),
+                        None,
+                    ),
                 },
                 indent=2,
                 sort_keys=True,

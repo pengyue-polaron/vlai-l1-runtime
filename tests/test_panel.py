@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 import sys
 from pathlib import Path
@@ -52,61 +51,24 @@ def test_panel_builds_live_collection_from_tracked_contract() -> None:
         {
             "experiment": "pick_v1",
             "task": "pick up the object",
-            "frames": "300",
-            "decision": "discard",
         },
     )
     assert launch.command[0] == str(ROOT / "scripts/collect.sh")
-    assert launch.command[-8:] == (
+    assert launch.command[-4:] == (
         "--experiment",
         "pick_v1",
         "--task",
         "pick up the object",
-        "--frames",
-        "300",
-        "--decision",
-        "discard",
     )
-    assert launch.input_actions == (InputAction("enter", "Start recording", "\n", "primary"),)
+    assert launch.input_actions == (
+        InputAction("enter", "Next / Save", "\n", "primary"),
+        InputAction("discard", "Discard", "d\n", "danger"),
+        InputAction("quit", "Quit", "q\n", "quiet"),
+    )
 
 
-def test_panel_normalizes_collection_camera_health(monkeypatch) -> None:
-    payload = {
-        "ok": True,
-        "streams": {
-            "agent": {
-                "ready": True,
-                "fresh": True,
-                "preview_fps": 9.8,
-                "age_s": 0.03,
-                "error": None,
-            }
-        },
-    }
-
-    class Response:
-        status = 200
-
-        def read(self, _limit):
-            return json.dumps(payload).encode()
-
-    class Connection:
-        def __init__(self, host, port, *, timeout):
-            assert (host, port) == ("127.0.0.1", 8088)
-            assert timeout > 0
-
-        def request(self, method, path, *, headers):
-            assert (method, path) == ("GET", "/healthz")
-            assert headers == {"Cache-Control": "no-store"}
-
-        def getresponse(self):
-            return Response()
-
-        def close(self):
-            return None
-
-    monkeypatch.setattr("vlai_l1_runtime.panel.HTTPConnection", Connection)
-    assert L1OperatorPanelAdapter(ROOT, CONFIG).camera_health() == {
+def test_panel_uses_shared_collection_camera_health(monkeypatch) -> None:
+    health = {
         "available": True,
         "ok": True,
         "streams": {
@@ -119,6 +81,12 @@ def test_panel_normalizes_collection_camera_health(monkeypatch) -> None:
             }
         },
     }
+
+    monkeypatch.setattr(
+        "vlai_l1_runtime.panel.fetch_camera_health",
+        lambda port: health if port == 8088 else None,
+    )
+    assert L1OperatorPanelAdapter(ROOT, CONFIG).camera_health() == health
 
 
 def test_panel_registers_a_create_only_collection_prompt(tmp_path: Path) -> None:

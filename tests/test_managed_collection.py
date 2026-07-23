@@ -10,9 +10,10 @@ from embodied_ops import EpisodeDecision
 from vlai_l1_runtime.collection.configuration import load_collection_config
 from vlai_l1_runtime.collection.managed import (
     ManagedXAirRuntimes,
+    _record_interactive_episode,
     _wait_for_episode_start,
-    _with_progress,
     collect_managed_episode,
+    collect_managed_session,
 )
 from vlai_l1_runtime.collection.orchestration import EpisodeResult
 
@@ -65,7 +66,7 @@ def test_episode_start_waits_for_an_explicit_operator_confirmation(monkeypatch) 
     )
 
     assert _wait_for_episode_start(lambda _prompt: next(responses)) is True
-    assert announcements == [("enter",), ("enter",)]
+    assert announcements == [("enter", "quit"), ("enter", "quit")]
 
 
 def test_episode_start_can_quit_before_recording(monkeypatch) -> None:
@@ -170,8 +171,6 @@ def test_camera_startup_failure_never_starts_robot_runtimes(monkeypatch) -> None
             CONFIG,
             experiment="startup_failure",
             task="hold position",
-            frame_count=3,
-            decision="discard",
             runtime_factory=Runtime,
         )
 
@@ -244,8 +243,8 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
         lambda: events.append("operator_confirmed") or True,
     )
     monkeypatch.setattr(
-        "vlai_l1_runtime.collection.managed.write_episode_frames",
-        lambda **_kwargs: events.append("write") or 3,
+        "vlai_l1_runtime.collection.managed._record_interactive_episode",
+        lambda **_kwargs: events.append("record") or (3, EpisodeDecision.DISCARD),
     )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed.complete_episode",
@@ -258,8 +257,6 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
         CONFIG,
         experiment="operator_gate",
         task="hold position",
-        frame_count=3,
-        decision=EpisodeDecision.DISCARD,
         runtime_factory=Runtime,
     )
 
@@ -274,7 +271,7 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
         "operator_confirmed",
         "camera_preflight",
         "samples",
-        "write",
+        "record",
         "runtime_exit",
         "source_exit",
         "complete",
@@ -282,27 +279,130 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
     ]
 
 
-def test_capture_rate_gate_rejects_non_realtime_collection(monkeypatch) -> None:
+def test_collection_session_repeats_until_quit(monkeypatch) -> None:
+    outcomes = iter(
+        (
+            EpisodeResult(EpisodeDecision.SAVE, 10, Path("/dataset")),
+            EpisodeResult(EpisodeDecision.DISCARD, 8, None),
+            EpisodeResult(EpisodeDecision.QUIT, 0, None),
+        )
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.collect_managed_episode",
+        lambda *_args, **_kwargs: next(outcomes),
+    )
+
+    results = collect_managed_session(
+        CONFIG,
+        experiment="multi_episode",
+        task="place fruit",
+    )
+
+    assert [result.decision for result in results] == [
+        EpisodeDecision.SAVE,
+        EpisodeDecision.DISCARD,
+    ]
+
+
+def test_recording_decision_is_taken_during_capture(monkeypatch) -> None:
+    commands = iter((None, "d"))
+    times = iter((0.0, 0.1))
+
+    class Validated:
+        def lerobot_frame(self, *, task):
+            return {"task": task}
+
+    class Assembler:
+        def validate(self, sample, *, now_ns):
+            assert sample in {"first", "second"}
+            assert now_ns in {1, 2}
+            return Validated()
+
+    class Sink:
+        def __init__(self):
+            self.frames = []
+
+        def add_frame(self, frame):
+            self.frames.append(frame)
+
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed._poll_stdin_line",
+        lambda: next(commands),
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.time.monotonic",
+        lambda: next(times),
+    )
+
+    sink = Sink()
+    captured, decision = _record_interactive_episode(
+        samples=(("first", 1), ("second", 2)),
+        assembler=Assembler(),
+        sink=sink,
+        task="place fruit",
+        total=300,
+        target_fps=30,
+        minimum_fps=1.0,
+    )
+
+    assert (captured, decision) == (1, EpisodeDecision.DISCARD)
+    assert sink.frames == [{"task": "place fruit"}]
+
+
+def test_interactive_capture_rejects_non_realtime_collection(monkeypatch) -> None:
     times = iter((0.0, 1.0))
+
+    class Validated:
+        def lerobot_frame(self, *, task):
+            return {"task": task}
+
+    class Assembler:
+        def validate(self, _sample, *, now_ns):
+            assert now_ns in {0, 1, 2}
+            return Validated()
+
+    class Sink:
+        def add_frame(self, _frame):
+            return None
+
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed._poll_stdin_line",
+        lambda: None,
+    )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed.time.monotonic",
         lambda: next(times),
     )
 
     with pytest.raises(RuntimeError, match=r"3\.00 FPS.*minimum 27\.00 FPS"):
-        list(
-            _with_progress(
-                [(object(), 0), (object(), 1), (object(), 2)],
-                3,
-                minimum_fps=27.0,
-            )
+        _record_interactive_episode(
+            samples=((object(), 0), (object(), 1), (object(), 2)),
+            assembler=Assembler(),
+            sink=Sink(),
+            task="place fruit",
+            total=3,
+            target_fps=30,
+            minimum_fps=27.0,
         )
 
 
 def test_capture_progress_is_published_to_the_panel(monkeypatch) -> None:
     events: list[tuple[object, ...]] = []
     times = iter((0.0, 0.1))
-    samples = [(object(), 0), (object(), 1), (object(), 2)]
+
+    class Validated:
+        def lerobot_frame(self, *, task):
+            return {"task": task}
+
+    class Assembler:
+        def validate(self, _sample, *, now_ns):
+            assert now_ns in {0, 1, 2}
+            return Validated()
+
+    class Sink:
+        def add_frame(self, _frame):
+            return None
+
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed.time.monotonic",
         lambda: next(times),
@@ -311,17 +411,20 @@ def test_capture_progress_is_published_to_the_panel(monkeypatch) -> None:
         "vlai_l1_runtime.collection.managed.announce_progress",
         lambda *args, **kwargs: events.append((*args, kwargs)),
     )
-
-    assert (
-        list(
-            _with_progress(
-                samples,
-                3,
-                minimum_fps=27.0,
-            )
-        )
-        == samples
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed._poll_stdin_line",
+        lambda: None,
     )
+
+    assert _record_interactive_episode(
+        samples=((object(), 0), (object(), 1), (object(), 2)),
+        assembler=Assembler(),
+        sink=Sink(),
+        task="place fruit",
+        total=3,
+        target_fps=30,
+        minimum_fps=27.0,
+    ) == (3, EpisodeDecision.SAVE)
     assert events[0] == (
         "collection",
         "Recording episode",

@@ -75,20 +75,22 @@ The x_air dependency and native state sidecar can be built without hardware:
 just sdk-build
 ```
 
-A finite episode is recorded with:
+Start a collection session with:
 
 ```bash
-just collect fruit_placement_v1 "place the fruit in the bowl" 300 save
+just collect fruit_placement_v1 "place the fruit in the bowl"
 ```
 
-This is one managed session. It starts or verifies the persistent three-camera
+The command starts or verifies the persistent three-camera
 owner, authorizes the privileged robot lifecycle, preflights raw frames before
 enabling motors, starts both x_air runtimes, and waits for fresh paired state.
 Use teleoperation to place the robot at the episode start pose, then press
 `Enter` in the terminal or **Start recording** in the Panel. The workflow
 rechecks all three cameras after that confirmation before recording the atomic
-canonical dataset transaction. Enter `q` at the terminal prompt to stop without
-recording.
+canonical dataset transaction. During recording, press `Enter` to save, enter
+`d` to discard, or enter `q` to discard the current episode and quit. After a
+save or discard, the same command advances to the next episode. The tracked
+frame ceiling auto-saves an episode if no earlier decision is entered.
 
 The reusable `embodied-ops` Panel is available with:
 
@@ -133,7 +135,7 @@ without opening their video streams. `just camera-check` starts or reuses the
 persistent owner and validates a finite raw-frame window through the same local
 bridge used by collection.
 `just sdk-status` inspects the deployed processes and CAN controllers, and
-`just sdk-stop` disables both pairs and returns all four links to `DOWN`.
+`just stop` disables both pairs and returns all four links to `DOWN`.
 
 The repository pins `embodied-ops` as a submodule; initialize it before running
 repository commands. Runtime contracts remain importable on Python 3.10; the

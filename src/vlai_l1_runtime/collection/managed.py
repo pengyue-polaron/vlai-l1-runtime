@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import os
 import re
+import select
 import subprocess
 import sys
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Protocol, TextIO
 
-from embodied_ops import EpisodeDecision
+from embodied_ops import EpisodeDecision, normalize_episode_decision
 from embodied_ops.operator_panel import announce_input, announce_progress
 
 from .. import console
@@ -27,7 +28,7 @@ from .dataset import (
     identity_from_config,
     provenance_from_config,
 )
-from .orchestration import EpisodeResult, complete_episode, write_episode_frames
+from .orchestration import EpisodeResult, complete_episode
 from .schema import CameraSample, CollectionSample, SampleAssembler
 
 _LEVEL = re.compile(r"^(INFO|STEP|PASS|WARN|FAIL)\s+(.*)$")
@@ -200,20 +201,45 @@ class ManagedXAirRuntimes:
         console.success("Teleoperation stopped; managed CAN links are disabled and down")
 
 
+def collect_managed_session(
+    config: CollectionConfig,
+    *,
+    experiment: str,
+    task: str,
+    runtime_factory: type[RuntimeSession] = ManagedXAirRuntimes,
+) -> tuple[EpisodeResult, ...]:
+    """Collect save/discard episodes until the operator quits."""
+
+    results: list[EpisodeResult] = []
+    while True:
+        result = collect_managed_episode(
+            config,
+            experiment=experiment,
+            task=task,
+            runtime_factory=runtime_factory,
+        )
+        if result.decision is EpisodeDecision.QUIT:
+            console.info(
+                f"Collection stopped · saved="
+                f"{sum(item.decision is EpisodeDecision.SAVE for item in results)} "
+                f"· discarded="
+                f"{sum(item.decision is EpisodeDecision.DISCARD for item in results)}"
+            )
+            return tuple(results)
+        results.append(result)
+
+
 def collect_managed_episode(
     config: CollectionConfig,
     *,
     experiment: str,
     task: str,
-    frame_count: int,
-    decision: EpisodeDecision,
     runtime_factory: type[RuntimeSession] = ManagedXAirRuntimes,
 ) -> EpisodeResult:
     """Own a complete preflight, bimanual runtime, capture, and stop session."""
 
     console.info(
-        f"Collection session · experiment={experiment} · frames={frame_count} "
-        f"· decision={EpisodeDecision(decision).value}"
+        f"Collection session · experiment={experiment} · max_frames={config.max_episode_frames}"
     )
     console.step("Starting or verifying persistent camera service")
     camera_status = CameraServiceController(config.system).start()
@@ -251,31 +277,32 @@ def collect_managed_episode(
                 console.step("Rechecking cameras after operator confirmation")
                 _preflight_cameras(source.camera_source, config)
                 console.success("Three cameras are fresh, synchronized, and ready to record")
-                console.step(f"Recording episode · target {config.fps} FPS")
-                progress = _with_progress(
-                    source.samples(frame_count),
-                    frame_count,
+                captured_frames, decision = _record_interactive_episode(
+                    samples=source.samples(config.max_episode_frames),
+                    assembler=SampleAssembler(config),
+                    sink=sink,
+                    task=task,
+                    total=config.max_episode_frames,
+                    target_fps=config.fps,
                     minimum_fps=config.minimum_capture_fps,
                 )
-                try:
-                    captured_frames = write_episode_frames(
-                        samples=progress,
-                        assembler=SampleAssembler(config),
-                        sink=sink,
-                        task=task,
-                    )
-                finally:
-                    progress.close()
         console.step("Finalizing dataset after hardware shutdown")
-        result = complete_episode(
-            sink=sink,
-            frame_count=captured_frames,
-            decision=decision,
-        )
+        if captured_frames == 0:
+            if decision is EpisodeDecision.SAVE:
+                console.warning("Empty episode discarded instead of publishing")
+                decision = EpisodeDecision.DISCARD
+            result = EpisodeResult(decision, 0, None)
+        else:
+            result = complete_episode(
+                sink=sink,
+                frame_count=captured_frames,
+                decision=decision,
+            )
     if result.decision is EpisodeDecision.SAVE:
         console.success(f"Saved {result.frame_count} frames to {result.dataset_root}")
     else:
-        console.success(f"Captured and discarded {result.frame_count} frames")
+        verb = "quit after" if result.decision is EpisodeDecision.QUIT else "discarded"
+        console.success(f"Captured and {verb} {result.frame_count} frames")
     return result
 
 
@@ -288,7 +315,7 @@ def _wait_for_episode_start(
         raise TypeError("read_input must be callable")
     console.step("Use teleoperation to place the robot at the episode start pose")
     while True:
-        announce_input(("enter",))
+        announce_input(("enter", "quit"))
         try:
             command = read_input("  Enter=start recording, q=quit > ").strip().lower()
         except EOFError as exc:
@@ -301,25 +328,25 @@ def _wait_for_episode_start(
         console.warning("Press Enter to start recording, or enter q to quit")
 
 
-def _preflight_cameras(cameras: CameraCaptureSource, config: CollectionConfig) -> None:
-    validator = CameraSetValidator(config.system.cameras)
-    for _ in range(3):
-        samples = cameras.capture(timeout_s=config.max_sample_age_s)
-        validator.validate(
-            {role: sample.metadata for role, sample in samples.items()},
-            now_ns=time.monotonic_ns(),
-        )
-
-
-def _with_progress(
-    samples: Iterable[tuple[CollectionSample, int]],
-    total: int,
+def _record_interactive_episode(
     *,
+    samples: Iterable[tuple[CollectionSample, int]],
+    assembler: SampleAssembler,
+    sink: DirectLeRobotEpisode,
+    task: str,
+    total: int,
+    target_fps: int,
     minimum_fps: float,
-) -> Iterator[tuple[CollectionSample, int]]:
+) -> tuple[int, EpisodeDecision]:
+    """Record until save/discard/quit input or the tracked frame ceiling."""
+
+    console.step(f"Recording episode · target {target_fps} FPS")
+    console.warning(f"Enter=save, d+Enter=discard, q+Enter=quit · auto-save at {total} frames")
+    announce_input(("enter", "discard", "quit"))
     status = console.LiveStatusLine()
     started = time.monotonic()
     captured = 0
+    decision: EpisodeDecision | None = None
     announce_progress(
         "collection",
         "Recording episode",
@@ -330,36 +357,73 @@ def _with_progress(
         force=True,
     )
     try:
-        for index, sample in enumerate(samples, start=1):
-            status.update(f"Recording frame {index:>4}/{total}")
-            captured = index
+        for sample, now_ns in samples:
+            command = _poll_stdin_line()
+            if command is not None:
+                try:
+                    decision = normalize_episode_decision(command)
+                except ValueError:
+                    console.warning("Press Enter to save, enter d to discard, or enter q to quit")
+                    announce_input(("enter", "discard", "quit"))
+                else:
+                    break
+            sink.add_frame(assembler.validate(sample, now_ns=now_ns).lerobot_frame(task=task))
+            captured += 1
+            status.update(f"Recording frame {captured:>4}/{total}")
             announce_progress(
                 "collection",
                 "Recording episode",
-                index,
+                captured,
                 total,
                 phase="capture",
-                detail=f"frame {index}/{total}",
+                detail=f"frame {captured}/{total}",
             )
-            yield sample
     finally:
         status.close()
     elapsed_s = time.monotonic() - started
-    effective_fps = captured / elapsed_s
+    effective_fps = captured / elapsed_s if elapsed_s > 0 else 0.0
+    decision = decision or EpisodeDecision.SAVE
     announce_progress(
         "collection",
         "Recording episode",
         captured,
         total,
-        phase="complete" if captured == total else "stopped",
+        phase="complete" if decision is EpisodeDecision.SAVE else decision.value,
         detail=f"{effective_fps:.2f} FPS",
         force=True,
     )
-    console.info(f"Captured {captured} frames in {elapsed_s:.2f}s · {effective_fps:.2f} FPS")
-    if effective_fps < minimum_fps:
+    console.info(
+        f"Captured {captured} frames in {elapsed_s:.2f}s "
+        f"· {effective_fps:.2f} FPS · {decision.value}"
+    )
+    if captured > 0 and effective_fps < minimum_fps:
         raise RuntimeError(
             f"capture rate {effective_fps:.2f} FPS is below the tracked "
             f"minimum {minimum_fps:.2f} FPS"
+        )
+    return captured, decision
+
+
+def _poll_stdin_line() -> str | None:
+    try:
+        readable, _, _ = select.select([sys.stdin], [], [], 0)
+    except (OSError, ValueError):
+        return None
+    if not readable:
+        return None
+    line = sys.stdin.readline()
+    if line == "":
+        return "q"
+    return line.strip().lower()
+
+
+def _preflight_cameras(cameras: CameraCaptureSource, config: CollectionConfig) -> None:
+    validator = CameraSetValidator(config.system.cameras)
+    for _ in range(3):
+        samples = cameras.capture(timeout_s=config.max_sample_age_s)
+        validator.validate(
+            {role: sample.metadata for role, sample in samples.items()},
+            now_ns=time.monotonic_ns(),
         )
 
 

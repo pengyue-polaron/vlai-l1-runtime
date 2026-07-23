@@ -145,6 +145,7 @@ def test_collection_config_and_schema_have_one_complete_contract() -> None:
     assert config.collection_ready is True
     assert config.collection_blockers == ()
     assert config.minimum_capture_fps == 27.0
+    assert config.max_episode_frames == 300
     assert config.image_writer_threads == 12
     assert config.repo_id_for("pick_v1") == "pengyue-polaron/vlai-l1-pick_v1"
     assert set(contract.features()) == {

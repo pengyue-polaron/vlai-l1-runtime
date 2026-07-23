@@ -154,16 +154,19 @@ Managed collection starts or verifies the marked Camera Service, connects one
 raw client, and preflights cameras before motor enable. It then starts both
 guarded x_air runtimes and waits for paired state. The operator uses
 teleoperation to place the robot at the episode start pose and presses Enter;
-the workflow rechecks all cameras before the first recorded frame. Collection
+the workflow rechecks all cameras before the first recorded frame. During
+recording, Enter saves, `d` discards, and `q` discards and quits. A tracked
+maximum frame count auto-saves, and save/discard advances to the next episode.
+Each episode stops both robot sidecars before LeRobot finalization and starts a
+new managed motion session only after the operator advances. Collection
 shutdown closes only its raw client, so preview remains available. No automatic
-reset is claimed while the Runtime has no reviewed fixed-pose command
-transport.
+reset is claimed while the Runtime has no reviewed fixed-pose command transport.
 
-`embodied-ops` provides the generic episode decision, freshness/skew,
-transaction, and Panel contracts. This repository owns their L1 adapter and all
-LeRobot-specific dataset code. That boundary lets a future OpenArm or other
-robot reuse the workflow protocol without pretending that its hardware schema
-is the same as L1.
+`embodied-ops` provides the generic episode decision, task registry,
+freshness/skew, transaction, normalized camera-health, and Panel contracts.
+This repository owns their L1 adapter and all LeRobot-specific dataset code.
+That boundary lets a future OpenArm or other robot reuse the workflow protocol
+without pretending that its hardware schema is the same as L1.
 
 ## Operator Panel
 

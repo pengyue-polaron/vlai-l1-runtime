@@ -1,9 +1,10 @@
-schema_version = 1
+schema_version = 2
 system_config = "../system/vlai_l1.toml"
 dataset_root = "../../data/datasets"
 derivative_root = "../../data/derivatives"
 repo_id_prefix = "pengyue-polaron/vlai-l1"
 fps = 30
+max_episode_frames = 300
 minimum_capture_fps = 27.0
 image_writer_threads = 12
 max_sample_age_s = 0.25

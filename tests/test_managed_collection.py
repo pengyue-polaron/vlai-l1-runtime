@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,9 +11,9 @@ from embodied_ops import EpisodeDecision
 from vlai_l1_runtime.collection.configuration import load_collection_config
 from vlai_l1_runtime.collection.managed import (
     ManagedXAirRuntimes,
+    _pump_runtime_output,
     _record_interactive_episode,
     _wait_for_episode_start,
-    collect_managed_episode,
     collect_managed_session,
 )
 from vlai_l1_runtime.collection.orchestration import EpisodeResult
@@ -37,6 +38,10 @@ def _stub_persistent_camera_service(monkeypatch) -> None:
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed.remove_orphaned_xair_control_socket",
         lambda _config, _side: None,
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.LeRobotBackendFactory.verify_dependency",
+        lambda _factory: None,
     )
 
 
@@ -72,13 +77,14 @@ def test_episode_start_waits_for_an_explicit_operator_confirmation(monkeypatch) 
 
     assert _wait_for_episode_start(
         lambda: resets.append("reset"),
-        lambda _prompt: next(responses),
+        lambda: None,
+        lambda: next(responses),
     )
     assert resets == ["reset"]
     assert announcements == [
-        ("enter", "reset", "quit"),
-        ("enter", "reset", "quit"),
-        ("enter", "reset", "quit"),
+        ("start", "reset", "quit"),
+        ("start", "reset", "quit"),
+        ("start", "reset", "quit"),
     ]
 
 
@@ -88,7 +94,19 @@ def test_episode_start_can_quit_before_recording(monkeypatch) -> None:
         lambda _actions: None,
     )
 
-    assert _wait_for_episode_start(lambda: None, lambda _prompt: "q") is False
+    assert _wait_for_episode_start(lambda: None, lambda: None, lambda: "q") is False
+
+
+def test_episode_start_fails_if_one_runtime_exits_while_waiting() -> None:
+    def require_runtime() -> None:
+        raise RuntimeError("right teleoperation exited")
+
+    with pytest.raises(RuntimeError, match="right teleoperation exited"):
+        _wait_for_episode_start(
+            lambda: None,
+            require_runtime,
+            lambda: None,
+        )
 
 
 def test_managed_runtimes_stop_both_sides_and_run_disable_fallback(monkeypatch) -> None:
@@ -165,6 +183,22 @@ def test_partial_runtime_start_failure_stops_started_side(monkeypatch) -> None:
     assert [command[1] for command in commands] == ["left_arm", "right_arm"]
 
 
+def test_runtime_output_hides_vendor_chatter_but_preserves_it_for_failures(
+    monkeypatch,
+) -> None:
+    emitted: list[tuple[str, str]] = []
+    output: deque[str] = deque()
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.console.emit",
+        lambda level, message: emitted.append((level, message)),
+    )
+
+    _pump_runtime_output("right", io.StringIO("vendor detail\nPASS runtime ready\n"), output)
+
+    assert list(output) == ["vendor detail", "PASS runtime ready"]
+    assert emitted == [("PASS", "RIGHT · runtime ready")]
+
+
 def test_managed_runtimes_reset_both_sides_and_resume_fresh_pairing(monkeypatch) -> None:
     requested: list[str] = []
     receiver_events: list[str] = []
@@ -219,7 +253,7 @@ def test_camera_startup_failure_never_starts_robot_runtimes(monkeypatch) -> None
     )
 
     with pytest.raises(RuntimeError, match="camera disappeared"):
-        collect_managed_episode(
+        collect_managed_session(
             CONFIG,
             experiment="startup_failure",
             task="hold position",
@@ -229,8 +263,16 @@ def test_camera_startup_failure_never_starts_robot_runtimes(monkeypatch) -> None
     assert entered_runtime is False
 
 
-def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) -> None:
+def test_managed_collection_keeps_runtime_and_resets_between_episodes(monkeypatch) -> None:
     events: list[str] = []
+    assemblers: list[object] = []
+    starts = iter((True, True, False))
+    recordings = iter(
+        (
+            (10, EpisodeDecision.SAVE),
+            (8, EpisodeDecision.DISCARD),
+        )
+    )
 
     class Source:
         def __init__(self, config, **kwargs):
@@ -240,7 +282,7 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
             events.append("source_enter")
             return self
 
-        def samples(self, frame_count):
+        def samples(self):
             events.append("samples")
             return ()
 
@@ -257,6 +299,9 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
 
         def wait_until_ready(self, receiver):
             events.append("runtime_ready")
+
+        def require_running(self):
+            events.append("runtime_check")
 
         def adjust_position(self, receiver):
             events.append("runtime_adjust")
@@ -290,79 +335,94 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
         lambda **_kwargs: Sink(),
     )
     monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.inspect_direct_dataset",
+        lambda *_args, **_kwargs: events.append("dataset_preflight"),
+    )
+    monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed._preflight_cameras",
         lambda _cameras, _config: events.append("camera_preflight"),
     )
+
+    def wait_for_start(_reset, require_runtime):
+        require_runtime()
+        start = next(starts)
+        events.append("operator_start" if start else "operator_quit")
+        return start
+
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed._wait_for_episode_start",
-        lambda reset: reset() or events.append("operator_confirmed") or True,
-    )
-    monkeypatch.setattr(
-        "vlai_l1_runtime.collection.managed._record_interactive_episode",
-        lambda **_kwargs: events.append("record") or (3, EpisodeDecision.DISCARD),
-    )
-    monkeypatch.setattr(
-        "vlai_l1_runtime.collection.managed.complete_episode",
-        lambda **_kwargs: (
-            events.append("complete") or EpisodeResult(EpisodeDecision.DISCARD, 3, None)
-        ),
+        wait_for_start,
     )
 
-    result = collect_managed_episode(
+    def record(**kwargs):
+        events.append("record")
+        assemblers.append(kwargs["assembler"])
+        return next(recordings)
+
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed._record_interactive_episode",
+        record,
+    )
+
+    def complete(*, frame_count, decision, **_kwargs):
+        events.append("complete")
+        root = Path("/dataset") if decision is EpisodeDecision.SAVE else None
+        return EpisodeResult(decision, frame_count, root)
+
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.complete_episode",
+        complete,
+    )
+
+    results = collect_managed_session(
         CONFIG,
         experiment="operator_gate",
         task="hold position",
         runtime_factory=Runtime,
     )
 
-    assert result == EpisodeResult(EpisodeDecision.DISCARD, 3, None)
+    assert [result.decision for result in results] == [
+        EpisodeDecision.SAVE,
+        EpisodeDecision.DISCARD,
+    ]
+    assert len(assemblers) == 2
+    assert assemblers[0] is not assemblers[1]
     assert events == [
+        "dataset_preflight",
         "authorize",
-        "sink_enter",
         "source_enter",
         "camera_preflight",
         "runtime_enter",
         "runtime_ready",
-        "runtime_adjust",
-        "operator_confirmed",
+        "runtime_check",
+        "operator_start",
         "camera_preflight",
+        "sink_enter",
         "samples",
         "record",
-        "runtime_exit",
-        "source_exit",
         "complete",
         "sink_exit",
-    ]
-
-
-def test_collection_session_repeats_until_quit(monkeypatch) -> None:
-    outcomes = iter(
-        (
-            EpisodeResult(EpisodeDecision.SAVE, 10, Path("/dataset")),
-            EpisodeResult(EpisodeDecision.DISCARD, 8, None),
-            EpisodeResult(EpisodeDecision.QUIT, 0, None),
-        )
-    )
-    monkeypatch.setattr(
-        "vlai_l1_runtime.collection.managed.collect_managed_episode",
-        lambda *_args, **_kwargs: next(outcomes),
-    )
-
-    results = collect_managed_session(
-        CONFIG,
-        experiment="multi_episode",
-        task="place fruit",
-    )
-
-    assert [result.decision for result in results] == [
-        EpisodeDecision.SAVE,
-        EpisodeDecision.DISCARD,
+        "runtime_adjust",
+        "runtime_check",
+        "operator_start",
+        "camera_preflight",
+        "sink_enter",
+        "samples",
+        "record",
+        "complete",
+        "sink_exit",
+        "runtime_adjust",
+        "runtime_check",
+        "operator_quit",
+        "runtime_exit",
+        "source_exit",
     ]
 
 
 def test_recording_decision_is_taken_during_capture(monkeypatch) -> None:
     commands = iter((None, "d"))
     times = iter((0.0, 0.1))
+    announcements: list[tuple[str, ...]] = []
 
     class Validated:
         def lerobot_frame(self, *, task):
@@ -386,6 +446,10 @@ def test_recording_decision_is_taken_during_capture(monkeypatch) -> None:
         lambda: next(commands),
     )
     monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.announce_input",
+        lambda actions: announcements.append(tuple(actions)),
+    )
+    monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed.time.monotonic",
         lambda: next(times),
     )
@@ -396,17 +460,18 @@ def test_recording_decision_is_taken_during_capture(monkeypatch) -> None:
         assembler=Assembler(),
         sink=sink,
         task="place fruit",
-        total=300,
         target_fps=30,
         minimum_fps=1.0,
     )
 
     assert (captured, decision) == (1, EpisodeDecision.DISCARD)
     assert sink.frames == [{"task": "place fruit"}]
+    assert announcements == [("save", "discard", "quit")]
 
 
 def test_interactive_capture_rejects_non_realtime_collection(monkeypatch) -> None:
     times = iter((0.0, 1.0))
+    commands = iter((None, None, None, ""))
 
     class Validated:
         def lerobot_frame(self, *, task):
@@ -423,7 +488,7 @@ def test_interactive_capture_rejects_non_realtime_collection(monkeypatch) -> Non
 
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed._poll_stdin_line",
-        lambda: None,
+        lambda: next(commands),
     )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed.time.monotonic",
@@ -432,11 +497,10 @@ def test_interactive_capture_rejects_non_realtime_collection(monkeypatch) -> Non
 
     with pytest.raises(RuntimeError, match=r"3\.00 FPS.*minimum 27\.00 FPS"):
         _record_interactive_episode(
-            samples=((object(), 0), (object(), 1), (object(), 2)),
+            samples=((object(), 0), (object(), 1), (object(), 2), (object(), 3)),
             assembler=Assembler(),
             sink=Sink(),
             task="place fruit",
-            total=3,
             target_fps=30,
             minimum_fps=27.0,
         )
@@ -445,6 +509,7 @@ def test_interactive_capture_rejects_non_realtime_collection(monkeypatch) -> Non
 def test_capture_progress_is_published_to_the_panel(monkeypatch) -> None:
     events: list[tuple[object, ...]] = []
     times = iter((0.0, 0.1))
+    commands = iter((None, None, None, ""))
 
     class Validated:
         def lerobot_frame(self, *, task):
@@ -469,15 +534,14 @@ def test_capture_progress_is_published_to_the_panel(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed._poll_stdin_line",
-        lambda: None,
+        lambda: next(commands),
     )
 
     assert _record_interactive_episode(
-        samples=((object(), 0), (object(), 1), (object(), 2)),
+        samples=((object(), 0), (object(), 1), (object(), 2), (object(), 3)),
         assembler=Assembler(),
         sink=Sink(),
         task="place fruit",
-        total=3,
         target_fps=30,
         minimum_fps=27.0,
     ) == (3, EpisodeDecision.SAVE)
@@ -485,13 +549,13 @@ def test_capture_progress_is_published_to_the_panel(monkeypatch) -> None:
         "collection",
         "Recording episode",
         0,
-        3,
+        None,
         {"phase": "capture", "detail": "minimum 27.00 FPS", "force": True},
     )
     assert events[-1] == (
         "collection",
         "Recording episode",
         3,
-        3,
+        None,
         {"phase": "complete", "detail": "30.00 FPS", "force": True},
     )

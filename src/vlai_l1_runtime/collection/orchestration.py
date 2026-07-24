@@ -75,7 +75,7 @@ def complete_episode(
     frame_count: int,
     decision: EpisodeDecision,
 ) -> EpisodeResult:
-    """Commit or discard frames after the live hardware session has stopped."""
+    """Commit or discard frames after live capture has stopped."""
 
     if not isinstance(decision, EpisodeDecision):
         decision = EpisodeDecision(decision)

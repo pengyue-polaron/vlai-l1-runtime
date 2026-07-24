@@ -291,20 +291,21 @@ the SDK startup `AdjustPosition` as the initial alignment, then use
 teleoperation to refine the episode start pose. Enter `r` or use Reset to
 repeat alignment on the active handles if needed, then press Enter in the
 terminal or Start recording in the Panel. The workflow rechecks all cameras
-after confirmation and records. A normal return, error, or `Ctrl+C` closes the
-collection client, disables both pairs and returns can0-can3 to `DOWN`; the
-read-only preview remains available.
+after confirmation and records until Enter, discard, or quit. Save/discard
+resets both sides on the same active handles before the next episode. A normal
+return, error, or `Ctrl+C` closes the collection client, disables both pairs
+and returns can0-can3 to `DOWN`; the read-only preview remains available.
 
 First discard a finite episode:
 
 ```bash
-just collect commissioning "hold position" 30 discard
+just collect commissioning "hold position"
 ```
 
 Then save a short new experiment and inspect it:
 
 ```bash
-just collect smoke_v1 "hold position" 60 save
+just collect smoke_v1 "hold position"
 just dataset-doctor smoke_v1
 just export-v21 smoke_v1
 ```
@@ -331,8 +332,9 @@ and is shown only when the tracked readiness gates permit it. The standalone
 Reset action starts the guarded teleoperation lifecycle solely for the SDK
 alignment and then shuts it down. All three
 previews and normalized health remain visible between collection runs. During
-the episode-start gate it offers Reset; during capture it shows progress and
-the guarded save/discard/quit inputs. Prompt
+the episode-start gate it offers **Start recording** and **Reset position**;
+during capture it offers **Save episode**, discard, and quit while showing
+indeterminate frame progress. Prompt
 registration creates a new validated JSON record without modifying an existing
 prompt and can fill the Collect task field.
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import types
 from pathlib import Path
@@ -138,11 +139,16 @@ def test_lerobot_factory_configures_async_image_writers(monkeypatch, tmp_path: P
     module = types.ModuleType("lerobot.datasets.lerobot_dataset")
     module.LeRobotDataset = LeRobotDataset
     monkeypatch.setitem(sys.modules, "lerobot.datasets.lerobot_dataset", module)
+    monkeypatch.delenv("SVT_LOG_FILE", raising=False)
+    monkeypatch.delenv("HF_DATASETS_DISABLE_PROGRESS_BARS", raising=False)
     identity = identity_from_config(CONFIG, "writer_test")
     factory = LeRobotBackendFactory(image_writer_threads=12)
 
+    factory.verify_dependency()
     factory.create(identity, tmp_path / "new")
     factory.resume(identity, tmp_path / "existing")
 
     assert [kind for kind, _ in calls] == ["create", "resume"]
     assert [kwargs["image_writer_threads"] for _, kwargs in calls] == [12, 12]
+    assert os.environ["SVT_LOG_FILE"] == os.devnull
+    assert os.environ["HF_DATASETS_DISABLE_PROGRESS_BARS"] == "1"

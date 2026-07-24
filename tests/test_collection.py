@@ -144,8 +144,8 @@ def test_collection_config_and_schema_have_one_complete_contract() -> None:
 
     assert config.collection_ready is True
     assert config.collection_blockers == ()
+    assert config.schema_version == 3
     assert config.minimum_capture_fps == 27.0
-    assert config.max_episode_frames == 300
     assert config.image_writer_threads == 12
     assert config.repo_id_for("pick_v1") == "pengyue-polaron/vlai-l1-pick_v1"
     assert set(contract.features()) == {
@@ -257,7 +257,7 @@ def test_live_source_composes_one_owned_robot_and_camera_sample() -> None:
     cameras = _CameraSource(sample.cameras)
 
     with LiveCollectionSource(config, state_source=state, camera_source=cameras) as source:
-        captured, now_ns = next(source.samples(1))
+        captured, now_ns = next(source.samples())
         assert captured.observation == sample.observation
         assert captured.action == sample.action
         assert captured.cameras == sample.cameras

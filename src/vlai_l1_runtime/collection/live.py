@@ -75,15 +75,13 @@ class LiveCollectionSource:
             raise RuntimeError("live collection source is not open")
         return self._camera_source
 
-    def samples(self, frame_count: int) -> Iterator[tuple[CollectionSample, int]]:
+    def samples(self) -> Iterator[tuple[CollectionSample, int]]:
         if self._stack is None:
             raise RuntimeError("live collection source is not open")
-        if isinstance(frame_count, bool) or not isinstance(frame_count, int) or frame_count <= 0:
-            raise ValueError("frame_count must be a positive integer")
         timeout_s = self._config.max_sample_age_s
         period_ns = round(1_000_000_000 / self._config.fps)
         next_tick = time.monotonic_ns()
-        for _ in range(frame_count):
+        while True:
             cameras = self._camera_source.capture(timeout_s=timeout_s)
             camera_timestamps = [sample.metadata.monotonic_ns for sample in cameras.values()]
             target_monotonic_ns = (min(camera_timestamps) + max(camera_timestamps)) // 2

@@ -41,9 +41,9 @@ sources exist only for pure integration tests and cannot enable the Runtime.
   to run together, and owns disable/down cleanup for its selected pair.
 - Stop the deployed teleoperation services before any direct CAN investigation.
 - A read that enables motors or emits zero-torque frames is not read-only.
-- Starting each managed episode creates both x_air runtimes and therefore runs
-  the SDK's `AdjustPosition` alignment once. At the episode-start gate, `r` or
-  the Panel's Reset input runs the same routine again on the active handles.
+- Starting a managed collection creates both x_air runtimes once. Save and
+  discard run `AdjustPosition` on the active handles before the next episode;
+  `r` or the Panel's Reset input can run it again at the episode-start gate.
   Keep the workspace clear for either motion and use teleoperation to refine
   the intended start pose before pressing Enter.
 - Standalone `just reset` and the Panel Reset workflow start only the guarded

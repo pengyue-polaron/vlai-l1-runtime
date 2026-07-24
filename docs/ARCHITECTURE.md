@@ -157,11 +157,13 @@ side before the workflow accepts paired state. The operator may run the same
 routine again with `r`, uses teleoperation to refine the episode start pose,
 and presses Enter. The workflow rechecks all cameras before the first recorded
 frame. During recording, Enter saves, `d` discards, and `q` discards and quits.
-A tracked maximum frame count auto-saves, and save/discard advances to the next
-episode.
-Each episode stops both robot sidecars before LeRobot finalization and starts a
-new managed motion session only after the operator advances. Collection
-shutdown closes only its raw client, so preview remains available. The
+Recording is operator-bounded and has no automatic duration limit.
+One collection command owns both sidecars across every episode. Save/discard
+finalization runs while the realtime control loops remain active, then
+`AdjustPosition` resets both sides on the same handles before the next episode.
+Only quit, failure, or interruption stops the sidecars and returns all four CAN
+links to `DOWN`. Collection shutdown closes only its raw client, so preview
+remains available. The
 standalone reset workflow uses this same startup alignment lifecycle without
 opening cameras or a dataset.
 

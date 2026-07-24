@@ -68,8 +68,9 @@ def test_panel_builds_live_collection_from_tracked_contract() -> None:
         "pick up the object",
     )
     assert launch.input_actions == (
-        InputAction("enter", "Next / Save", "\n", "primary"),
-        InputAction("reset", "Reset", "r\n", "quiet"),
+        InputAction("start", "Start recording", "\n", "primary"),
+        InputAction("save", "Save episode", "\n", "primary"),
+        InputAction("reset", "Reset position", "r\n", "quiet"),
         InputAction("discard", "Discard", "d\n", "danger"),
         InputAction("quit", "Quit", "q\n", "quiet"),
     )

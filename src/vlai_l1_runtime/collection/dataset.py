@@ -98,7 +98,7 @@ class DirectDatasetState:
 
 @dataclass(frozen=True)
 class LeRobotBackendFactory:
-    """Load LeRobot only when a real dataset transaction starts."""
+    """Resolve the optional LeRobot boundary and create dataset backends."""
 
     image_writer_threads: int
 
@@ -110,13 +110,12 @@ class LeRobotBackendFactory:
         ):
             raise ValueError("image_writer_threads must be a positive integer")
 
+    def verify_dependency(self) -> None:
+        _lerobot_dataset_type()
+
     def create(self, identity: DirectDatasetIdentity, root: Path) -> DatasetBackend:
-        require_collection_python()
-        try:
-            from lerobot.datasets.lerobot_dataset import LeRobotDataset
-        except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
-            raise collection_dependency_error() from exc
-        return LeRobotDataset.create(
+        dataset_type = _lerobot_dataset_type()
+        return dataset_type.create(
             repo_id=identity.repo_id,
             root=root,
             fps=identity.fps,
@@ -127,16 +126,23 @@ class LeRobotBackendFactory:
         )
 
     def resume(self, identity: DirectDatasetIdentity, root: Path) -> DatasetBackend:
-        require_collection_python()
-        try:
-            from lerobot.datasets.lerobot_dataset import LeRobotDataset
-        except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
-            raise collection_dependency_error() from exc
-        return LeRobotDataset.resume(
+        dataset_type = _lerobot_dataset_type()
+        return dataset_type.resume(
             repo_id=identity.repo_id,
             root=root,
             image_writer_threads=self.image_writer_threads,
         )
+
+
+def _lerobot_dataset_type() -> type:
+    os.environ["SVT_LOG_FILE"] = os.devnull
+    os.environ["HF_DATASETS_DISABLE_PROGRESS_BARS"] = "1"
+    require_collection_python()
+    try:
+        from lerobot.datasets.lerobot_dataset import LeRobotDataset
+    except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
+        raise collection_dependency_error() from exc
+    return LeRobotDataset
 
 
 class DirectLeRobotEpisode:

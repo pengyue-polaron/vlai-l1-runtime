@@ -33,10 +33,11 @@ from .dataset import (
     DirectLeRobotEpisode,
     LeRobotBackendFactory,
     identity_from_config,
+    inspect_direct_dataset,
     provenance_from_config,
 )
 from .orchestration import EpisodeResult, complete_episode
-from .schema import CameraSample, CollectionSample, SampleAssembler
+from .schema import CameraSample, CollectionSample, SampleAssembler, normalize_task
 
 _LEVEL = re.compile(r"^(INFO|STEP|PASS|WARN|FAIL)\s+(.*)$")
 
@@ -45,6 +46,8 @@ class RuntimeSession(Protocol):
     def __enter__(self) -> RuntimeSession: ...
 
     def wait_until_ready(self, receiver: XAirStateReceiver) -> None: ...
+
+    def require_running(self) -> None: ...
 
     def adjust_position(self, receiver: XAirStateReceiver) -> None: ...
 
@@ -189,6 +192,9 @@ class ManagedXAirRuntimes:
                 console.success("AdjustPosition complete; fresh paired state resumed")
                 return
 
+    def require_running(self) -> None:
+        self._raise_if_runtime_exited()
+
     def __exit__(self, exc_type, exc, traceback) -> None:
         self._stop_all()
 
@@ -261,39 +267,20 @@ def collect_managed_session(
     task: str,
     runtime_factory: type[RuntimeSession] = ManagedXAirRuntimes,
 ) -> tuple[EpisodeResult, ...]:
-    """Collect save/discard episodes until the operator quits."""
+    """Collect operator-bounded episodes in one persistent teleoperation session."""
 
-    results: list[EpisodeResult] = []
-    while True:
-        result = collect_managed_episode(
-            config,
-            experiment=experiment,
-            task=task,
-            runtime_factory=runtime_factory,
-        )
-        if result.decision is EpisodeDecision.QUIT:
-            console.info(
-                f"Collection stopped · saved="
-                f"{sum(item.decision is EpisodeDecision.SAVE for item in results)} "
-                f"· discarded="
-                f"{sum(item.decision is EpisodeDecision.DISCARD for item in results)}"
-            )
-            return tuple(results)
-        results.append(result)
-
-
-def collect_managed_episode(
-    config: CollectionConfig,
-    *,
-    experiment: str,
-    task: str,
-    runtime_factory: type[RuntimeSession] = ManagedXAirRuntimes,
-) -> EpisodeResult:
-    """Own a complete preflight, bimanual runtime, capture, and stop session."""
-
-    console.info(
-        f"Collection session · experiment={experiment} · max_frames={config.max_episode_frames}"
+    task = normalize_task(task)
+    identity = identity_from_config(config, experiment)
+    provenance = provenance_from_config(config)
+    console.info(f"Collection session · experiment={experiment} · task={task}")
+    console.step("Validating the atomic dataset destination")
+    inspect_direct_dataset(
+        identity,
+        expected_task=task,
+        expected_provenance=provenance,
     )
+    backend_factory = LeRobotBackendFactory(config.image_writer_threads)
+    backend_factory.verify_dependency()
     console.step("Starting or verifying persistent camera service")
     camera_status = CameraServiceController(config.system).start()
     console.success(
@@ -309,81 +296,122 @@ def collect_managed_episode(
         config,
         state_source=receiver,
     )
-    sink = DirectLeRobotEpisode(
-        identity=identity_from_config(config, experiment),
-        task=task,
-        provenance=provenance_from_config(config),
-        backend_factory=LeRobotBackendFactory(config.image_writer_threads),
-    )
+    results: list[EpisodeResult] = []
 
-    console.step("Preparing atomic dataset transaction")
-    with sink:
-        console.step("Preflighting state socket and three cameras")
-        with source:
-            _preflight_cameras(source.camera_source, config)
-            console.success("Three cameras are fresh, synchronized, and ready")
-            with runtime_factory(config) as runtimes:
-                runtimes.wait_until_ready(receiver)
-                if not _wait_for_episode_start(lambda: runtimes.adjust_position(receiver)):
-                    console.info("Collection cancelled before recording")
-                    return EpisodeResult(EpisodeDecision.QUIT, 0, None)
+    console.step("Preflighting state socket and three cameras")
+    with source:
+        _preflight_cameras(source.camera_source, config)
+        console.success("Three cameras are fresh, synchronized, and ready")
+        with runtime_factory(config) as runtimes:
+            runtimes.wait_until_ready(receiver)
+            while True:
+                if not _wait_for_episode_start(
+                    lambda: runtimes.adjust_position(receiver),
+                    runtimes.require_running,
+                ):
+                    break
                 console.step("Rechecking cameras after operator confirmation")
                 _preflight_cameras(source.camera_source, config)
                 console.success("Three cameras are fresh, synchronized, and ready to record")
-                captured_frames, decision = _record_interactive_episode(
-                    samples=source.samples(config.max_episode_frames),
-                    assembler=SampleAssembler(config),
-                    sink=sink,
+                sink = DirectLeRobotEpisode(
+                    identity=identity,
                     task=task,
-                    total=config.max_episode_frames,
-                    target_fps=config.fps,
-                    minimum_fps=config.minimum_capture_fps,
+                    provenance=provenance,
+                    backend_factory=backend_factory,
                 )
-        console.step("Finalizing dataset after hardware shutdown")
-        if captured_frames == 0:
-            if decision is EpisodeDecision.SAVE:
-                console.warning("Empty episode discarded instead of publishing")
-                decision = EpisodeDecision.DISCARD
-            result = EpisodeResult(decision, 0, None)
-        else:
-            result = complete_episode(
-                sink=sink,
-                frame_count=captured_frames,
-                decision=decision,
-            )
+                console.step("Preparing atomic episode transaction")
+                with sink:
+                    captured_frames, decision = _record_interactive_episode(
+                        samples=source.samples(),
+                        assembler=SampleAssembler(config),
+                        sink=sink,
+                        task=task,
+                        target_fps=config.fps,
+                        minimum_fps=config.minimum_capture_fps,
+                    )
+                    result = _complete_interactive_episode(
+                        sink,
+                        captured_frames=captured_frames,
+                        decision=decision,
+                    )
+                _report_episode_result(result)
+                if result.decision is EpisodeDecision.QUIT:
+                    break
+                results.append(result)
+                runtimes.adjust_position(receiver)
+
+    console.info(
+        f"Collection stopped · saved="
+        f"{sum(item.decision is EpisodeDecision.SAVE for item in results)} "
+        f"· discarded="
+        f"{sum(item.decision is EpisodeDecision.DISCARD for item in results)}"
+    )
+    return tuple(results)
+
+
+def _complete_interactive_episode(
+    sink: DirectLeRobotEpisode,
+    *,
+    captured_frames: int,
+    decision: EpisodeDecision,
+) -> EpisodeResult:
+    if captured_frames == 0:
+        sink.discard()
+        if decision is EpisodeDecision.SAVE:
+            console.warning("Empty episode discarded instead of publishing")
+            decision = EpisodeDecision.DISCARD
+        return EpisodeResult(decision, 0, None)
+    action = "Saving episode and encoding videos"
+    if decision is not EpisodeDecision.SAVE:
+        action = f"Discarding {captured_frames} captured frames"
+    console.step(action)
+    return complete_episode(
+        sink=sink,
+        frame_count=captured_frames,
+        decision=decision,
+    )
+
+
+def _report_episode_result(result: EpisodeResult) -> None:
     if result.decision is EpisodeDecision.SAVE:
         console.success(f"Saved {result.frame_count} frames to {result.dataset_root}")
-    else:
-        verb = "quit after" if result.decision is EpisodeDecision.QUIT else "discarded"
-        console.success(f"Captured and {verb} {result.frame_count} frames")
-    return result
+        return
+    verb = "quit after" if result.decision is EpisodeDecision.QUIT else "discarded"
+    console.success(f"Captured and {verb} {result.frame_count} frames")
 
 
 def _wait_for_episode_start(
     reset_position: Callable[[], None],
-    read_input: Callable[[str], str] = input,
+    require_runtime: Callable[[], None],
+    read_command: Callable[[], str | None] | None = None,
 ) -> bool:
     """Wait until the operator confirms the teleoperated episode start pose."""
 
-    if not callable(reset_position) or not callable(read_input):
-        raise TypeError("reset_position and read_input must be callable")
+    if (
+        not callable(reset_position)
+        or not callable(require_runtime)
+        or (read_command is not None and not callable(read_command))
+    ):
+        raise TypeError("episode-start callbacks must be callable")
+    if read_command is None:
+        read_command = _poll_stdin_line
     console.step("Use teleoperation to place the robot at the episode start pose")
+    console.info("Enter=start recording, r=reset with AdjustPosition, q=quit")
     while True:
-        announce_input(("enter", "reset", "quit"))
-        try:
-            command = (
-                read_input("  Enter=start recording, r=reset with AdjustPosition, q=quit > ")
-                .strip()
-                .lower()
-            )
-        except EOFError as exc:
-            raise RuntimeError("operator confirmation input closed before recording") from exc
+        announce_input(("start", "reset", "quit"))
+        require_runtime()
+        command = read_command()
+        if command is None:
+            time.sleep(0.05)
+            continue
+        command = command.strip().lower()
         if not command:
             console.success("Operator confirmed the episode start pose")
             return True
         if command in {"r", "reset"}:
             reset_position()
             console.step("Use teleoperation to place the robot at the episode start pose")
+            console.info("Enter=start recording, r=reset with AdjustPosition, q=quit")
             continue
         if command in {"q", "quit", "exit"}:
             return False
@@ -409,15 +437,14 @@ def _record_interactive_episode(
     assembler: SampleAssembler,
     sink: DirectLeRobotEpisode,
     task: str,
-    total: int,
     target_fps: int,
     minimum_fps: float,
 ) -> tuple[int, EpisodeDecision]:
-    """Record until save/discard/quit input or the tracked frame ceiling."""
+    """Record until the operator explicitly saves, discards, or quits."""
 
     console.step(f"Recording episode · target {target_fps} FPS")
-    console.warning(f"Enter=save, d+Enter=discard, q+Enter=quit · auto-save at {total} frames")
-    announce_input(("enter", "discard", "quit"))
+    console.warning("Enter=save, d+Enter=discard, q+Enter=quit")
+    announce_input(("save", "discard", "quit"))
     status = console.LiveStatusLine()
     started = time.monotonic()
     captured = 0
@@ -426,7 +453,7 @@ def _record_interactive_episode(
         "collection",
         "Recording episode",
         0,
-        total,
+        None,
         phase="capture",
         detail=f"minimum {minimum_fps:.2f} FPS",
         force=True,
@@ -439,30 +466,31 @@ def _record_interactive_episode(
                     decision = normalize_episode_decision(command)
                 except ValueError:
                     console.warning("Press Enter to save, enter d to discard, or enter q to quit")
-                    announce_input(("enter", "discard", "quit"))
+                    announce_input(("save", "discard", "quit"))
                 else:
                     break
             sink.add_frame(assembler.validate(sample, now_ns=now_ns).lerobot_frame(task=task))
             captured += 1
-            status.update(f"Recording frame {captured:>4}/{total}")
+            status.update(f"Recording frame {captured}")
             announce_progress(
                 "collection",
                 "Recording episode",
                 captured,
-                total,
+                None,
                 phase="capture",
-                detail=f"frame {captured}/{total}",
+                detail=f"frame {captured}",
             )
     finally:
         status.close()
     elapsed_s = time.monotonic() - started
     effective_fps = captured / elapsed_s if elapsed_s > 0 else 0.0
-    decision = decision or EpisodeDecision.SAVE
+    if decision is None:
+        raise RuntimeError("live sample stream ended before an operator decision")
     announce_progress(
         "collection",
         "Recording episode",
         captured,
-        total,
+        None,
         phase="complete" if decision is EpisodeDecision.SAVE else decision.value,
         detail=f"{effective_fps:.2f} FPS",
         force=True,
@@ -509,9 +537,7 @@ def _pump_runtime_output(side: str, stream: TextIO, output: deque[str]) -> None:
             continue
         output.append(line)
         match = _LEVEL.fullmatch(line)
-        if match is None:
-            console.info(f"{side.upper():>5} · {line}")
-        else:
+        if match is not None:
             console.emit(match.group(1), f"{side.upper():>5} · {match.group(2)}")
 
 

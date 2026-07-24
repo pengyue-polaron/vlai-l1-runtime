@@ -84,15 +84,16 @@ just collect fruit_placement_v1 "place the fruit in the bowl"
 The command starts or verifies the persistent three-camera
 owner, authorizes the privileged robot lifecycle, preflights raw frames before
 enabling motors, starts both x_air runtimes, and waits for fresh paired state.
-Runtime creation performs the SDK's `AdjustPosition` alignment once for every
-episode. Use teleoperation to refine the episode start pose, then press `Enter`
+Runtime creation performs the SDK's startup alignment once for the collection
+session. Use teleoperation to refine the episode start pose, then press `Enter`
 in the terminal or **Start recording** in the Panel. Enter `r` or use **Reset**
 before recording to run `AdjustPosition` again. The workflow
 rechecks all three cameras after that confirmation before recording the atomic
 canonical dataset transaction. During recording, press `Enter` to save, enter
 `d` to discard, or enter `q` to discard the current episode and quit. After a
-save or discard, the same command advances to the next episode. The tracked
-frame ceiling auto-saves an episode if no earlier decision is entered.
+save or discard, the same active runtime runs `AdjustPosition` and advances to
+the next episode without disabling either arm pair. Recording has no automatic
+time limit and ends only when the operator makes a decision.
 
 The reusable `embodied-ops` Panel is available with:
 
@@ -126,9 +127,11 @@ Stopping a collection leaves the read-only camera service available. Only
 dataset transaction, then disables both pairs and returns all four CAN links to
 `DOWN`. The Panel's standalone **Reset** action uses this command. This is the
 x_air SDK alignment routine, not a policy-command or arbitrary-pose interface.
+Use the collection workflow when the robot must remain enabled across episodes.
 
 Camera images are written asynchronously so the live loop can maintain its
-tracked 30 FPS rate; a session below the tracked minimum is discarded instead
+tracked 30 FPS rate; encoder banners are suppressed while the current save
+stage remains visible. A session below the tracked minimum is discarded instead
 of publishing time-compressed data. Normal completion, collection failure,
 startup failure after either side begins, and `Ctrl+C` all use the same
 fail-closed cleanup: motors are disabled and all four CAN links return to

@@ -188,8 +188,9 @@ class L1OperatorPanelAdapter:
                     task,
                 ),
                 input_actions=(
-                    InputAction("enter", "Next / Save", "\n", "primary"),
-                    InputAction("reset", "Reset", "r\n", "quiet"),
+                    InputAction("start", "Start recording", "\n", "primary"),
+                    InputAction("save", "Save episode", "\n", "primary"),
+                    InputAction("reset", "Reset position", "r\n", "quiet"),
                     InputAction("discard", "Discard", "d\n", "danger"),
                     InputAction("quit", "Quit", "q\n", "quiet"),
                 ),

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ..configuration import SystemConfig
-from .xair import describe_xair_side
+from .xair import describe_xair_side, xair_control_socket_path
 
 
 def run_xair_side(config: SystemConfig, side: str) -> int:
@@ -124,7 +124,7 @@ def run_xair_side(config: SystemConfig, side: str) -> int:
                 child.wait()
         _disable_and_close(config, interfaces)
         try:
-            _remove_orphaned_control_socket(Path(str(launch["control_socket_path"])))
+            remove_orphaned_xair_control_socket(config, side)
         finally:
             for signum, handler in previous_handlers.items():
                 signal.signal(signum, handler)
@@ -139,6 +139,12 @@ def _invoking_identity() -> tuple[int, int]:
     if uid < 0 or gid < 0:
         raise RuntimeError("sudo invoking identity must be non-negative")
     return uid, gid
+
+
+def remove_orphaned_xair_control_socket(config: SystemConfig, side: str) -> None:
+    """Remove one configured x_air control socket after its owner has exited."""
+
+    _remove_orphaned_control_socket(xair_control_socket_path(config, side))
 
 
 def _remove_orphaned_control_socket(path: Path) -> None:

@@ -24,6 +24,7 @@ from ..cameras import CameraSetValidator
 from ..teleoperation import (
     XAirStateReceiver,
     describe_xair_side,
+    remove_orphaned_xair_control_socket,
     request_xair_adjust_position,
     verify_xair_dependency,
 )
@@ -239,7 +240,17 @@ class ManagedXAirRuntimes:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+        cleanup_failures = []
+        for side in ("left", "right"):
+            try:
+                remove_orphaned_xair_control_socket(system, side)
+            except (OSError, RuntimeError) as exc:
+                cleanup_failures.append(f"{side}: {exc}")
         self._runtimes.clear()
+        if cleanup_failures:
+            raise RuntimeError(
+                "teleoperation control endpoint cleanup failed: " + "; ".join(cleanup_failures)
+            )
         console.success("Teleoperation stopped; managed CAN links are disabled and down")
 
 

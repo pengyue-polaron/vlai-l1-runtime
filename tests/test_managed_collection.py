@@ -34,6 +34,10 @@ def _stub_persistent_camera_service(monkeypatch) -> None:
         "vlai_l1_runtime.collection.managed.CameraServiceController",
         Controller,
     )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.remove_orphaned_xair_control_socket",
+        lambda _config, _side: None,
+    )
 
 
 class _Process:
@@ -91,6 +95,7 @@ def test_managed_runtimes_stop_both_sides_and_run_disable_fallback(monkeypatch) 
     processes: list[_Process] = []
     signals: list[tuple[int, str]] = []
     commands: list[tuple[str, ...]] = []
+    cleaned_sides: list[str] = []
 
     def popen(*args, **kwargs):
         process = _Process()
@@ -111,6 +116,10 @@ def test_managed_runtimes_stop_both_sides_and_run_disable_fallback(monkeypatch) 
         "vlai_l1_runtime.collection.managed.subprocess.run",
         lambda command, **kwargs: commands.append(tuple(command)),
     )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.remove_orphaned_xair_control_socket",
+        lambda _config, side: cleaned_sides.append(side),
+    )
 
     with pytest.raises(RuntimeError, match="capture failed"), ManagedXAirRuntimes(CONFIG):
         raise RuntimeError("capture failed")
@@ -118,6 +127,7 @@ def test_managed_runtimes_stop_both_sides_and_run_disable_fallback(monkeypatch) 
     assert len(processes) == 2
     assert signals == [(processes[0].pid, "INT"), (processes[1].pid, "INT")]
     assert [command[1] for command in commands] == ["left_arm", "right_arm"]
+    assert cleaned_sides == ["left", "right"]
 
 
 def test_partial_runtime_start_failure_stops_started_side(monkeypatch) -> None:

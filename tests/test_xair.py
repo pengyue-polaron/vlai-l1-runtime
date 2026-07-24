@@ -20,7 +20,11 @@ from vlai_l1_runtime.teleoperation import (
     verify_xair_dependency,
     xair_control_socket_path,
 )
-from vlai_l1_runtime.teleoperation.lifecycle import _find_competing_control, _qdisc_drops
+from vlai_l1_runtime.teleoperation.lifecycle import (
+    _find_competing_control,
+    _qdisc_drops,
+    _remove_orphaned_control_socket,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM_CONFIG = ROOT / "configs/system/vlai_l1.toml"
@@ -103,6 +107,24 @@ def test_qdisc_health_query_isolated_from_runtime_shutdown_signal(monkeypatch) -
 
     assert _qdisc_drops("can1") == 7
     assert calls[0][1]["start_new_session"] is True
+
+
+def test_control_socket_cleanup_preserves_active_owner_and_removes_orphan(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "control.sock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(path))
+    server.listen(1)
+    try:
+        with pytest.raises(RuntimeError, match="still active"):
+            _remove_orphaned_control_socket(path)
+        assert path.exists()
+    finally:
+        server.close()
+
+    _remove_orphaned_control_socket(path)
+    assert not path.exists()
 
 
 def test_xair_packets_form_exact_degree_valued_bimanual_state() -> None:

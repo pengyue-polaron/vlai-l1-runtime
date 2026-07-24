@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import signal
+import stat
 import subprocess
 import time
 from pathlib import Path
@@ -122,8 +123,11 @@ def run_xair_side(config: SystemConfig, side: str) -> int:
                 child.kill()
                 child.wait()
         _disable_and_close(config, interfaces)
-        for signum, handler in previous_handlers.items():
-            signal.signal(signum, handler)
+        try:
+            _remove_orphaned_control_socket(Path(str(launch["control_socket_path"])))
+        finally:
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
 
 
 def _invoking_identity() -> tuple[int, int]:
@@ -135,6 +139,27 @@ def _invoking_identity() -> tuple[int, int]:
     if uid < 0 or gid < 0:
         raise RuntimeError("sudo invoking identity must be non-negative")
     return uid, gid
+
+
+def _remove_orphaned_control_socket(path: Path) -> None:
+    """Remove only an inactive repository-owned Unix control endpoint."""
+
+    if not path.is_absolute():
+        raise RuntimeError("x_air control socket path must be absolute")
+    try:
+        identity = path.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISSOCK(identity.st_mode):
+        raise RuntimeError(f"x_air control socket path is not a socket: {path}")
+    try:
+        entries = Path("/proc/net/unix").read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise RuntimeError("cannot verify x_air control socket ownership") from exc
+    active_paths = {fields[7] for line in entries[1:] if len(fields := line.split(maxsplit=7)) == 8}
+    if str(path) in active_paths:
+        raise RuntimeError(f"x_air control socket is still active: {path}")
+    path.unlink()
 
 
 def _configure_can(config: SystemConfig, interface: str) -> None:

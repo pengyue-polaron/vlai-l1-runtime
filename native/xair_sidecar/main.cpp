@@ -477,11 +477,13 @@ int run(const Options& options) {
     vlai_l1::configure_fifo_priority_cap(options.rt_priority);
     vlai_l1::set_and_require_all_threads_fifo(options.rt_priority, 1);
     DatagramPublisher publisher(options.state_socket, options.side, options.publish_hz);
-    ControlServer control(options.control_socket, options.control_owner_uid,
-                          options.control_owner_gid);
     vlai_l1::CanHealthMonitor can_health({options.leader_can, options.follower_can});
     StateSlot slot;
     TeleopHandle handle;
+    // Declare the control endpoint last so scope unwinding removes it before a
+    // potentially blocking vendor-handle destructor.
+    ControlServer control(options.control_socket, options.control_owner_uid,
+                          options.control_owner_gid);
     const std::string arm_side = options.side + "_arm";
     std::cout << "INFO creating x_air " << arm_side << " session: " << options.leader_can
               << " -> " << options.follower_can << '\n';

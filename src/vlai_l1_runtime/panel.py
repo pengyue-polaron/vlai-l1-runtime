@@ -66,6 +66,8 @@ class L1OperatorPanelAdapter:
                 submit_label="Export",
             ),
         ]
+        if not config.system.teleoperation.blockers:
+            workflows.insert(1, _reset_workflow())
         if config.collection_ready:
             workflows.insert(1, _collect_workflow())
         return {
@@ -152,9 +154,9 @@ class L1OperatorPanelAdapter:
             "--config",
             str(self.collection_config.path),
         )
-        if workflow == "validate-collection":
+        if workflow in {"validate-collection", "reset"}:
             if values:
-                raise ValueError("validate-collection accepts no values")
+                raise ValueError(f"{workflow} accepts no values")
             return WorkflowLaunch(workflow, workflow, base)
         if workflow in {"dataset-doctor", "export-v21"}:
             if set(values) != {"experiment"}:
@@ -187,6 +189,7 @@ class L1OperatorPanelAdapter:
                 ),
                 input_actions=(
                     InputAction("enter", "Next / Save", "\n", "primary"),
+                    InputAction("reset", "Reset", "r\n", "quiet"),
                     InputAction("discard", "Discard", "d\n", "danger"),
                     InputAction("quit", "Quit", "q\n", "quiet"),
                 ),
@@ -291,6 +294,21 @@ def _collect_workflow() -> dict[str, Any]:
                 "placeholder": "place the fruit in the bowl",
             },
         ],
+    }
+
+
+def _reset_workflow() -> dict[str, Any]:
+    return {
+        "id": "reset",
+        "label": "Reset",
+        "eyebrow": "ROBOT",
+        "title": "Reset teleoperation alignment",
+        "description": "Run x_air AdjustPosition on both teleoperation sides.",
+        "submit_label": "Reset robot",
+        "confirm": (
+            "This moves both leader and follower arm pairs. Confirm the workspace is clear?"
+        ),
+        "fields": [],
     }
 
 

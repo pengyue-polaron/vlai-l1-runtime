@@ -100,12 +100,13 @@ just collect commissioning "hold position" 30 discard
 
 `just collect` owns the whole live session. It preflights the state socket and
 all three cameras before starting either robot runtime, starts the left and
-right runtimes, and waits for paired state. Use teleoperation to place the robot
-at the episode start pose, then press Enter in the terminal or Start recording
-in the Panel. Collection rechecks all cameras after confirmation, records, and
-always disables both pairs on completion, failure, or interruption. Start it
-with no manual `sdk-start`, observer, camera reader, or competing controller
-active.
+right runtimes, and waits for paired state after the SDK's startup
+`AdjustPosition`. Use teleoperation to refine the episode start pose, enter `r`
+or use Reset to repeat alignment if needed, then press Enter in the terminal or
+Start recording in the Panel. Collection rechecks all cameras after
+confirmation, records, and always disables both pairs on completion, failure,
+or interruption. Start it with no manual `sdk-start`, observer, camera reader,
+or competing controller active.
 
 Then record one short saved episode and run `dataset-doctor`. A successful
 teleoperation commissioning changes only the teleoperation and hardware

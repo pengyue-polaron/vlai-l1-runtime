@@ -21,6 +21,7 @@ def run_xair_side(config: SystemConfig, side: str) -> int:
     if os.geteuid() != 0:
         raise RuntimeError("x_air live launch requires root")
     launch = describe_xair_side(config, side)
+    owner_uid, owner_gid = _invoking_identity()
     repo = config.path.parents[2]
     assets = repo / "build/xair-assets"
     sidecar = repo / "build/xair-sidecar/vlai_l1_xair_sidecar"
@@ -93,6 +94,12 @@ def run_xair_side(config: SystemConfig, side: str) -> int:
             str(config.teleoperation.rt_priority),
             "--can-health-poll-ms",
             str(round(config.teleoperation.can_health_poll_s * 1000)),
+            "--control-socket",
+            str(launch["control_socket_path"]),
+            "--control-owner-uid",
+            str(owner_uid),
+            "--control-owner-gid",
+            str(owner_gid),
         )
         child = subprocess.Popen(command, env=environment, text=True)
         while child.poll() is None and not stop_requested:
@@ -117,6 +124,17 @@ def run_xair_side(config: SystemConfig, side: str) -> int:
         _disable_and_close(config, interfaces)
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
+
+
+def _invoking_identity() -> tuple[int, int]:
+    try:
+        uid = int(os.environ.get("SUDO_UID", os.getuid()))
+        gid = int(os.environ.get("SUDO_GID", os.getgid()))
+    except ValueError as exc:
+        raise RuntimeError("sudo invoking identity is invalid") from exc
+    if uid < 0 or gid < 0:
+        raise RuntimeError("sudo invoking identity must be non-negative")
+    return uid, gid
 
 
 def _configure_can(config: SystemConfig, interface: str) -> None:

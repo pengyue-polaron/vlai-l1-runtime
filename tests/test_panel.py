@@ -31,6 +31,7 @@ def test_panel_exposes_the_commissioned_collection_stack() -> None:
     assert {workflow["id"] for workflow in catalog["workflows"]} == {
         "validate-collection",
         "collect",
+        "reset",
         "dataset-doctor",
         "export-v21",
     }
@@ -41,6 +42,12 @@ def test_panel_exposes_the_commissioned_collection_stack() -> None:
     assert camera.command == (
         str(ROOT / "scripts/camera_service.sh"),
         "start",
+    )
+    reset = adapter.build_launch("reset", {})
+    assert reset.command[-3:] == (
+        "reset",
+        "--config",
+        str(CONFIG),
     )
 
 
@@ -62,6 +69,7 @@ def test_panel_builds_live_collection_from_tracked_contract() -> None:
     )
     assert launch.input_actions == (
         InputAction("enter", "Next / Save", "\n", "primary"),
+        InputAction("reset", "Reset", "r\n", "quiet"),
         InputAction("discard", "Discard", "d\n", "danger"),
         InputAction("quit", "Quit", "q\n", "quiet"),
     )

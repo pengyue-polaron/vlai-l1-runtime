@@ -9,7 +9,9 @@ from .xair import (
     describe_xair_side,
     prepare_xair_assets,
     render_xair_control_config,
+    request_xair_adjust_position,
     verify_xair_dependency,
+    xair_control_socket_path,
 )
 
 __all__ = [
@@ -20,6 +22,8 @@ __all__ = [
     "describe_xair_side",
     "prepare_xair_assets",
     "render_xair_control_config",
+    "request_xair_adjust_position",
     "run_xair_side",
     "verify_xair_dependency",
+    "xair_control_socket_path",
 ]

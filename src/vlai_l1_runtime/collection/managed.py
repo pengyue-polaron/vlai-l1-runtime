@@ -11,6 +11,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol, TextIO
 
@@ -20,7 +21,12 @@ from embodied_ops.operator_panel import announce_input, announce_progress
 from .. import console
 from ..camera_service import CameraServiceController
 from ..cameras import CameraSetValidator
-from ..teleoperation import XAirStateReceiver, describe_xair_side, verify_xair_dependency
+from ..teleoperation import (
+    XAirStateReceiver,
+    describe_xair_side,
+    request_xair_adjust_position,
+    verify_xair_dependency,
+)
 from .configuration import CollectionConfig
 from .dataset import (
     DirectLeRobotEpisode,
@@ -38,6 +44,8 @@ class RuntimeSession(Protocol):
     def __enter__(self) -> RuntimeSession: ...
 
     def wait_until_ready(self, receiver: XAirStateReceiver) -> None: ...
+
+    def adjust_position(self, receiver: XAirStateReceiver) -> None: ...
 
     def __exit__(self, exc_type, exc, traceback) -> None: ...
 
@@ -146,6 +154,40 @@ class ManagedXAirRuntimes:
         finally:
             status.close()
 
+    def adjust_position(self, receiver: XAirStateReceiver) -> None:
+        """Run the SDK alignment routine on both sides and require fresh paired state."""
+
+        if len(self._runtimes) != 2:
+            raise RuntimeError("both x_air runtimes must be active before AdjustPosition")
+        self._raise_if_runtime_exited()
+        console.step("Resetting both teleoperation sides with x_air AdjustPosition")
+        system = self._config.system
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="vlai-adjust-position") as pool:
+            requests = {
+                side: pool.submit(request_xair_adjust_position, system, side)
+                for side in ("left", "right")
+            }
+            for side in ("left", "right"):
+                try:
+                    requests[side].result()
+                except BaseException as exc:
+                    raise RuntimeError(f"{side} AdjustPosition failed: {exc}") from exc
+        self._raise_if_runtime_exited()
+        receiver.reset_pairing()
+        timeout_s = system.teleoperation.startup_timeout_s
+        deadline = time.monotonic() + timeout_s
+        while True:
+            self._raise_if_runtime_exited()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    "fresh paired robot state did not resume after AdjustPosition "
+                    f"within {timeout_s:.1f}s"
+                )
+            if receiver.receive(timeout_s=min(0.25, remaining)) is not None:
+                console.success("AdjustPosition complete; fresh paired state resumed")
+                return
+
     def __exit__(self, exc_type, exc, traceback) -> None:
         self._stop_all()
 
@@ -155,7 +197,7 @@ class ManagedXAirRuntimes:
             if status is not None:
                 detail = runtime.output[-1] if runtime.output else "no runtime output"
                 raise RuntimeError(
-                    f"{runtime.side} teleoperation exited during startup "
+                    f"{runtime.side} teleoperation exited unexpectedly "
                     f"with status {status}: {detail}"
                 )
 
@@ -271,7 +313,7 @@ def collect_managed_episode(
             console.success("Three cameras are fresh, synchronized, and ready")
             with runtime_factory(config) as runtimes:
                 runtimes.wait_until_ready(receiver)
-                if not _wait_for_episode_start():
+                if not _wait_for_episode_start(lambda: runtimes.adjust_position(receiver)):
                     console.info("Collection cancelled before recording")
                     return EpisodeResult(EpisodeDecision.QUIT, 0, None)
                 console.step("Rechecking cameras after operator confirmation")
@@ -307,25 +349,47 @@ def collect_managed_episode(
 
 
 def _wait_for_episode_start(
+    reset_position: Callable[[], None],
     read_input: Callable[[str], str] = input,
 ) -> bool:
     """Wait until the operator confirms the teleoperated episode start pose."""
 
-    if not callable(read_input):
-        raise TypeError("read_input must be callable")
+    if not callable(reset_position) or not callable(read_input):
+        raise TypeError("reset_position and read_input must be callable")
     console.step("Use teleoperation to place the robot at the episode start pose")
     while True:
-        announce_input(("enter", "quit"))
+        announce_input(("enter", "reset", "quit"))
         try:
-            command = read_input("  Enter=start recording, q=quit > ").strip().lower()
+            command = (
+                read_input("  Enter=start recording, r=reset with AdjustPosition, q=quit > ")
+                .strip()
+                .lower()
+            )
         except EOFError as exc:
             raise RuntimeError("operator confirmation input closed before recording") from exc
         if not command:
             console.success("Operator confirmed the episode start pose")
             return True
+        if command in {"r", "reset"}:
+            reset_position()
+            console.step("Use teleoperation to place the robot at the episode start pose")
+            continue
         if command in {"q", "quit", "exit"}:
             return False
-        console.warning("Press Enter to start recording, or enter q to quit")
+        console.warning("Press Enter to start, enter r to reset, or enter q to quit")
+
+
+def reset_managed_teleoperation(config: CollectionConfig) -> None:
+    """Run the SDK startup AdjustPosition lifecycle and shut both sides down."""
+
+    if config.system.teleoperation.blockers:
+        blockers = ", ".join(config.system.teleoperation.blockers)
+        raise RuntimeError(f"teleoperation reset is unavailable: {blockers}")
+    ManagedXAirRuntimes.authorize()
+    receiver = XAirStateReceiver(config.system)
+    with receiver, ManagedXAirRuntimes(config) as runtimes:
+        runtimes.wait_until_ready(receiver)
+    console.success("Standalone teleoperation reset complete; startup alignment succeeded")
 
 
 def _record_interactive_episode(

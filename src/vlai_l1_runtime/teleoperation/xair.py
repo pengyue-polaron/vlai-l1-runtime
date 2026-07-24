@@ -29,6 +29,7 @@ _REQUIRED_SYMBOLS = (
     "xarm_teleop_create_unilateral",
     "xarm_teleop_destroy",
     "xarm_teleop_get_last_error",
+    "xarm_teleop_go_home",
     "xarm_teleop_is_running",
     "xarm_teleop_set_full_state_callback",
     "xarm_teleop_start",
@@ -46,6 +47,8 @@ _PROFILE_FIELDS = {
 }
 _YAML_VECTOR = re.compile(r"^\s*(Kp|Kd|Fc|k|Fv|Fo):\s*\[(.*)]\s*$")
 _PACKAGE_VERSION = re.compile(r"<version>\s*([^<\s]+)\s*</version>")
+_ADJUST_POSITION_REQUEST = b"ADJUST_POSITION\n"
+_CONTROL_RESPONSE_LIMIT = 4096
 
 
 @dataclass(frozen=True)
@@ -169,9 +172,8 @@ class XAirStateReceiver:
         if not isinstance(config, SystemConfig):
             raise TypeError("XAirStateReceiver requires SystemConfig")
         self._path = config.teleoperation.state_socket_path
-        self._assembler = XAirBimanualAssembler(
-            max_side_skew_s=config.teleoperation.max_side_skew_s
-        )
+        self._max_side_skew_s = config.teleoperation.max_side_skew_s
+        self._assembler = XAirBimanualAssembler(max_side_skew_s=self._max_side_skew_s)
         self._socket: socket.socket | None = None
         self._socket_inode: int | None = None
 
@@ -250,6 +252,18 @@ class XAirStateReceiver:
             return closest
         return self.receive(timeout_s=timeout_s)
 
+    def reset_pairing(self) -> None:
+        """Discard queued packets after a deliberate SDK control-loop restart."""
+
+        if self._socket is None:
+            raise RuntimeError("x_air state receiver is not open")
+        while True:
+            readable, _, _ = select.select((self._socket,), (), (), 0)
+            if not readable:
+                break
+            self._socket.recv(_PACKET.size + 1)
+        self._assembler = XAirBimanualAssembler(max_side_skew_s=self._max_side_skew_s)
+
     def __exit__(self, exc_type, exc, traceback) -> None:
         receiver, self._socket = self._socket, None
         if receiver is not None:
@@ -261,6 +275,53 @@ class XAirStateReceiver:
         if stat.S_ISSOCK(identity.st_mode) and identity.st_ino == self._socket_inode:
             self._path.unlink()
         self._socket_inode = None
+
+
+def xair_control_socket_path(config: SystemConfig, side: str) -> Path:
+    """Derive one sidecar control endpoint from the tracked state endpoint."""
+
+    if not isinstance(config, SystemConfig):
+        raise TypeError("xair_control_socket_path requires SystemConfig")
+    if side not in SIDES:
+        raise ValueError(f"side must be one of {SIDES}")
+    state_path = config.teleoperation.state_socket_path
+    return state_path.with_name(f"{state_path.stem}-{side}-control.sock")
+
+
+def request_xair_adjust_position(config: SystemConfig, side: str) -> None:
+    """Run the SDK AdjustPosition routine through the owning sidecar."""
+
+    path = xair_control_socket_path(config, side)
+    timeout_s = config.teleoperation.startup_timeout_s
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.settimeout(timeout_s)
+    try:
+        client.connect(str(path))
+        client.sendall(_ADJUST_POSITION_REQUEST)
+        client.shutdown(socket.SHUT_WR)
+        response = bytearray()
+        while len(response) <= _CONTROL_RESPONSE_LIMIT:
+            chunk = client.recv(_CONTROL_RESPONSE_LIMIT + 1 - len(response))
+            if not chunk:
+                break
+            response.extend(chunk)
+    except TimeoutError as exc:
+        raise TimeoutError(f"{side} x_air AdjustPosition exceeded {timeout_s:.1f}s") from exc
+    except OSError as exc:
+        raise RuntimeError(f"cannot request {side} x_air AdjustPosition: {exc}") from exc
+    finally:
+        client.close()
+    if len(response) > _CONTROL_RESPONSE_LIMIT:
+        raise RuntimeError(f"{side} x_air control response is too large")
+    if response == b"OK\n":
+        return
+    try:
+        detail = bytes(response).decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise RuntimeError(f"{side} x_air control response is not UTF-8") from exc
+    if not detail:
+        detail = "empty control response"
+    raise RuntimeError(f"{side} x_air AdjustPosition failed: {detail}")
 
 
 def describe_xair_side(config: SystemConfig, side: str) -> dict[str, object]:
@@ -291,6 +352,7 @@ def describe_xair_side(config: SystemConfig, side: str) -> dict[str, object]:
         "can_restart_ms": config.can.restart_ms,
         "can_tx_queue_length": config.can.tx_queue_length,
         "state_socket_path": str(teleop.state_socket_path),
+        "control_socket_path": str(xair_control_socket_path(config, side)),
         "publish_hz": teleop.publish_hz,
         "state_timeout_ms": round(teleop.state_timeout_s * 1000),
         "rt_priority": teleop.rt_priority,

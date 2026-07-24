@@ -103,6 +103,9 @@ cameras action="start":
 panel:
     {{ vpy }} -m vlai_l1_runtime.cli panel --config {{ collection_config }}
 
+reset:
+    {{ vpy }} -m vlai_l1_runtime.cli reset --config {{ collection_config }}
+
 collect experiment task:
     {{ repo }}/scripts/collect.sh \
         --config {{ collection_config }} \

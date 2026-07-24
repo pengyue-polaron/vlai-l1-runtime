@@ -287,12 +287,13 @@ Start with no manual x_air runtime, observer, camera reader, or competing
 controller active. `just collect` starts or reuses the marked Camera Service,
 connects one raw client, preflights all three cameras before motor enable,
 starts both configured runtimes, and waits for fresh paired state. Use
-teleoperation to place the robot at the episode start pose, then press Enter in
-the terminal or Start recording in the Panel. The workflow rechecks all cameras
+the SDK startup `AdjustPosition` as the initial alignment, then use
+teleoperation to refine the episode start pose. Enter `r` or use Reset to
+repeat alignment on the active handles if needed, then press Enter in the
+terminal or Start recording in the Panel. The workflow rechecks all cameras
 after confirmation and records. A normal return, error, or `Ctrl+C` closes the
 collection client, disables both pairs and returns can0-can3 to `DOWN`; the
-read-only preview remains available. The input gate is not an automatic reset;
-no reviewed fixed-pose command path exists.
+read-only preview remains available.
 
 First discard a finite episode:
 
@@ -326,9 +327,12 @@ has no authentication or transport encryption. Do not expose it to an
 untrusted network. Start the persistent preview with **Start cameras** or
 `just cameras`; stop it explicitly with **Stop cameras** or
 `just cameras stop`. Its collection action invokes the same managed session
-and is shown only when the tracked readiness gates permit it. All three
+and is shown only when the tracked readiness gates permit it. The standalone
+Reset action starts the guarded teleoperation lifecycle solely for the SDK
+alignment and then shuts it down. All three
 previews and normalized health remain visible between collection runs. During
-capture it also shows progress and the guarded Start recording input. Prompt
+the episode-start gate it offers Reset; during capture it shows progress and
+the guarded save/discard/quit inputs. Prompt
 registration creates a new validated JSON record without modifying an existing
 prompt and can fill the Collect task field.
 

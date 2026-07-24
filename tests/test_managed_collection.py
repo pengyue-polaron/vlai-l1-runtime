@@ -59,14 +59,23 @@ class _Process:
 
 def test_episode_start_waits_for_an_explicit_operator_confirmation(monkeypatch) -> None:
     announcements: list[tuple[str, ...]] = []
-    responses = iter(("not yet", ""))
+    resets: list[str] = []
+    responses = iter(("r", "not yet", ""))
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed.announce_input",
         lambda actions: announcements.append(tuple(actions)),
     )
 
-    assert _wait_for_episode_start(lambda _prompt: next(responses)) is True
-    assert announcements == [("enter", "quit"), ("enter", "quit")]
+    assert _wait_for_episode_start(
+        lambda: resets.append("reset"),
+        lambda _prompt: next(responses),
+    )
+    assert resets == ["reset"]
+    assert announcements == [
+        ("enter", "reset", "quit"),
+        ("enter", "reset", "quit"),
+        ("enter", "reset", "quit"),
+    ]
 
 
 def test_episode_start_can_quit_before_recording(monkeypatch) -> None:
@@ -75,7 +84,7 @@ def test_episode_start_can_quit_before_recording(monkeypatch) -> None:
         lambda _actions: None,
     )
 
-    assert _wait_for_episode_start(lambda _prompt: "q") is False
+    assert _wait_for_episode_start(lambda: None, lambda _prompt: "q") is False
 
 
 def test_managed_runtimes_stop_both_sides_and_run_disable_fallback(monkeypatch) -> None:
@@ -146,6 +155,39 @@ def test_partial_runtime_start_failure_stops_started_side(monkeypatch) -> None:
     assert [command[1] for command in commands] == ["left_arm", "right_arm"]
 
 
+def test_managed_runtimes_reset_both_sides_and_resume_fresh_pairing(monkeypatch) -> None:
+    requested: list[str] = []
+    receiver_events: list[str] = []
+    manager = ManagedXAirRuntimes(CONFIG)
+    manager._runtimes = [
+        SimpleNamespace(
+            side=side,
+            process=SimpleNamespace(poll=lambda: None),
+            output=[],
+        )
+        for side in ("left", "right")
+    ]
+
+    class Receiver:
+        def reset_pairing(self):
+            receiver_events.append("reset_pairing")
+
+        def receive(self, *, timeout_s):
+            assert 0 < timeout_s <= 0.25
+            receiver_events.append("fresh_pair")
+            return object()
+
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.request_xair_adjust_position",
+        lambda _config, side: requested.append(side),
+    )
+
+    manager.adjust_position(Receiver())
+
+    assert set(requested) == {"left", "right"}
+    assert receiver_events == ["reset_pairing", "fresh_pair"]
+
+
 def test_camera_startup_failure_never_starts_robot_runtimes(monkeypatch) -> None:
     entered_runtime = False
 
@@ -206,6 +248,9 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
         def wait_until_ready(self, receiver):
             events.append("runtime_ready")
 
+        def adjust_position(self, receiver):
+            events.append("runtime_adjust")
+
         def __exit__(self, exc_type, exc, traceback):
             events.append("runtime_exit")
 
@@ -240,7 +285,7 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
     )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed._wait_for_episode_start",
-        lambda: events.append("operator_confirmed") or True,
+        lambda reset: reset() or events.append("operator_confirmed") or True,
     )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed._record_interactive_episode",
@@ -268,6 +313,7 @@ def test_managed_collection_confirms_start_then_rechecks_cameras(monkeypatch) ->
         "camera_preflight",
         "runtime_enter",
         "runtime_ready",
+        "runtime_adjust",
         "operator_confirmed",
         "camera_preflight",
         "samples",

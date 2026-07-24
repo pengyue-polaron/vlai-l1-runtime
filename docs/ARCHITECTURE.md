@@ -152,15 +152,18 @@ inspected.
 
 Managed collection starts or verifies the marked Camera Service, connects one
 raw client, and preflights cameras before motor enable. It then starts both
-guarded x_air runtimes and waits for paired state. The operator uses
-teleoperation to place the robot at the episode start pose and presses Enter;
-the workflow rechecks all cameras before the first recorded frame. During
-recording, Enter saves, `d` discards, and `q` discards and quits. A tracked
-maximum frame count auto-saves, and save/discard advances to the next episode.
+guarded x_air runtimes; SDK construction performs `AdjustPosition` once on each
+side before the workflow accepts paired state. The operator may run the same
+routine again with `r`, uses teleoperation to refine the episode start pose,
+and presses Enter. The workflow rechecks all cameras before the first recorded
+frame. During recording, Enter saves, `d` discards, and `q` discards and quits.
+A tracked maximum frame count auto-saves, and save/discard advances to the next
+episode.
 Each episode stops both robot sidecars before LeRobot finalization and starts a
 new managed motion session only after the operator advances. Collection
-shutdown closes only its raw client, so preview remains available. No automatic
-reset is claimed while the Runtime has no reviewed fixed-pose command transport.
+shutdown closes only its raw client, so preview remains available. The
+standalone reset workflow uses this same startup alignment lifecycle without
+opening cameras or a dataset.
 
 `embodied-ops` provides the generic episode decision, task registry,
 freshness/skew, transaction, normalized camera-health, and Panel contracts.
@@ -179,5 +182,6 @@ collection, and motion shutdown lifecycle; it does not own the persistent
 camera process.
 Capture progress uses the `embodied-ops` latest-value protocol instead of
 durable terminal lines. The adapter also owns a strict create-only JSON prompt
-registry for collection task text. It does not advertise reset, checkpoint,
-evaluation, or policy-motion actions while command transport is unimplemented.
+registry for collection task text. Its Reset action is limited to the SDK
+alignment lifecycle; it does not advertise checkpoint, evaluation, or
+policy-motion actions while command transport is unimplemented.

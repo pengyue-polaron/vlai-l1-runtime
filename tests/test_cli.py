@@ -55,6 +55,17 @@ def test_hardware_free_cli_validates_and_describes_collection(capsys) -> None:
     }
 
 
+def test_reset_cli_uses_the_managed_teleoperation_lifecycle(monkeypatch) -> None:
+    called = []
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.reset_managed_teleoperation",
+        lambda config: called.append(config.path),
+    )
+
+    assert main(["reset", "--config", str(COLLECTION_CONFIG)]) == 0
+    assert called == [COLLECTION_CONFIG.resolve()]
+
+
 def test_xair_observer_reports_paired_bimanual_state(monkeypatch, capsys) -> None:
     values = {name: float(index) for index, name in enumerate(FEATURE_NAMES)}
     sample = NamedJointVector(values, SampleMetadata(7, 123_000))

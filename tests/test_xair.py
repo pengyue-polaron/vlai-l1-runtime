@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import socket
 import struct
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -15,7 +16,9 @@ from vlai_l1_runtime.teleoperation import (
     XAirStateReceiver,
     describe_xair_side,
     render_xair_control_config,
+    request_xair_adjust_position,
     verify_xair_dependency,
+    xair_control_socket_path,
 )
 from vlai_l1_runtime.teleoperation.lifecycle import _find_competing_control, _qdisc_drops
 
@@ -60,6 +63,7 @@ def test_pinned_xair_dependency_and_generated_launch_inputs(tmp_path: Path) -> N
         "can_restart_ms": 100,
         "can_tx_queue_length": 1000,
         "state_socket_path": "/run/vlai-l1/teleop-state.sock",
+        "control_socket_path": "/run/vlai-l1/teleop-state-right-control.sock",
         "publish_hz": 100,
         "state_timeout_ms": 100,
         "rt_priority": 20,
@@ -155,6 +159,81 @@ def test_xair_receiver_owns_and_cleans_its_unix_socket(tmp_path: Path) -> None:
             assert closest[0].metadata.monotonic_ns == 4_000
             assert closest[1].values["left_joint_1.pos"] == pytest.approx(0.0)
             assert receiver.receive(timeout_s=0.0) is None
+            sender.sendto(
+                _packet(side=0, sequence=4, timestamp=7_000, value=0.3), str(state_socket)
+            )
+            receiver.reset_pairing()
+            assert receiver.receive(timeout_s=0.0) is None
+            sender.sendto(
+                _packet(side=0, sequence=5, timestamp=8_000, value=0.4), str(state_socket)
+            )
+            sender.sendto(
+                _packet(side=1, sequence=5, timestamp=9_000, value=0.4), str(state_socket)
+            )
+            assert receiver.receive(timeout_s=0.1) is not None
         assert not state_socket.exists()
     finally:
         sender.close()
+
+
+def test_xair_adjust_position_uses_the_owning_sidecar_control_socket(tmp_path: Path) -> None:
+    config = load_system_config(SYSTEM_CONFIG)
+    config = replace(
+        config,
+        teleoperation=replace(
+            config.teleoperation,
+            state_socket_path=tmp_path / "state.sock",
+        ),
+    )
+    control_path = xair_control_socket_path(config, "left")
+    request: list[bytes] = []
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(control_path))
+    server.listen(1)
+
+    def serve() -> None:
+        client, _ = server.accept()
+        with client:
+            request.append(client.recv(256))
+            client.sendall(b"OK\n")
+
+    worker = threading.Thread(target=serve)
+    worker.start()
+    try:
+        request_xair_adjust_position(config, "left")
+    finally:
+        worker.join(timeout=1)
+        server.close()
+
+    assert not worker.is_alive()
+    assert request == [b"ADJUST_POSITION\n"]
+
+
+def test_xair_adjust_position_surfaces_sidecar_failure(tmp_path: Path) -> None:
+    config = load_system_config(SYSTEM_CONFIG)
+    config = replace(
+        config,
+        teleoperation=replace(
+            config.teleoperation,
+            state_socket_path=tmp_path / "state.sock",
+        ),
+    )
+    control_path = xair_control_socket_path(config, "right")
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(control_path))
+    server.listen(1)
+
+    def serve() -> None:
+        client, _ = server.accept()
+        with client:
+            client.recv(256)
+            client.sendall(b"ERROR controller rejected alignment\n")
+
+    worker = threading.Thread(target=serve)
+    worker.start()
+    try:
+        with pytest.raises(RuntimeError, match=r"right.*controller rejected alignment"):
+            request_xair_adjust_position(config, "right")
+    finally:
+        worker.join(timeout=1)
+        server.close()

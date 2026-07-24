@@ -81,6 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("validate-collection", "validate collection and System contracts"),
         ("describe-collection", "print the canonical dataset contract as JSON"),
         ("collect", "record one commissioned live episode"),
+        ("reset", "MOVES HARDWARE: run x_air AdjustPosition on both teleoperation sides"),
         ("dataset-doctor", "validate one canonical LeRobot v3 dataset"),
         ("export-v21", "export one canonical dataset to LeRobot v2.1"),
         ("panel", "serve the hardware-free VLAI L1 Operator Panel"),
@@ -231,6 +232,11 @@ def _run_collection_command(args: argparse.Namespace) -> int:
                 sort_keys=True,
             )
         )
+        return 0
+    if args.command == "reset":
+        from .collection.managed import reset_managed_teleoperation
+
+        reset_managed_teleoperation(config)
         return 0
 
     identity = identity_from_config(config, args.experiment)

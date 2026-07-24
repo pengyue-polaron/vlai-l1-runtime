@@ -84,8 +84,10 @@ just collect fruit_placement_v1 "place the fruit in the bowl"
 The command starts or verifies the persistent three-camera
 owner, authorizes the privileged robot lifecycle, preflights raw frames before
 enabling motors, starts both x_air runtimes, and waits for fresh paired state.
-Use teleoperation to place the robot at the episode start pose, then press
-`Enter` in the terminal or **Start recording** in the Panel. The workflow
+Runtime creation performs the SDK's `AdjustPosition` alignment once for every
+episode. Use teleoperation to refine the episode start pose, then press `Enter`
+in the terminal or **Start recording** in the Panel. Enter `r` or use **Reset**
+before recording to run `AdjustPosition` again. The workflow
 rechecks all three cameras after that confirmation before recording the atomic
 canonical dataset transaction. During recording, press `Enter` to save, enter
 `d` to discard, or enter `q` to discard the current episode and quit. After a
@@ -120,15 +122,18 @@ just cameras stop
 Stopping a collection leaves the read-only camera service available. Only
 `just cameras stop` releases the three camera handles.
 
-There is no automatic fixed-pose reset: the reviewed x_air interface currently
-provides teleoperation, not a Runtime-owned reset command. Camera images are
-written asynchronously so the live loop can maintain its tracked 30 FPS rate; a
-session below the tracked minimum is discarded instead of publishing
-time-compressed data. Normal completion, collection failure, startup failure
-after either side begins, and `Ctrl+C` all use the same fail-closed cleanup:
-motors are disabled and all four CAN links return to `DOWN`. Do not run `just
-sdk-start` or a separate observer before collection; those commands are for
-bounded commissioning and diagnostics.
+`just reset` performs the same startup alignment without opening cameras or a
+dataset transaction, then disables both pairs and returns all four CAN links to
+`DOWN`. The Panel's standalone **Reset** action uses this command. This is the
+x_air SDK alignment routine, not a policy-command or arbitrary-pose interface.
+
+Camera images are written asynchronously so the live loop can maintain its
+tracked 30 FPS rate; a session below the tracked minimum is discarded instead
+of publishing time-compressed data. Normal completion, collection failure,
+startup failure after either side begins, and `Ctrl+C` all use the same
+fail-closed cleanup: motors are disabled and all four CAN links return to
+`DOWN`. Do not run `just sdk-start` or a separate observer before collection;
+those commands are for bounded commissioning and diagnostics.
 
 On the robot, `just camera-list` prints the serials of connected V4L cameras
 without opening their video streams. `just camera-check` starts or reuses the

@@ -72,6 +72,7 @@ class CameraSetValidator:
                         stream.driver,
                         stream.device_id,
                         stream.video_index,
+                        stream.crop,
                     )
                     for stream in config.streams
                 ),

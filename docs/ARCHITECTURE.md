@@ -90,6 +90,12 @@ truncated payload, stale sequence, incoherent set, or owner failure is
 fail-closed. Preview and raw consumers use independent threads, so a slow
 browser cannot block the physical readers or collection.
 
+The raw transport and MJPEG preview retain each configured source dimension.
+An optional per-stream observation crop is part of the same tracked System
+camera contract. `SampleAssembler` applies it only after validating the full
+raw frame. The commissioned AgentView crop is the centered 480×480 region of
+the 640×480 source; both wrist observations remain full-frame.
+
 Each frame identifies its configured device and stream epoch. The bridge owns a
 stateful validator for sequence and timestamp continuity. After a deliberate
 stream restart, the bridge must declare each restarted role's new epoch before
@@ -124,9 +130,10 @@ x_air state observer + Camera Bridge
 `CollectionSample` holds named follower state, named leader action, and the
 enabled timestamped camera frames. `SampleAssembler` is the only place that
 combines freshness, skew, continuity, finite-value, and image-shape checks. It
-stays free of LeRobot, NumPy, ROS, and device APIs. NumPy materialization happens
-only at the dataset writer boundary. The Runtime does not apply joint or gripper
-position ranges to observation or teleoperation action values.
+also applies the tracked observation crop without importing an image library.
+It stays free of LeRobot, NumPy, ROS, and device APIs. NumPy materialization
+happens only at the dataset writer boundary. The Runtime does not apply joint
+or gripper position ranges to observation or teleoperation action values.
 
 For each frame, live collection targets the midpoint of the earliest and latest
 camera timestamps and selects the complete left/right robot-state pair closest

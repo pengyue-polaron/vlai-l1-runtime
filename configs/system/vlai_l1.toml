@@ -125,6 +125,7 @@ height = 480
 fps = 30
 driver = "v4l2"
 video_index = 4
+crop_enabled = false
 
 [cameras.wrist_right]
 required_for_collection = true
@@ -135,6 +136,7 @@ height = 480
 fps = 30
 driver = "v4l2"
 video_index = 4
+crop_enabled = false
 
 [cameras.agent]
 required_for_collection = false
@@ -145,6 +147,11 @@ height = 480
 fps = 30
 driver = "v4l2"
 video_index = 0
+crop_enabled = true
+crop_x = 80
+crop_y = 0
+crop_width = 480
+crop_height = 480
 
 [teleoperation]
 provider = "x_air_sdk"

@@ -116,6 +116,28 @@ class ControlProfile:
 
 
 @dataclass(frozen=True)
+class ImageRoi:
+    x: int
+    y: int
+    width: int
+    height: int
+
+    @property
+    def xywh(self) -> tuple[int, int, int, int]:
+        return (self.x, self.y, self.width, self.height)
+
+    def validate(self, *, image_width: int, image_height: int, label: str) -> None:
+        if self.x < 0 or self.y < 0:
+            raise ConfigError(f"{label} x/y must be non-negative")
+        if self.width <= 0 or self.height <= 0:
+            raise ConfigError(f"{label} width/height must be positive")
+        if self.x + self.width > image_width or self.y + self.height > image_height:
+            raise ConfigError(
+                f"{label} {self.xywh} exceeds source image {image_width}x{image_height}"
+            )
+
+
+@dataclass(frozen=True)
 class CameraConfig:
     role: str
     required_for_collection: bool
@@ -126,6 +148,7 @@ class CameraConfig:
     driver: str
     device_id: str | None
     video_index: int | None = None
+    crop: ImageRoi | None = None
 
     def __post_init__(self) -> None:
         if self.role not in CAMERA_ROLES:
@@ -165,6 +188,18 @@ class CameraConfig:
             raise ConfigError(f"camera {self.role} requires a video_index for v4l2")
         if self.driver != "v4l2" and self.video_index is not None:
             raise ConfigError(f"camera {self.role} video_index is only valid for v4l2")
+        if self.crop is not None:
+            if not isinstance(self.crop, ImageRoi):
+                raise ConfigError(f"camera {self.role} crop must be an ImageRoi")
+            self.crop.validate(
+                image_width=self.width,
+                image_height=self.height,
+                label=f"camera {self.role} crop",
+            )
+            if self.role == "agent" and self.crop.width != self.crop.height:
+                raise ConfigError(
+                    f"camera agent crop must be square, got {self.crop.width}x{self.crop.height}"
+                )
 
 
 @dataclass(frozen=True)
@@ -609,11 +644,34 @@ def _parse_cameras(value: Any) -> CamerasConfig:
         table = _mapping(raw[role], label)
         _allowed_keys(
             table,
-            {"required_for_collection", "enabled", "width", "height", "fps", "driver"},
-            {"device_id", "video_index"},
+            {
+                "required_for_collection",
+                "enabled",
+                "width",
+                "height",
+                "fps",
+                "driver",
+                "crop_enabled",
+            },
+            {
+                "device_id",
+                "video_index",
+                "crop_x",
+                "crop_y",
+                "crop_width",
+                "crop_height",
+            },
             label,
         )
         enabled = _boolean(table["enabled"], f"{label}.enabled")
+        crop_enabled = _boolean(table["crop_enabled"], f"{label}.crop_enabled")
+        crop_keys = {"crop_x", "crop_y", "crop_width", "crop_height"}
+        present_crop_keys = crop_keys & set(table)
+        if crop_enabled and present_crop_keys != crop_keys:
+            missing = sorted(crop_keys - present_crop_keys)
+            raise ConfigError(f"{label} is missing crop keys: {missing}")
+        if not crop_enabled and present_crop_keys:
+            raise ConfigError(f"{label} crop coordinates require crop_enabled = true")
         device = table.get("device_id")
         if enabled and device is None:
             raise ConfigError(f"{label}.device_id is required when enabled")
@@ -635,6 +693,16 @@ def _parse_cameras(value: Any) -> CamerasConfig:
                     None
                     if "video_index" not in table
                     else _integer(table["video_index"], f"{label}.video_index", minimum=0)
+                ),
+                crop=(
+                    None
+                    if not crop_enabled
+                    else ImageRoi(
+                        x=_integer(table["crop_x"], f"{label}.crop_x", minimum=0),
+                        y=_integer(table["crop_y"], f"{label}.crop_y", minimum=0),
+                        width=_integer(table["crop_width"], f"{label}.crop_width", minimum=1),
+                        height=_integer(table["crop_height"], f"{label}.crop_height", minimum=1),
+                    )
                 ),
             )
         )
@@ -956,6 +1024,7 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
                     stream.driver,
                     stream.device_id,
                     stream.video_index,
+                    None if stream.crop is None else stream.crop.xywh,
                 )
                 for stream in config.cameras.streams
             ),

@@ -6,6 +6,7 @@ import json
 import shutil
 import subprocess
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,13 @@ from .dependencies import collection_dependency_error, require_collection_python
 V21_DATA_PATH = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet"
 V21_VIDEO_PATH = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4"
 CHUNK_SIZE = 1000
+
+
+@dataclass(frozen=True)
+class VideoProbe:
+    frames: int
+    width: int
+    height: int
 
 
 def export_v21_dataset(
@@ -139,11 +147,18 @@ def _build_v21(
                 frame_count=int(record["length"]),
                 fps=fps,
             )
-            actual = _probe_video_frames(output)
-            if actual != int(record["length"]):
+            probe = _probe_video(output)
+            if probe.frames != int(record["length"]):
                 raise RuntimeError(
                     f"video frame mismatch for {key} episode {episode}: "
-                    f"expected={record['length']}, actual={actual}"
+                    f"expected={record['length']}, actual={probe.frames}"
+                )
+            expected_height, expected_width, _ = info["features"][key]["shape"]
+            if (probe.height, probe.width) != (expected_height, expected_width):
+                raise RuntimeError(
+                    f"video geometry mismatch for {key} episode {episode}: "
+                    f"expected={expected_width}x{expected_height}, "
+                    f"actual={probe.width}x{probe.height}"
                 )
             video_count += 1
 
@@ -274,7 +289,7 @@ def _slice_video(
     )
 
 
-def _probe_video_frames(path: Path) -> int:
+def _probe_video(path: Path) -> VideoProbe:
     result = subprocess.run(
         [
             "ffprobe",
@@ -283,16 +298,28 @@ def _probe_video_frames(path: Path) -> int:
             "-select_streams",
             "v:0",
             "-show_entries",
-            "stream=nb_frames",
+            "stream=nb_frames,width,height",
             "-of",
-            "default=noprint_wrappers=1:nokey=1",
+            "json",
             str(path),
         ],
         check=True,
         capture_output=True,
         text=True,
     )
-    return int(result.stdout.strip())
+    payload = json.loads(result.stdout)
+    streams = payload.get("streams")
+    if not isinstance(streams, list) or len(streams) != 1:
+        raise RuntimeError(f"ffprobe returned an invalid video stream for {path}")
+    stream = streams[0]
+    try:
+        return VideoProbe(
+            frames=int(stream["nb_frames"]),
+            width=int(stream["width"]),
+            height=int(stream["height"]),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"ffprobe returned incomplete video metadata for {path}") from exc
 
 
 def _validate_v21_output(

@@ -34,6 +34,10 @@ The canonical dataset is written directly as LeRobot v3.0. Each frame contains:
   `observation.images.agent`;
 - one normalized task string.
 
+The wrist observations remain 640×480. AgentView uses the tracked centered
+480×480 crop from the 640×480 camera source, so canonical v3 and exported v2.1
+datasets present the same square model input.
+
 Samples are accepted only when joint vectors are exact and finite, timestamps
 are fresh, state/action, left/right arm, camera pairs, and robot/camera samples
 are synchronized, and sequences increase. The Runtime does not impose joint or

@@ -19,6 +19,13 @@ Its repository ID is derived as
 `meta/vlai_l1.json` records the task, schema identity, topology, feature names,
 camera roles, FPS, config hashes, and final episode/frame counts.
 
+The tracked System camera contract defines the observation crop for each
+stream. AgentView is captured at 640×480 for preview and camera transport, then
+center-cropped to `(x=80, y=0, width=480, height=480)` as it enters the canonical
+dataset. Both side strips are excluded; the wrist streams remain full-frame.
+The same square AgentView pixels therefore appear in the canonical v3 dataset
+and every v2.1 derivative.
+
 The canonical features are:
 
 ```text
@@ -88,8 +95,9 @@ vlai-l1 export-v21 \
 This creates `data/derivatives/pick_blocks_v1-v2.1` as a new, atomic output. It
 will not overwrite an existing derivative. Each v3 video range is sliced into
 an episode-local H.264 file, verified with `ffprobe`, and accompanied by v2.1
-JSONL metadata. The derivative retains namespaced source provenance and records
-its source repository ID and counts.
+JSONL metadata. Frame count and encoded dimensions are both checked against the
+canonical feature contract. The derivative retains namespaced source provenance
+and records its source repository ID and counts.
 
 The exporter requires `ffmpeg`, `ffprobe`, Python 3.12, and the `dataset`
 extra. The canonical v3 dataset remains the sole source of truth.

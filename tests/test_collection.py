@@ -141,6 +141,7 @@ def _sample(
 def test_collection_config_and_schema_have_one_complete_contract() -> None:
     config = load_collection_config(COLLECTION_CONFIG)
     contract = canonical_dataset_contract(_commissioned_config().system)
+    full_contract = canonical_dataset_contract(config.system)
 
     assert config.collection_ready is True
     assert config.collection_blockers == ()
@@ -155,6 +156,49 @@ def test_collection_config_and_schema_have_one_complete_contract() -> None:
         WRIST_RIGHT_IMAGE_KEY,
     }
     assert contract.features()[STATE_KEY]["names"] == list(FEATURE_NAMES)
+    assert full_contract.features()["observation.images.agent"]["shape"] == (480, 480, 3)
+
+
+def test_agent_observation_uses_the_exact_tracked_center_crop() -> None:
+    import numpy as np
+
+    config = load_collection_config(COLLECTION_CONFIG)
+    timestamp_ns = 1_000_000_000
+    images = {
+        stream.role: np.arange(
+            stream.height * stream.width * 3,
+            dtype=np.uint8,
+        ).reshape(stream.height, stream.width, 3)
+        for stream in config.system.cameras.streams
+        if stream.enabled
+    }
+    sample = CollectionSample(
+        NamedJointVector(_pose(), SampleMetadata(1, timestamp_ns)),
+        NamedJointVector(_pose(), SampleMetadata(1, timestamp_ns)),
+        {
+            stream.role: CameraSample(
+                CameraFrameMetadata(
+                    stream.role,
+                    stream.device_id,
+                    "boot-a",
+                    1,
+                    timestamp_ns,
+                ),
+                images[stream.role],
+            )
+            for stream in config.system.cameras.streams
+            if stream.enabled
+        },
+    )
+
+    result = SampleAssembler(config).validate(sample, now_ns=timestamp_ns)
+
+    agent = result.images["observation.images.agent"]
+    assert agent.shape == (480, 480, 3)
+    assert np.array_equal(agent, images["agent"][:, 80:560])
+    assert agent.flags.c_contiguous
+    assert result.images[WRIST_LEFT_IMAGE_KEY] is images["wrist_left"]
+    assert result.images[WRIST_RIGHT_IMAGE_KEY] is images["wrist_right"]
 
 
 def test_collection_config_rejects_unknown_or_overlapping_roots(tmp_path: Path) -> None:

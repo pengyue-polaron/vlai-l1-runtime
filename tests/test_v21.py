@@ -33,3 +33,4 @@ def test_v21_metadata_is_episode_based_and_preserves_feature_names() -> None:
         == source["features"]["observation.state"]["names"]
     )
     assert result["features"]["observation.images.agent"]["info"]["video.codec"] == "h264"
+    assert result["features"]["observation.images.agent"]["shape"] == [480, 640, 3]

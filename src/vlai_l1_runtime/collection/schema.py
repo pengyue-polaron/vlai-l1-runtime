@@ -190,8 +190,12 @@ class SampleAssembler:
         if set(sample.cameras) != set(enabled_roles):
             raise CollectionContractError("sample must contain every enabled camera role exactly")
         for role in enabled_roles:
-            validate_camera_image(sample.cameras[role].image, stream_by_role[role])
-            images[f"{IMAGE_PREFIX}{role}"] = sample.cameras[role].image
+            stream = stream_by_role[role]
+            validate_camera_image(sample.cameras[role].image, stream)
+            images[f"{IMAGE_PREFIX}{role}"] = _crop_camera_image(
+                sample.cameras[role].image,
+                stream,
+            )
         metadata = {role: camera.metadata for role, camera in sample.cameras.items()}
         self._camera_validator.validate(metadata, now_ns=now_ns)
         max_robot_camera_skew_ns = int(self._config.max_robot_camera_skew_s * 1_000_000_000)
@@ -224,7 +228,11 @@ class _TimedSample:
 
 def canonical_dataset_contract(system: SystemConfig) -> DatasetContract:
     cameras = tuple(
-        CameraSpec(stream.role, stream.height, stream.width)
+        CameraSpec(
+            stream.role,
+            stream.height if stream.crop is None else stream.crop.height,
+            stream.width if stream.crop is None else stream.crop.width,
+        )
         for stream in system.cameras.streams
         if stream.enabled
     )
@@ -283,3 +291,17 @@ def validate_camera_image(image: Any, config: CameraConfig) -> None:
     raise CollectionContractError(
         f"{config.role} image must be an HxWx3 uint8 array or matching RGB PIL image"
     )
+
+
+def _crop_camera_image(image: Any, config: CameraConfig) -> Any:
+    roi = config.crop
+    if roi is None:
+        return image
+    shape = getattr(image, "shape", None)
+    if shape is not None:
+        cropped = image[roi.y : roi.y + roi.height, roi.x : roi.x + roi.width]
+        return cropped.copy()
+    crop = getattr(image, "crop", None)
+    if callable(crop):
+        return crop((roi.x, roi.y, roi.x + roi.width, roi.y + roi.height))
+    raise CollectionContractError(f"{config.role} image cannot apply its configured crop")

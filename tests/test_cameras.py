@@ -3,10 +3,11 @@ from __future__ import annotations
 import signal
 import threading
 import time
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
+from embodied_ops import add_contract_digest
 
 from vlai_l1_runtime import (
     CameraContractError,
@@ -22,12 +23,25 @@ from vlai_l1_runtime.camera_bridge import (
 from vlai_l1_runtime.camera_ipc import (
     RawCameraBridgeClient,
     RawCameraBridgeServer,
+    camera_contract_digest,
 )
 from vlai_l1_runtime.camera_service import CameraServiceController
 from vlai_l1_runtime.collection.schema import CameraSample
 from vlai_l1_runtime.configuration import CameraConfig, CamerasConfig, ConfigError
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_camera_transport_uses_the_shared_canonical_contract_digest() -> None:
+    system = load_system_config(ROOT / "configs/system/vlai_l1.toml")
+    expected = add_contract_digest(
+        {
+            "protocol": "vlai-l1-raw-camera-v1",
+            "cameras": asdict(system.cameras),
+        }
+    )
+
+    assert camera_contract_digest(system) == expected["contract_sha256"]
 
 
 class _Image:

@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import io
 
+from embodied_ops import console as shared_console
+
 from vlai_l1_runtime import console
-
-
-class _Tty(io.StringIO):
-    def isatty(self) -> bool:
-        return True
 
 
 def test_redirected_status_is_throttled_and_has_no_ansi() -> None:
@@ -27,16 +24,7 @@ def test_redirected_status_is_throttled_and_has_no_ansi() -> None:
     assert stream.getvalue() == "[RUN] one\n[RUN] three\n"
 
 
-def test_log_message_preserves_active_tty_status() -> None:
-    stream = _Tty()
-    status = console.LiveStatusLine(stream=stream)
-    try:
-        status.update("Recording frame 4/300")
-        console.emit("PASS", "runtime ready", stream=stream)
-    finally:
-        status.close()
-
-    output = stream.getvalue()
-    assert "\033[2K" in output
-    assert "[PASS]" in output
-    assert output.count("Recording frame 4/300") == 2
+def test_console_is_the_shared_embodied_ops_implementation() -> None:
+    assert console.ArgumentParser is shared_console.ArgumentParser
+    assert console.LiveStatusLine is shared_console.LiveStatusLine
+    assert console.emit is shared_console.emit

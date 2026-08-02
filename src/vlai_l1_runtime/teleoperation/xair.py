@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import platform
@@ -17,6 +16,8 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from embodied_ops import file_sha256
 
 from ..configuration import MOTOR_NAMES, ROLES, SIDES, ControlProfile, SystemConfig
 from ..contracts import NamedJointVector, SampleMetadata, feature_names_for_sides
@@ -592,9 +593,9 @@ def verify_xair_dependency(config: SystemConfig) -> XAirDependencyReport:
         architecture=architecture,
         sdk_version=teleop.sdk_version,
         teleop_library=teleop_library,
-        teleop_library_sha256=_sha256(teleop_library),
+        teleop_library_sha256=file_sha256(teleop_library),
         can_library=can_library,
-        can_library_sha256=_sha256(can_library),
+        can_library_sha256=file_sha256(can_library),
     )
 
 
@@ -647,14 +648,6 @@ def _verify_elf(path: Path, *, expected_machine: int) -> None:
         raise ValueError(f"x_air library is not a 64-bit little-endian ELF: {path}")
     if struct.unpack_from("<H", header, 18)[0] != expected_machine:
         raise ValueError(f"x_air library architecture does not match this host: {path}")
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _monotonic_seconds() -> float:

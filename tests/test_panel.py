@@ -5,8 +5,13 @@ import sys
 from pathlib import Path
 
 import pytest
-from embodied_ops.operator_panel import InputAction, OperatorPanelApplication
+from embodied_ops.operator_panel import (
+    PANEL_CATALOG_SCHEMA_VERSION,
+    OperatorPanelApplication,
+    validate_panel_catalog,
+)
 
+from vlai_l1_runtime.collection.interaction import L1_COLLECTION_INTERACTION
 from vlai_l1_runtime.panel import L1OperatorPanelAdapter
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,8 +23,9 @@ def test_panel_exposes_the_commissioned_collection_stack() -> None:
     adapter = L1OperatorPanelAdapter(ROOT, CONFIG)
     catalog = adapter.catalog()
 
+    assert catalog["schema_version"] == PANEL_CATALOG_SCHEMA_VERSION
+    assert validate_panel_catalog(catalog) is catalog
     assert catalog["product"] == {"brand": "VLAI L1", "title": "Operations"}
-    assert catalog["readiness"]["collection"] is True
     assert {(camera["id"], camera["port"], camera["path"]) for camera in catalog["cameras"]} == {
         ("wrist_left", 8088, "/wrist_left.mjpg"),
         ("wrist_right", 8088, "/wrist_right.mjpg"),
@@ -44,7 +50,7 @@ def test_panel_exposes_the_commissioned_collection_stack() -> None:
         str(ROOT / "scripts/camera_service.sh"),
         "start",
     )
-    reset = adapter.build_launch("reset", {})
+    reset = adapter.build_launch("reset", {"config": "configs/collection/default.toml"})
     assert reset.command[-3:] == (
         "reset",
         "--config",
@@ -68,13 +74,7 @@ def test_panel_builds_live_collection_from_tracked_contract() -> None:
         "--task",
         "pick up the object",
     )
-    assert launch.input_actions == (
-        InputAction("start", "Start recording", "\n", "primary"),
-        InputAction("save", "Save episode", "\n", "primary"),
-        InputAction("reset", "Reset position", "r\n", "quiet"),
-        InputAction("discard", "Discard", "d\n", "danger"),
-        InputAction("quit", "Quit", "q\n", "quiet"),
-    )
+    assert launch.input_actions == L1_COLLECTION_INTERACTION.input_actions
 
 
 def test_right_only_panel_exposes_only_recorded_camera_roles() -> None:

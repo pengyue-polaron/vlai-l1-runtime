@@ -15,7 +15,12 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol, TextIO
 
-from embodied_ops import EpisodeDecision, normalize_episode_decision
+from embodied_ops import (
+    EpisodeDecision,
+    normalize_collection_start,
+    normalize_episode_decision,
+    reset_required_after_episode,
+)
 from embodied_ops.operator_panel import announce_input, announce_progress
 
 from .. import console
@@ -36,6 +41,7 @@ from .dataset import (
     inspect_direct_dataset,
     provenance_from_config,
 )
+from .interaction import L1_COLLECTION_INTERACTION
 from .orchestration import EpisodeResult, complete_episode
 from .schema import CameraSample, CollectionSample, SampleAssembler, normalize_task
 
@@ -355,7 +361,11 @@ def collect_managed_session(
                         target_fps=config.fps,
                         minimum_fps=config.minimum_capture_fps,
                     )
-                    if decision is not EpisodeDecision.QUIT:
+                    if reset_required_after_episode(
+                        decision,
+                        after_save=True,
+                        after_discard=True,
+                    ):
                         runtimes.adjust_position(receiver)
                         console.success("Robot is at Reset position; finalizing the episode")
                     result = _complete_interactive_episode(
@@ -426,24 +436,27 @@ def _wait_for_episode_start(
     console.step("Use teleoperation to place the robot at the episode start pose")
     console.info("Enter=start recording, r=reset with AdjustPosition, q=quit")
     while True:
-        announce_input(("start", "reset", "quit"))
+        announce_input(L1_COLLECTION_INTERACTION.start_action_ids)
         require_runtime()
         command = read_command()
         if command is None:
             time.sleep(0.05)
             continue
         command = command.strip().lower()
-        if not command:
-            console.success("Operator confirmed the episode start pose")
-            return True
         if command in {"r", "reset"}:
             reset_position()
             console.step("Use teleoperation to place the robot at the episode start pose")
             console.info("Enter=start recording, r=reset with AdjustPosition, q=quit")
             continue
-        if command in {"q", "quit", "exit"}:
+        try:
+            decision = normalize_collection_start(command)
+        except ValueError:
+            console.warning("Press Enter to start, enter r to reset, or enter q to quit")
+            continue
+        if decision is EpisodeDecision.QUIT:
             return False
-        console.warning("Press Enter to start, enter r to reset, or enter q to quit")
+        console.success("Operator confirmed the episode start pose")
+        return True
 
 
 def reset_managed_teleoperation(config: CollectionConfig) -> None:
@@ -472,7 +485,7 @@ def _record_interactive_episode(
 
     console.step(f"Recording episode · target {target_fps} FPS")
     console.warning("Enter=save, d+Enter=discard, q+Enter=quit")
-    announce_input(("save", "discard", "quit"))
+    announce_input(L1_COLLECTION_INTERACTION.recording_action_ids)
     status = console.LiveStatusLine()
     started = time.monotonic()
     captured = 0
@@ -494,7 +507,7 @@ def _record_interactive_episode(
                     decision = normalize_episode_decision(command)
                 except ValueError:
                     console.warning("Press Enter to save, enter d to discard, or enter q to quit")
-                    announce_input(("save", "discard", "quit"))
+                    announce_input(L1_COLLECTION_INTERACTION.recording_action_ids)
                 else:
                     break
             sink.add_frame(assembler.validate(sample, now_ns=now_ns).lerobot_frame(task=task))

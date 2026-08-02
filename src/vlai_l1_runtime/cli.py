@@ -30,7 +30,7 @@ from .teleoperation import (
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="vlai-l1")
+    parser = console.ArgumentParser(prog="vlai-l1")
     subparsers = parser.add_subparsers(dest="command", required=True)
     for command, help_text in (
         ("validate-config", "validate the tracked System contract"),

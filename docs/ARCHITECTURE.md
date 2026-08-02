@@ -3,7 +3,8 @@
 The intended dependency direction is:
 
 ```text
-VLAI workflows / embodied-ops adapter
+embodied-ops workflow and Operator Panel contracts
+  -> VLAI workflow adapter and LeRobot dataset composition
   -> LeRobot Robot and Teleoperator clients
   -> VLAI L1 Runtime transport
   -> command lease and safety gates
@@ -16,6 +17,15 @@ hardware-independent collection/dataset layer exist today. The teleoperation
 observation path is commissioned after recovery of `can0` and a bounded test of
 the new joint-safety monitor. The independent policy-command transport remains
 unimplemented.
+
+`embodied-ops` is the cross-robot operator-workflow layer, not a competing
+hardware API. It owns stable CLI presentation, collection input/decision
+contracts, reset-policy selection, task registries, timing checks, atomic
+artifacts, canonical contract digests, and the versioned Operator Panel catalog
+and form builders. VLAI composes those contracts with its extra pre-recording
+AdjustPosition action. Joint names, degrees, CAN ownership, camera identities,
+LeRobot layout, physical Reset behavior, and every readiness decision remain
+L1-specific.
 
 ## Teleoperation observation path
 
@@ -212,9 +222,12 @@ remains available. The
 standalone reset workflow uses this same startup alignment lifecycle without
 opening cameras or a dataset.
 
-`embodied-ops` provides the generic episode decision, task registry,
-freshness/skew, transaction, normalized camera-health, and Panel contracts.
-This repository owns their L1 adapter and all LeRobot-specific dataset code.
+`embodied-ops` provides the generic CLI, collection interaction and reset
+policy, episode decision, task registry, freshness/skew, transaction,
+contract-digest, normalized camera-health, and strict Panel catalog contracts.
+The Runtime imports that implementation through thin compatibility and L1
+composition modules instead of retaining parallel copies. This repository owns
+the L1 adapter and all LeRobot-specific dataset code.
 That boundary lets a future OpenArm or other robot reuse the workflow protocol
 without pretending that its hardware schema is the same as L1.
 
@@ -228,7 +241,10 @@ tracked readiness gates as the CLI and owns its camera client, teleoperation,
 collection, and motion shutdown lifecycle; it does not own the persistent
 camera process.
 Capture progress uses the `embodied-ops` latest-value protocol instead of
-durable terminal lines. The adapter also owns a strict create-only JSON prompt
-registry for collection task text. Its Reset action is limited to the SDK
-alignment lifecycle; it does not advertise checkpoint, evaluation, or
-policy-motion actions while command transport is unimplemented.
+durable terminal lines. Catalogs declare the shared schema version and are
+built from shared field primitives; collection readiness is expressed by
+whether the live workflow is present rather than an L1-only Web schema field.
+The adapter also owns a strict create-only JSON prompt registry for collection
+task text. Its Reset action is limited to the SDK alignment lifecycle; it does
+not advertise checkpoint, evaluation, or policy-motion actions while command
+transport is unimplemented.

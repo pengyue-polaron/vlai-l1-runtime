@@ -22,9 +22,10 @@ unavailable capabilities.
   upstream ROS2 gripper bridge.
 - LeRobot Robot and Teleoperator plugins are separate thin clients. They use
   this Runtime and must not open CAN devices.
-- `embodied-ops` supplies reusable episode, timing, artifact, and Operator Panel
-  primitives. L1 feature names, datasets, provenance, and hardware readiness
-  remain here.
+- `embodied-ops` supplies the shared CLI presentation, collection interaction,
+  timing, artifact, contract-digest, task-registry, and versioned Operator Panel
+  contracts. L1 feature names, datasets, Reset mechanics, provenance, and
+  hardware readiness remain here.
 
 ## Dataset contract
 

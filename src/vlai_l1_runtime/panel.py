@@ -13,13 +13,18 @@ from embodied_ops import (
     validate_experiment_name,
 )
 from embodied_ops.operator_panel import (
-    InputAction,
+    PANEL_CATALOG_SCHEMA_VERSION,
     PanelCapabilities,
     WorkflowLaunch,
+    combobox_field,
     fetch_camera_health,
+    option,
+    select_field,
+    text_field,
 )
 
 from .collection.configuration import load_collection_config
+from .collection.interaction import L1_COLLECTION_INTERACTION
 from .collection.schema import normalize_task
 
 
@@ -39,16 +44,9 @@ class L1OperatorPanelAdapter:
         config = self.collection_config
         prompt_catalogs = self._prompt_catalogs()
         preview_port = config.system.camera_preview.port
+        config_reference = self._reference(config.path)
         workflows = [
-            {
-                "id": "validate-collection",
-                "label": "Validate",
-                "eyebrow": "CONFIGURATION",
-                "title": "Validate collection contract",
-                "description": "Validate tracked collection and System configuration.",
-                "submit_label": "Validate",
-                "fields": [],
-            },
+            _validate_workflow(config_reference),
             _experiment_workflow(
                 workflow="dataset-doctor",
                 label="Doctor",
@@ -67,7 +65,10 @@ class L1OperatorPanelAdapter:
             ),
         ]
         if not config.system.teleoperation.blockers:
-            workflows.insert(1, _reset_workflow(config.teleoperation_sides))
+            workflows.insert(
+                1,
+                _reset_workflow(config.teleoperation_sides, config_reference),
+            )
         if config.collection_ready:
             workflows.insert(
                 1,
@@ -78,6 +79,7 @@ class L1OperatorPanelAdapter:
                 ),
             )
         return {
+            "schema_version": PANEL_CATALOG_SCHEMA_VERSION,
             "product": {"brand": "VLAI L1", "title": "Operations"},
             "cameras": [
                 {
@@ -102,10 +104,6 @@ class L1OperatorPanelAdapter:
                     "confirm": "Stop the persistent read-only camera service?",
                 },
             ],
-            "readiness": {
-                "collection": config.collection_ready,
-                "blockers": list(config.collection_blockers),
-            },
             "workflows": workflows,
             "registrations": [_prompt_registration(prompt_catalogs, self.repo_root)],
             "configuration_types": [],
@@ -113,23 +111,17 @@ class L1OperatorPanelAdapter:
                 {
                     "label": "Tracked configuration",
                     "items": [
-                        {
-                            "value": self._reference(config.path),
-                            "label": "Collection",
-                        },
-                        {
-                            "value": self._reference(config.system.path),
-                            "label": "System",
-                        },
+                        option(config_reference, "Collection"),
+                        option(self._reference(config.system.path), "System"),
                     ],
                 },
                 {
                     "label": "Registered prompts",
                     "items": [
-                        {
-                            "value": task.prompt,
-                            "label": f"{task.task_id} · {task.distribution.upper()}",
-                        }
+                        option(
+                            task.prompt,
+                            f"{task.task_id} · {task.distribution.upper()}",
+                        )
                         for catalog in prompt_catalogs
                         for task in catalog.tasks
                     ],
@@ -161,8 +153,12 @@ class L1OperatorPanelAdapter:
             str(self.collection_config.path),
         )
         if workflow in {"validate-collection", "reset"}:
-            if values:
-                raise ValueError(f"{workflow} accepts no values")
+            if set(values) != {"config"}:
+                raise ValueError(f"{workflow} requires exactly config")
+            selected = _text(values["config"], "config")
+            expected = self._reference(self.collection_config.path)
+            if selected != expected:
+                raise ValueError(f"{workflow} must use the active collection config")
             return WorkflowLaunch(workflow, workflow, base)
         if workflow in {"dataset-doctor", "export-v21"}:
             if set(values) != {"experiment"}:
@@ -193,13 +189,7 @@ class L1OperatorPanelAdapter:
                     "--task",
                     task,
                 ),
-                input_actions=(
-                    InputAction("start", "Start recording", "\n", "primary"),
-                    InputAction("save", "Save episode", "\n", "primary"),
-                    InputAction("reset", "Reset position", "r\n", "quiet"),
-                    InputAction("discard", "Discard", "d\n", "danger"),
-                    InputAction("quit", "Quit", "q\n", "quiet"),
-                ),
+                input_actions=L1_COLLECTION_INTERACTION.input_actions,
             )
         raise ValueError(f"unknown operator workflow: {workflow!r}")
 
@@ -265,14 +255,25 @@ def _experiment_workflow(
         "title": title,
         "description": description,
         "submit_label": submit_label,
+        "fields": [text_field("experiment", "Experiment", placeholder="fruit_placement_v1")],
+    }
+
+
+def _validate_workflow(config_reference: str) -> dict[str, Any]:
+    return {
+        "id": "validate-collection",
+        "label": "Validate",
+        "eyebrow": "CONFIGURATION",
+        "title": "Validate collection contract",
+        "description": "Validate tracked collection and System configuration.",
+        "submit_label": "Validate",
         "fields": [
-            {
-                "name": "experiment",
-                "label": "Experiment",
-                "type": "text",
-                "required": True,
-                "placeholder": "fruit_placement_v1",
-            }
+            select_field(
+                "config",
+                "Collection config",
+                [option(config_reference, "Active collection contract")],
+                default=config_reference,
+            )
         ],
     }
 
@@ -294,34 +295,26 @@ def _collect_workflow(
         ),
         "submit_label": "Start collection",
         "fields": [
-            {
-                "name": "experiment",
-                "label": "Experiment",
-                "type": "text",
-                "required": True,
-                "placeholder": "fruit_placement_v1",
-            },
-            {
-                "name": "task",
-                "label": "Task",
-                "type": "combobox",
-                "required": True,
-                "placeholder": "place the fruit in the bowl",
-                "help_text": "Select a registered prompt or enter a new normalized task.",
-                "options": [
-                    {
-                        "value": task.prompt,
-                        "label": f"{task.task_id} · {task.distribution.upper()}",
-                    }
+            text_field("experiment", "Experiment", placeholder="fruit_placement_v1"),
+            combobox_field(
+                "task",
+                "Task",
+                [
+                    option(task.prompt, f"{task.task_id} · {task.distribution.upper()}")
                     for catalog in prompt_catalogs
                     for task in catalog.tasks
                 ],
-            },
+                placeholder="place the fruit in the bowl",
+                help_text="Select a registered prompt or enter a new normalized task.",
+            ),
         ],
     }
 
 
-def _reset_workflow(teleoperation_sides: tuple[str, ...]) -> dict[str, Any]:
+def _reset_workflow(
+    teleoperation_sides: tuple[str, ...],
+    config_reference: str,
+) -> dict[str, Any]:
     side_label = ", ".join(teleoperation_sides)
     return {
         "id": "reset",
@@ -334,7 +327,14 @@ def _reset_workflow(teleoperation_sides: tuple[str, ...]) -> dict[str, Any]:
             f"This moves the {side_label} leader/follower arm pair(s). "
             "Confirm the workspace is clear?"
         ),
-        "fields": [],
+        "fields": [
+            select_field(
+                "config",
+                "Collection config",
+                [option(config_reference, f"Active {side_label} contract")],
+                default=config_reference,
+            )
+        ],
     }
 
 
@@ -351,46 +351,29 @@ def _prompt_registration(
         "submit_label": "Register prompt",
         "confirm": "Register this prompt in the repository?",
         "fields": [
-            {
-                "name": "catalog",
-                "label": "Catalog",
-                "type": "select",
-                "required": True,
-                "options": [
-                    {
-                        "value": catalog.path.relative_to(repo_root).as_posix(),
-                        "label": catalog.catalog_id,
-                    }
+            select_field(
+                "catalog",
+                "Catalog",
+                [
+                    option(
+                        catalog.path.relative_to(repo_root).as_posix(),
+                        catalog.catalog_id,
+                    )
                     for catalog in catalogs
                 ],
-            },
+            ),
+            text_field("prompt", "Prompt", placeholder="place the fruit in the bowl"),
             {
-                "name": "prompt",
-                "label": "Prompt",
-                "type": "text",
-                "required": True,
-                "placeholder": "place the fruit in the bowl",
-            },
-            {
-                "name": "task_id",
-                "label": "Task ID",
-                "type": "text",
-                "required": True,
-                "placeholder": "place_fruit_in_bowl",
+                **text_field("task_id", "Task ID", placeholder="place_fruit_in_bowl"),
                 "derive_from": "prompt",
                 "transform": "snake_case",
             },
-            {
-                "name": "distribution",
-                "label": "Distribution",
-                "type": "select",
-                "required": True,
-                "default": "train",
-                "options": [
-                    {"value": "train", "label": "Train"},
-                    {"value": "ood", "label": "OOD"},
-                ],
-            },
+            select_field(
+                "distribution",
+                "Distribution",
+                [option("train", "Train"), option("ood", "OOD")],
+                default="train",
+            ),
         ],
     }
 

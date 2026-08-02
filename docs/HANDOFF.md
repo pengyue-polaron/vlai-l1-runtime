@@ -282,13 +282,16 @@ Camera and data evidence:
 - the environment uses Python 3.12.13, OpenCV 4.13.0 and
   `torch 2.11.0+cpu`; CUDA is absent.
 
-The pinned `external/embodied-ops` checkout was advanced from `f87cb46` to
-`072e847` on 2026-08-02. Its single upstream change adds editable Operator
-Panel comboboxes; it changes no Runtime hardware or dataset API. The pinned
-`external/x-air-sdk` remains at `bf300508` because its upstream has no newer
-commit.
+The pinned `external/embodied-ops` checkout was advanced from `072e847` to
+`beecefa` on 2026-08-03, matching the revision already adopted by
+`galaxea-a1-runtime`. VLAI now composes its shared CLI, collection interaction
+and reset policy, canonical contract/file digests, and versioned Operator Panel
+catalog/builders. Robot state/action semantics, AdjustPosition behavior,
+readiness gates, CAN/camera ownership, and LeRobot dataset composition remain
+local. The pinned `external/x-air-sdk` remains at `bf300508` because its
+upstream has no newer commit.
 
-The last full onboard hardware-free software check passed 127 tests. About
+The last full onboard hardware-free software check passed 128 tests. About
 75 GB remained on the migrated root filesystem before live camera
 commissioning.
 
@@ -509,7 +512,8 @@ The teleoperation collection path has the following evidence:
 - the saved canonical v3 dataset passes doctor;
 - its independently generated v2.1 derivative validates;
 - operator confirmation is shared by terminal and Panel before recording;
-- collection preview, camera health, capture progress, and create-only prompt
+- CLI presentation, collection input/decision policy, collection preview,
+  camera health, capture progress, Panel schema/forms, and create-only prompt
   registration are composed through `embodied-ops`.
 - the tracked right-only collection contract emits exact right-side 8-DOF
   vectors and only Right Wrist plus AgentView; 30 live episodes totaling
@@ -518,7 +522,7 @@ The teleoperation collection path has the following evidence:
 - a hardware-free 12-frame right-only LeRobot v3 acceptance created and deeply
   inspected one episode with the blue-block/red-plate task, exact eight-name
   action/state vectors, and only `wrist_right` plus `agent` video features;
-  122 Runtime tests and all 20 pinned `embodied-ops` tests pass.
+  128 Runtime tests and all 26 pinned `embodied-ops` tests pass.
 
 The remaining operational issue is intermittent RealSense USB transport
 stability, especially the D455 cable/port/power path. The prior right-leader

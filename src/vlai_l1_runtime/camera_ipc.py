@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import socket
@@ -13,6 +12,8 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Protocol
+
+from embodied_ops import add_contract_digest
 
 from .cameras import CameraFrameMetadata
 from .collection.schema import CameraSample, validate_camera_image
@@ -45,13 +46,13 @@ def camera_contract_digest(config: SystemConfig) -> str:
 
     if not isinstance(config, SystemConfig):
         raise TypeError("camera contract digest requires SystemConfig")
-    payload = json.dumps(
-        asdict(config.cameras),
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode()
-    return hashlib.sha256(payload).hexdigest()
+    contract = add_contract_digest(
+        {
+            "protocol": "vlai-l1-raw-camera-v1",
+            "cameras": asdict(config.cameras),
+        }
+    )
+    return str(contract["contract_sha256"])
 
 
 class RawCameraBridgeServer:

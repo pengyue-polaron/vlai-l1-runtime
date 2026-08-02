@@ -9,6 +9,7 @@ from .dataset import (
     inspect_direct_dataset,
     provenance_from_config,
 )
+from .interaction import L1_COLLECTION_INTERACTION
 from .mock import SyntheticSampleSource
 from .orchestration import EpisodeResult, record_episode
 from .schema import (
@@ -24,6 +25,7 @@ from .schema import (
 
 __all__ = [
     "ACTION_KEY",
+    "L1_COLLECTION_INTERACTION",
     "STATE_KEY",
     "WRIST_LEFT_IMAGE_KEY",
     "WRIST_RIGHT_IMAGE_KEY",

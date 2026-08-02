@@ -72,11 +72,14 @@ def _snapshot_sample_metadata(metadata: object) -> SampleMetadata:
 class NamedJointVector:
     values: Mapping[str, float]
     metadata: SampleMetadata
+    feature_names: tuple[str, ...] = FEATURE_NAMES
 
     def __post_init__(self) -> None:
         metadata = _snapshot_sample_metadata(self.metadata)
-        normalized = validate_named_values(self.values)
+        feature_names = _validate_feature_names(self.feature_names)
+        normalized = validate_named_values(self.values, feature_names=feature_names)
         object.__setattr__(self, "metadata", metadata)
+        object.__setattr__(self, "feature_names", feature_names)
         object.__setattr__(self, "values", MappingProxyType(normalized))
 
 
@@ -149,19 +152,53 @@ def robot_description(config: SystemConfig) -> RobotDescription:
     )
 
 
-def validate_named_values(values: Mapping[str, float]) -> dict[str, float]:
+def feature_names_for_sides(sides: tuple[str, ...]) -> tuple[str, ...]:
+    if not isinstance(sides, tuple) or not sides:
+        raise ContractError("joint sides must be a non-empty tuple")
+    if not all(isinstance(side, str) for side in sides):
+        raise ContractError("joint sides must be text")
+    if len(sides) != len(set(sides)) or any(side not in SIDES for side in sides):
+        raise ContractError(f"joint sides must be unique members of {SIDES}")
+    canonical = tuple(side for side in SIDES if side in sides)
+    if sides != canonical:
+        raise ContractError(f"joint sides must follow canonical order {SIDES}")
+    return tuple(f"{side}_{motor}.pos" for side in sides for motor in MOTOR_NAMES)
+
+
+def _validate_feature_names(feature_names: tuple[str, ...]) -> tuple[str, ...]:
+    if not isinstance(feature_names, tuple) or not feature_names:
+        raise ContractError("joint feature_names must be a non-empty tuple")
+    if not all(isinstance(name, str) for name in feature_names):
+        raise ContractError("joint feature_names must be text")
+    if len(feature_names) != len(set(feature_names)):
+        raise ContractError("joint feature_names must be unique")
+    unknown = sorted(set(feature_names) - set(FEATURE_NAMES))
+    if unknown:
+        raise ContractError(f"unknown joint feature_names: {unknown}")
+    canonical = tuple(name for name in FEATURE_NAMES if name in feature_names)
+    if feature_names != canonical:
+        raise ContractError("joint feature_names must follow canonical robot order")
+    return feature_names
+
+
+def validate_named_values(
+    values: Mapping[str, float],
+    *,
+    feature_names: tuple[str, ...] = FEATURE_NAMES,
+) -> dict[str, float]:
+    feature_names = _validate_feature_names(feature_names)
     if not isinstance(values, Mapping):
         raise ContractError("joint values must be a mapping")
     if not all(isinstance(name, str) for name in values):
         raise ContractError("joint feature names must be text")
     actual = set(values)
-    expected = set(FEATURE_NAMES)
+    expected = set(feature_names)
     if actual != expected:
         missing = sorted(expected - actual)
         unknown = sorted(actual - expected)
         raise ContractError(f"joint feature mismatch; missing={missing}, unknown={unknown}")
     result: dict[str, float] = {}
-    for name in FEATURE_NAMES:
+    for name in feature_names:
         value = values[name]
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ContractError(f"{name} must be numeric")

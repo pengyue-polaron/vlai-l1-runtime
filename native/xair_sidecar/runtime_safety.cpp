@@ -14,8 +14,10 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <iomanip>
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
@@ -84,6 +86,16 @@ std::string can_health_detail(const vlai_l1::CanHealthSnapshot& snapshot) {
     return output.str();
 }
 
+std::string joint_value_detail(const std::string& side, std::size_t index,
+                               const char* role, double value, double minimum,
+                               double maximum) {
+    std::ostringstream output;
+    output << std::fixed << std::setprecision(3) << side << " joint_" << index + 1 << ' '
+           << role << " position " << value << " deg is outside [" << minimum << ", "
+           << maximum << "] deg";
+    return output.str();
+}
+
 }  // namespace
 
 extern "C" int pthread_setschedparam(pthread_t thread, int policy,
@@ -101,6 +113,93 @@ extern "C" int pthread_setschedparam(pthread_t thread, int policy,
 }
 
 namespace vlai_l1 {
+
+JointSafetyMonitor::JointSafetyMonitor(std::string side, JointSafetyLimits limits)
+    : side_(std::move(side)), limits_(limits) {
+    if (side_ != "left" && side_ != "right") {
+        throw std::invalid_argument("joint safety side must be left or right");
+    }
+    if (limits_.following_error_timeout_ns == 0) {
+        throw std::invalid_argument("joint safety following-error timeout must be positive");
+    }
+    for (std::size_t index = 0; index < kArmJointCount; ++index) {
+        const double minimum = limits_.min_deg[index];
+        const double maximum = limits_.max_deg[index];
+        const double following = limits_.max_following_error_deg[index];
+        if (!std::isfinite(minimum) || !std::isfinite(maximum) || minimum >= maximum) {
+            throw std::invalid_argument("joint safety position bounds are invalid");
+        }
+        if (!std::isfinite(following) || following <= 0.0) {
+            throw std::invalid_argument("joint safety following-error limit is invalid");
+        }
+    }
+}
+
+std::optional<JointSafetyEvent> JointSafetyMonitor::observe(
+    std::uint64_t monotonic_ns,
+    const std::array<double, kArmJointCount>& leader_radians,
+    const std::array<double, kArmJointCount>& follower_radians) {
+    if (last_monotonic_ns_.has_value() && monotonic_ns <= *last_monotonic_ns_) {
+        return JointSafetyEvent{true, side_ + " joint safety source timestamp did not increase"};
+    }
+    last_monotonic_ns_ = monotonic_ns;
+    constexpr double kRadiansToDegrees = 180.0 / 3.14159265358979323846;
+    for (std::size_t index = 0; index < kArmJointCount; ++index) {
+        const double leader_deg = leader_radians[index] * kRadiansToDegrees;
+        const double follower_deg = follower_radians[index] * kRadiansToDegrees;
+        const double minimum = limits_.min_deg[index];
+        const double maximum = limits_.max_deg[index];
+        if (!std::isfinite(leader_deg) || !std::isfinite(follower_deg)) {
+            return JointSafetyEvent{true, side_ + " joint_" + std::to_string(index + 1) +
+                                              " joint safety position is non-finite"};
+        }
+        if (leader_deg < minimum || leader_deg > maximum) {
+            return JointSafetyEvent{
+                true,
+                joint_value_detail(side_, index, "leader", leader_deg, minimum, maximum)};
+        }
+        if (follower_deg < minimum || follower_deg > maximum) {
+            return JointSafetyEvent{
+                true,
+                joint_value_detail(side_, index, "follower", follower_deg, minimum, maximum)};
+        }
+
+        const double error_deg = std::abs(leader_deg - follower_deg);
+        if (error_deg <= limits_.max_following_error_deg[index]) {
+            error_started_ns_[index].reset();
+            following_warning_emitted_[index] = false;
+            continue;
+        }
+        if (!error_started_ns_[index].has_value()) {
+            error_started_ns_[index] = monotonic_ns;
+            continue;
+        }
+        if (monotonic_ns - *error_started_ns_[index] >=
+            limits_.following_error_timeout_ns) {
+            std::ostringstream output;
+            output << std::fixed << std::setprecision(3) << side_ << " joint_" << index + 1
+                   << " following error " << error_deg << " deg exceeded "
+                   << limits_.max_following_error_deg[index] << " deg for "
+                   << limits_.following_error_timeout_ns / 1'000'000 << " ms";
+            if (limits_.stop_on_following_error) {
+                return JointSafetyEvent{true, output.str()};
+            }
+            if (!following_warning_emitted_[index]) {
+                following_warning_emitted_[index] = true;
+                return JointSafetyEvent{false, output.str()};
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+void JointSafetyMonitor::reset() noexcept {
+    for (auto& started : error_started_ns_) {
+        started.reset();
+    }
+    following_warning_emitted_.fill(false);
+    last_monotonic_ns_.reset();
+}
 
 int bounded_fifo_priority(int requested, int configured_cap) noexcept {
     if (configured_cap <= 0) {

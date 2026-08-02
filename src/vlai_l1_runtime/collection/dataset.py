@@ -14,7 +14,6 @@ from typing import Any, Protocol
 
 from embodied_ops import OutputDirectoryTransaction, atomic_write_text
 
-from ..contracts import FEATURE_NAMES
 from .dependencies import collection_dependency_error, require_collection_python
 from .schema import DATASET_SCHEMA, DatasetContract, canonical_dataset_contract, normalize_task
 
@@ -352,7 +351,7 @@ def identity_from_config(config: Any, experiment: str) -> DirectDatasetIdentity:
         target_root=config.dataset_root_for(experiment),
         repo_id=config.repo_id_for(experiment),
         fps=config.fps,
-        contract=canonical_dataset_contract(config.system),
+        contract=canonical_dataset_contract(config),
         experiment=experiment,
     )
 
@@ -373,8 +372,8 @@ def provenance_from_config(config: Any) -> dict[str, Any]:
         "position_unit": config.system.position_unit,
         "fps": config.fps,
         "image_storage": "video",
-        "feature_names": list(FEATURE_NAMES),
-        "camera_roles": [stream.role for stream in config.system.cameras.streams if stream.enabled],
+        "feature_names": list(config.feature_names),
+        "camera_roles": list(config.record_camera_roles),
         "teleoperation_provider": config.system.teleoperation.provider,
         "teleoperation_sdk_version": config.system.teleoperation.sdk_version,
         "teleoperation_source_revision": config.system.teleoperation.source_revision,

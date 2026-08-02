@@ -2,11 +2,12 @@
 
 ## Canonical v3 dataset
 
-`configs/collection/default.toml` owns dataset roots, repository ID prefix, FPS,
+Each tracked collection config owns dataset roots, repository ID prefix, active
+teleoperation sides, recorded camera roles, FPS,
 minimum effective capture rate, asynchronous image-writer concurrency, sample
 freshness, and state/action, robot/camera and camera-pair skew. It points to
-exactly one System config; camera dimensions and roles, joint names, physical
-units, and robot identity are not duplicated.
+exactly one System config; camera dimensions and physical identities, joint
+names, physical units, and robot identity are not duplicated.
 
 An experiment named `pick_blocks_v1` is stored at:
 
@@ -36,10 +37,9 @@ observation.images.wrist_right  video[height,width,3]
 observation.images.agent        video[height,width,3]
 ```
 
-Only enabled camera roles are part of an experiment's feature contract. The two
-wrist roles are required by the platform configuration. AgentView remains an
-optional role, but its commissioned D455 is enabled in the current configuration
-and is therefore part of every newly collected frame.
+Only enabled roles explicitly selected by the collection config are part of an
+experiment's feature contract. Both wrists and AgentView remain in the complete
+physical camera configuration. The bimanual collection selects all three.
 
 Both vectors use:
 
@@ -47,6 +47,12 @@ Both vectors use:
 left_joint_1.pos ... left_joint_7.pos, left_gripper.pos,
 right_joint_1.pos ... right_joint_7.pos, right_gripper.pos
 ```
+
+`configs/collection/right_only.toml` uses a separate dataset root and repository
+prefix. Its canonical features are `float32[8]` right-side state/action plus
+`observation.images.wrist_right` and `observation.images.agent`. The Camera
+Service may continue to own and preview all enabled physical cameras, but Left
+Wrist pixels are neither passed to LeRobot nor encoded into this dataset.
 
 ## Publication contract
 
@@ -57,10 +63,10 @@ per-frame action-delta limit; named state and action values must still be
 finite, fresh, synchronized, and increasing in sequence. The Runtime does not
 apply joint or gripper position ranges to collected values.
 
-Each episode is buffered by LeRobot inside a hidden sibling directory. Robot
-runtimes stop immediately after the last accepted frame; the read-only
-persistent Camera Service may remain available between episodes. Saving then
-performs video encoding, LeRobot finalization, provenance writing, and a deep
+Each episode is buffered by LeRobot inside a hidden sibling directory. After
+the last accepted frame, save/discard runs `AdjustPosition` on the still-active
+selected runtime(s). Saving then performs video encoding, LeRobot finalization,
+provenance writing, and a deep
 validation of task metadata, episode ranges, Parquet row counts and columns,
 and every referenced video. Only then is the complete directory renamed over
 the dataset target. Appending requires hard-link support so old large payloads

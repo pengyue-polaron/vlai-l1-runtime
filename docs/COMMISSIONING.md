@@ -1,11 +1,12 @@
 # x_air commissioning
 
-The pinned x_air build is the commissioned teleoperation runtime. Repeat live
-commissioning only after a behavior-affecting runtime, SDK, configuration, or
-hardware change, and only after the operator explicitly confirms a clear
-workspace. `xarm_teleop_create_unilateral` enables motors and performs position
-alignment before `start`, so launching the sidecar must be treated as immediate
-motion.
+The pinned x_air build is the commissioned teleoperation runtime. A complete
+motor-power restart restored the prior right-leader all-node no-ACK fault, and
+the new joint-safety boundary passed a bounded isolated-right observer window.
+The guarded launcher first performs a motion-free feedback probe,
+but `xarm_teleop_create_unilateral` subsequently enables motors and performs
+position alignment before `start`, so a successful probe is the boundary before
+immediate motion.
 
 The Runtime submodule points at the first-party `pengyue-polaron/vlai-x-air-sdk`
 mirror and pins commit `bf300508e179f652b23f0efaf3b6c9048f1f12e9`. The mirror
@@ -32,10 +33,12 @@ entries.
 
 1. Stop both existing teleoperation services and confirm no other controller
    process remains.
-2. Verify all four CAN links are down. Bring up only the two links needed by the
-   current side at the tracked 1 Mbit/s nominal and 5 Mbit/s data rate.
+2. Verify all four CAN links are down. The guarded lifecycle brings up only the
+   two links needed by the current side at the tracked 1 Mbit/s nominal and
+   5 Mbit/s data rate. It then uses the low-level CAN SDK without motor enable
+   to require all eight tracked response IDs on every configured probe round.
 3. Verify J2 direction without enabling teleoperation. The public teleoperation
-   API is not a read-only probe and must not be used for this step.
+   API is motion-capable and must not be used as the probe.
 4. Start the state observer before the sidecar:
 
    ```bash
@@ -74,40 +77,85 @@ vlai_l1_xair_sidecar
   --state-timeout-ms 100
   --rt-priority 20
   --can-health-poll-ms 100
+  --joint-min-deg <tracked side-specific 7-value vector>
+  --joint-max-deg <tracked side-specific 7-value vector>
+  --max-following-error-deg <tracked 7-value vector>
+  --following-error-timeout-ms 100
+  --following-error-action warn
 ```
 
 The sidecar caps the SDK's internally requested FIFO priority at the tracked
-value, then verifies every process thread at that exact policy. It snapshots
-both CAN controllers before SDK creation and stops the session on any live
-error counter or increase in warning, passive, bus-off, bus-error, arbitration
-loss, or restart statistics.
+value, then verifies every process thread at that exact policy. Before sidecar
+creation, the outer lifecycle requires complete repeated motor feedback without
+enabling motors. The sidecar then snapshots both CAN controllers before SDK
+creation and stops the session on any live error counter or increase in
+warning, passive, bus-off, bus-error, arbitration loss, or restart statistics.
+It also checks both arm feedback vectors against the tracked joint bounds and
+stops on a bound violation. Per the operator's explicit decision, a
+leader/follower error that remains over its configured per-joint limit for the
+configured timeout emits one warning per excursion and does not stop control.
+Never test that warning by pinning an arm against an object or hard stop.
+
+The outer lifecycle additionally supervises the blocking SDK constructor. If
+one tracked PCAN endpoint is already unhealthy or becomes unhealthy during the
+motion-free motor probe or before the sidecar reports ready, it disables the
+pair and fails without rebinding the adapter or retrying. Managed bimanual
+startup does not invoke either motion-capable SDK constructor until both sides
+have completed their motion-free probes. No automatic CAN recovery occurs
+before or after control reports ready.
 
 Do not use the upstream `start_xarm_teleop_both.sh`: its current launch
 arguments reverse the documented left/right CAN pairs. Do not use the upstream
 ROS2 wrapper either; it opens an additional gripper handle on the leader bus.
+
+### Temporary isolated right-side operation
+
+When the left arm is intentionally out of service, stop all controllers and
+de-energize that arm before disconnecting its CAN cable. Confirm `can1` and
+`can3` are `DOWN`, keep the right-arm workspace clear for startup alignment,
+and run:
+
+```bash
+just sdk-start-right-only
+```
+
+This command uses only the tracked right pair (`can0` leader and `can2`
+follower). It refuses startup if the left pair is up or any other Runtime
+lifecycle already owns the system, and stops the right session if either left
+interface is subsequently brought up. Stop it with `Ctrl+C`; cleanup disables
+and returns only `can0/can2` to `DOWN`. Do not run the bimanual `just collect`,
+`just reset`, or default Panel while the left side is disconnected. The
+explicit `collect-right`, `reset-right`, and `panel-right` workflows reuse the
+same isolated-side interlock and remain truthful right-only workflows.
 
 ## Camera and collection stage
 
 The camera streams were identified from live RGB frames: D405 `255323074436` is
 the left wrist, D405 `255323074499` is the right wrist, and D455 `251643060089`
 is AgentView. All three are enabled in System config; AgentView remains an
-optional platform role but is part of the current dataset contract. Verify a
+optional platform role but is selected by both tracked dataset modes. Verify a
 short discard before saving data:
 
 ```bash
 just collect commissioning "hold position"
 ```
 
-`just collect` owns the whole live session. It preflights the state socket and
-all three cameras before starting either robot runtime, starts the left and
-right runtimes, and waits for paired state after the SDK's startup
-`AdjustPosition`. Use teleoperation to refine the episode start pose, enter `r`
+For isolated right-side collection, first require `can1/can3` down and use:
+
+```bash
+just collect-right right_commissioning "hold position"
+```
+
+The selected collect recipe owns the whole live session. It preflights the
+state socket and recorded camera roles, starts exactly the configured runtime(s),
+and waits for selected state after the SDK's startup `AdjustPosition`. Use
+teleoperation to refine the episode start pose, enter `r`
 or use Reset to repeat alignment if needed, then press Enter in the terminal or
-Start recording in the Panel. Collection rechecks all cameras after
-confirmation, records, and always disables both pairs on completion, failure,
-or interruption. Recording continues until an explicit save/discard/quit
-decision. Save or discard resets both sides on the same active handles before
-the next episode instead of restarting the runtime. Start it with no manual
+Start recording in the Panel. Collection rechecks all recorded camera roles
+after confirmation and records until an explicit save/discard/quit decision.
+Save or discard first resets the selected side(s) on the same active handles,
+then encodes or discards while the runtime stays enabled at Reset. Quit,
+failure, or interruption disables only the owned pair(s). Start it with no manual
 `sdk-start`, observer, camera reader, or competing controller active.
 
 Then record one short saved episode and run `dataset-doctor`. A successful

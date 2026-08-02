@@ -17,10 +17,15 @@ except ModuleNotFoundError:  # pragma: no cover - exercised by the Python 3.10 c
 from embodied_ops import validate_experiment_name
 
 from ..configuration import (
+    CAMERA_ROLES,
+    MOTOR_NAMES,
+    SIDES,
+    CameraConfig,
     ConfigError,
     SystemConfig,
     _exact_keys,
     _integer,
+    _list,
     _mapping,
     _positive_number,
     _read_local_regular_file,
@@ -46,15 +51,28 @@ class CollectionConfig:
     max_sample_age_s: float
     max_state_action_skew_s: float
     max_robot_camera_skew_s: float
+    teleoperation_sides: tuple[str, ...]
+    record_camera_roles: tuple[str, ...]
     config_sha256: str
     system_config_sha256: str
+
+    @property
+    def feature_names(self) -> tuple[str, ...]:
+        return tuple(
+            f"{side}_{motor}.pos" for side in self.teleoperation_sides for motor in MOTOR_NAMES
+        )
+
+    @property
+    def recording_camera_streams(self) -> tuple[CameraConfig, ...]:
+        selected = set(self.record_camera_roles)
+        return tuple(stream for stream in self.system.cameras.streams if stream.role in selected)
 
     @property
     def collection_blockers(self) -> tuple[str, ...]:
         camera_blockers = tuple(
             f"camera_{stream.role}_uncommissioned"
-            for stream in self.system.cameras.streams
-            if stream.required_for_collection and not stream.enabled
+            for stream in self.recording_camera_streams
+            if not stream.enabled
         )
         return (*self.system.teleoperation.blockers, *camera_blockers)
 
@@ -100,10 +118,12 @@ def load_collection_config(path: Path) -> CollectionConfig:
         "max_sample_age_s",
         "max_state_action_skew_s",
         "max_robot_camera_skew_s",
+        "teleoperation_sides",
+        "record_camera_roles",
     }
     _exact_keys(root, keys, "collection")
     schema_version = _integer(root["schema_version"], "schema_version", minimum=1)
-    if schema_version != 3:
+    if schema_version != 4:
         raise ConfigError(f"unsupported collection schema_version: {schema_version}")
 
     system_path = _relative_path(root["system_config"], "system_config", resolved.parent)
@@ -142,6 +162,26 @@ def load_collection_config(path: Path) -> CollectionConfig:
     if robot_camera_skew > sample_age:
         raise ConfigError("max_robot_camera_skew_s must not exceed max_sample_age_s")
     system = load_system_config(system_path)
+    teleoperation_sides = _ordered_selection(
+        root["teleoperation_sides"],
+        choices=SIDES,
+        label="teleoperation_sides",
+    )
+    record_camera_roles = _ordered_selection(
+        root["record_camera_roles"],
+        choices=CAMERA_ROLES,
+        label="record_camera_roles",
+    )
+    expected_wrists = {f"wrist_{side}" for side in teleoperation_sides}
+    selected_wrists = {role for role in record_camera_roles if role.startswith("wrist_")}
+    if selected_wrists != expected_wrists:
+        raise ConfigError(
+            "record_camera_roles must contain exactly the wrist camera for each teleoperation side"
+        )
+    stream_by_role = {stream.role: stream for stream in system.cameras.streams}
+    unavailable = [role for role in record_camera_roles if not stream_by_role[role].enabled]
+    if unavailable:
+        raise ConfigError(f"record_camera_roles are disabled in System config: {unavailable}")
     return CollectionConfig(
         path=resolved,
         repo_root=repo_root,
@@ -156,11 +196,29 @@ def load_collection_config(path: Path) -> CollectionConfig:
         max_sample_age_s=sample_age,
         max_state_action_skew_s=state_action_skew,
         max_robot_camera_skew_s=robot_camera_skew,
+        teleoperation_sides=teleoperation_sides,
+        record_camera_roles=record_camera_roles,
         config_sha256=hashlib.sha256(content).hexdigest(),
         system_config_sha256=hashlib.sha256(
             _read_local_regular_file(system_path, label="system config")
         ).hexdigest(),
     )
+
+
+def _ordered_selection(value: Any, *, choices: tuple[str, ...], label: str) -> tuple[str, ...]:
+    items = _list(value, label)
+    if not items:
+        raise ConfigError(f"{label} must contain at least one value")
+    result = tuple(_text(item, f"{label}[{index}]") for index, item in enumerate(items))
+    unknown = sorted(set(result) - set(choices))
+    if unknown:
+        raise ConfigError(f"{label} contains unknown values: {unknown}")
+    if len(result) != len(set(result)):
+        raise ConfigError(f"{label} values must be unique")
+    canonical = tuple(choice for choice in choices if choice in result)
+    if result != canonical:
+        raise ConfigError(f"{label} must follow canonical order {choices}")
+    return result
 
 
 def _relative_path(value: Any, label: str, base: Path) -> Path:

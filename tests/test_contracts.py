@@ -14,6 +14,7 @@ from vlai_l1_runtime import (
     robot_description,
 )
 from vlai_l1_runtime.contracts import (
+    feature_names_for_sides,
     validate_contiguous_command,
     validate_first_command_hold,
     validate_named_values,
@@ -63,6 +64,16 @@ def test_named_joint_vector_requires_exact_finite_features() -> None:
         validate_named_values(non_text_name)
     with pytest.raises(ContractError, match="metadata must be SampleMetadata"):
         NamedJointVector(_pose(), None)
+
+    right_names = feature_names_for_sides(("right",))
+    right = NamedJointVector(
+        dict.fromkeys(right_names, 1.0),
+        SampleMetadata(5, 60),
+        right_names,
+    )
+    assert tuple(right.values) == right_names
+    with pytest.raises(ContractError, match="feature mismatch"):
+        NamedJointVector(_pose(), SampleMetadata(6, 70), right_names)
 
 
 def test_command_sequence_timestamp_and_first_hold_are_explicit() -> None:

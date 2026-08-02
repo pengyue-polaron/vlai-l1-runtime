@@ -25,6 +25,7 @@ from vlai_l1_runtime.contracts import FEATURE_NAMES, NamedJointVector, SampleMet
 
 ROOT = Path(__file__).resolve().parents[1]
 COLLECTION_CONFIG = ROOT / "configs/collection/default.toml"
+RIGHT_COLLECTION_CONFIG = ROOT / "configs/collection/right_only.toml"
 
 
 class Image:
@@ -98,6 +99,7 @@ def _commissioned_config():
     )
     return replace(
         config,
+        record_camera_roles=("wrist_left", "wrist_right"),
         system=replace(
             config.system,
             cameras=cameras,
@@ -140,12 +142,14 @@ def _sample(
 
 def test_collection_config_and_schema_have_one_complete_contract() -> None:
     config = load_collection_config(COLLECTION_CONFIG)
-    contract = canonical_dataset_contract(_commissioned_config().system)
-    full_contract = canonical_dataset_contract(config.system)
+    contract = canonical_dataset_contract(_commissioned_config())
+    full_contract = canonical_dataset_contract(config)
 
     assert config.collection_ready is True
     assert config.collection_blockers == ()
-    assert config.schema_version == 3
+    assert config.schema_version == 4
+    assert config.teleoperation_sides == ("left", "right")
+    assert config.record_camera_roles == ("wrist_left", "wrist_right", "agent")
     assert config.minimum_capture_fps == 27.0
     assert config.image_writer_threads == 12
     assert config.repo_id_for("pick_v1") == "pengyue-polaron/vlai-l1-pick_v1"
@@ -157,6 +161,36 @@ def test_collection_config_and_schema_have_one_complete_contract() -> None:
     }
     assert contract.features()[STATE_KEY]["names"] == list(FEATURE_NAMES)
     assert full_contract.features()["observation.images.agent"]["shape"] == (480, 480, 3)
+
+
+def test_right_only_collection_contract_is_exact_and_omits_left_wrist() -> None:
+    import numpy as np
+
+    config = load_collection_config(RIGHT_COLLECTION_CONFIG)
+    contract = canonical_dataset_contract(config)
+    source = SyntheticSampleSource(
+        config,
+        image_factory=lambda _role, height, width, _sequence: np.zeros(
+            (height, width, 3), dtype=np.uint8
+        ),
+    )
+
+    assert config.teleoperation_sides == ("right",)
+    assert config.record_camera_roles == ("wrist_right", "agent")
+    assert contract.state_names == tuple(
+        name for name in FEATURE_NAMES if name.startswith("right_")
+    )
+    assert set(contract.features()) == {
+        STATE_KEY,
+        ACTION_KEY,
+        WRIST_RIGHT_IMAGE_KEY,
+        "observation.images.agent",
+    }
+    sample, now_ns = next(source.samples(1))
+    validated = SampleAssembler(config).validate(sample, now_ns=now_ns)
+    assert len(validated.state) == 8
+    assert len(validated.action) == 8
+    assert tuple(validated.images) == (WRIST_RIGHT_IMAGE_KEY, "observation.images.agent")
 
 
 def test_agent_observation_uses_the_exact_tracked_center_crop() -> None:
@@ -229,6 +263,28 @@ def test_collection_config_rejects_unknown_or_overlapping_roots(tmp_path: Path) 
     )
     candidate.write_text(content)
     with pytest.raises(ConfigError, match="must not exceed fps"):
+        load_collection_config(candidate)
+
+    content = RIGHT_COLLECTION_CONFIG.read_text().replace(
+        'system_config = "../system/vlai_l1.toml"',
+        'system_config = "../system/system.toml"',
+    )
+    candidate.write_text(
+        content.replace(
+            'record_camera_roles = ["wrist_right", "agent"]',
+            'record_camera_roles = ["wrist_left", "wrist_right", "agent"]',
+        )
+    )
+    with pytest.raises(ConfigError, match="exactly the wrist camera"):
+        load_collection_config(candidate)
+
+    candidate.write_text(
+        content.replace(
+            'record_camera_roles = ["wrist_right", "agent"]',
+            'record_camera_roles = ["agent", "wrist_right"]',
+        )
+    )
+    with pytest.raises(ConfigError, match="canonical order"):
         load_collection_config(candidate)
 
 

@@ -82,7 +82,11 @@ class LiveCollectionSource:
         period_ns = round(1_000_000_000 / self._config.fps)
         next_tick = time.monotonic_ns()
         while True:
-            cameras = self._camera_source.capture(timeout_s=timeout_s)
+            available = self._camera_source.capture(timeout_s=timeout_s)
+            try:
+                cameras = {role: available[role] for role in self._config.record_camera_roles}
+            except KeyError as exc:
+                raise RuntimeError(f"recording camera is missing: {exc.args[0]}") from exc
             camera_timestamps = [sample.metadata.monotonic_ns for sample in cameras.values()]
             target_monotonic_ns = (min(camera_timestamps) + max(camera_timestamps)) // 2
             robot = self._state_source.receive_closest(
@@ -90,7 +94,7 @@ class LiveCollectionSource:
                 timeout_s=timeout_s,
             )
             if robot is None:
-                raise TimeoutError("timed out waiting for paired x_air state")
+                raise TimeoutError("timed out waiting for selected x_air state")
             observation, action = robot
             now_ns = time.monotonic_ns()
             yield CollectionSample(observation, action, cameras), now_ns

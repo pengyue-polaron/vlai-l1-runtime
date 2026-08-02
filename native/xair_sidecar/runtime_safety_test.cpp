@@ -3,6 +3,8 @@
 #include <pthread.h>
 #include <sched.h>
 
+#include <array>
+#include <cmath>
 #include <functional>
 #include <iostream>
 #include <stdexcept>
@@ -28,6 +30,17 @@ void expect_can_failure(const vlai_l1::CanHealthSnapshot& baseline,
     }
     throw std::runtime_error("unhealthy CAN transition was accepted");
 }
+
+vlai_l1::JointSafetyLimits joint_limits() {
+    vlai_l1::JointSafetyLimits limits;
+    limits.min_deg.fill(-90.0);
+    limits.max_deg.fill(90.0);
+    limits.max_following_error_deg.fill(10.0);
+    limits.following_error_timeout_ns = 100'000'000;
+    return limits;
+}
+
+double radians(double degrees) { return degrees * 3.14159265358979323846 / 180.0; }
 
 }  // namespace
 
@@ -66,6 +79,69 @@ int main() {
         auto unhealthy_baseline = baseline;
         unhealthy_baseline.live_errors.txerr = 1;
         expect_can_failure(unhealthy_baseline, [](auto&) {});
+
+        std::array<double, vlai_l1::kArmJointCount> leader{};
+        std::array<double, vlai_l1::kArmJointCount> follower{};
+        vlai_l1::JointSafetyMonitor normal("right", joint_limits());
+        require(!normal.observe(1, leader, follower).has_value(),
+                "in-range matching joints must pass");
+
+        auto outside = leader;
+        outside[3] = radians(91.0);
+        vlai_l1::JointSafetyMonitor bound_monitor("right", joint_limits());
+        const auto bound_fault = bound_monitor.observe(1, outside, follower);
+        require(bound_fault.has_value() && bound_fault->fatal &&
+                    bound_fault->detail.find("right joint_4 leader position") !=
+                        std::string::npos,
+                "an out-of-range joint must fail with side, joint, and role detail");
+
+        leader[2] = radians(20.0);
+        vlai_l1::JointSafetyMonitor following_monitor("right", joint_limits());
+        require(!following_monitor.observe(1, leader, follower).has_value(),
+                "a new following error must start its bounded grace period");
+        require(!following_monitor.observe(99'000'001, leader, follower).has_value(),
+                "a following error shorter than the timeout must not fail");
+        const auto following_fault =
+            following_monitor.observe(100'000'001, leader, follower);
+        require(following_fault.has_value() && following_fault->fatal &&
+                    following_fault->detail.find("right joint_3 following error") !=
+                        std::string::npos,
+                "a sustained following error must identify the affected joint");
+
+        auto warning_limits = joint_limits();
+        warning_limits.stop_on_following_error = false;
+        vlai_l1::JointSafetyMonitor warning_monitor("right", warning_limits);
+        require(!warning_monitor.observe(1, leader, follower).has_value(),
+                "warning-only following error must retain its grace period");
+        const auto warning = warning_monitor.observe(100'000'001, leader, follower);
+        require(warning.has_value() && !warning->fatal &&
+                    warning->detail.find("right joint_3 following error") !=
+                        std::string::npos,
+                "warning-only following error must emit one nonfatal event");
+        require(!warning_monitor.observe(120'000'001, leader, follower).has_value(),
+                "warning-only following error must not flood repeated events");
+
+        vlai_l1::JointSafetyMonitor cleared_monitor("left", joint_limits());
+        require(!cleared_monitor.observe(1, leader, follower).has_value(),
+                "a following-error timer must start");
+        leader[2] = radians(5.0);
+        require(!cleared_monitor.observe(50'000'001, leader, follower).has_value(),
+                "a recovered joint must clear its following-error timer");
+        leader[2] = radians(20.0);
+        require(!cleared_monitor.observe(150'000'001, leader, follower).has_value(),
+                "a later following error must receive a fresh grace period");
+        require(!cleared_monitor.observe(249'000'001, leader, follower).has_value(),
+                "a fresh following error must use its own start time");
+
+        const auto timestamp_fault =
+            cleared_monitor.observe(249'000'001, leader, follower);
+        require(timestamp_fault.has_value() && timestamp_fault->fatal &&
+                    timestamp_fault->detail.find("timestamp did not increase") !=
+                        std::string::npos,
+                "non-increasing joint safety timestamps must fail closed");
+        cleared_monitor.reset();
+        require(!cleared_monitor.observe(1, follower, follower).has_value(),
+                "reset must clear safety timing state after AdjustPosition");
     } catch (const std::exception& error) {
         std::cerr << "FAIL " << error.what() << '\n';
         return 1;

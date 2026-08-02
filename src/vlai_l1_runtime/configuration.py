@@ -29,6 +29,20 @@ MOTOR_NAMES = (
     "joint_7",
     "gripper",
 )
+MOTOR_TYPE_CODES = MappingProxyType(
+    {
+        "DM4310": 0,
+        "DM4340": 1,
+        "DM6006": 2,
+        "DM8006": 3,
+        "DM8009": 4,
+        "DM10010L": 5,
+        "DM10010": 6,
+        "DM1015": 7,
+        "DMH3510": 8,
+        "DM_J4310_2EC": 9,
+    }
+)
 SIDES = ("left", "right")
 ROLES = ("leader", "follower")
 CAMERA_ROLES = ("wrist_left", "wrist_right", "agent")
@@ -244,6 +258,26 @@ class RuntimeConfig:
 
 
 @dataclass(frozen=True)
+class JointSafetySideConfig:
+    min_deg: tuple[float, ...]
+    max_deg: tuple[float, ...]
+    max_following_error_deg: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class TeleoperationJointSafetyConfig:
+    following_error_timeout_s: float
+    following_error_action: str
+    sides: Mapping[str, JointSafetySideConfig]
+
+    def for_side(self, side: str) -> JointSafetySideConfig:
+        try:
+            return self.sides[side]
+        except KeyError as exc:
+            raise ValueError(f"unknown teleoperation side: {side!r}") from exc
+
+
+@dataclass(frozen=True)
 class TeleoperationConfig:
     provider: str
     mode: str
@@ -260,6 +294,9 @@ class TeleoperationConfig:
     can_health_poll_s: float
     startup_timeout_s: float
     shutdown_timeout_s: float
+    motor_probe_duration_s: float
+    motor_probe_rate_hz: int
+    joint_safety: TeleoperationJointSafetyConfig
     commissioned: bool
 
     @property
@@ -354,7 +391,7 @@ def load_system_config(path: Path) -> SystemConfig:
     )
 
     schema_version = _integer(root["schema_version"], "schema_version", minimum=1)
-    if schema_version != 3:
+    if schema_version != 4:
         raise ConfigError(f"unsupported schema_version: {schema_version}")
     robot_id = _text(root["robot_id"], "robot_id")
     topology_id = _text(root["topology_id"], "topology_id")
@@ -381,7 +418,7 @@ def load_system_config(path: Path) -> SystemConfig:
         raise ConfigError("command_ready must equal all independent readiness gates")
     if runtime.transport != "unimplemented" or safety.command_ready:
         raise ConfigError(
-            "system schema version 3 cannot enable the unimplemented command transport"
+            "system schema version 4 cannot enable the unimplemented command transport"
         )
 
     config = SystemConfig(
@@ -595,7 +632,9 @@ def _parse_motors(value: Any) -> tuple[MotorConfig, ...]:
                 receive_id=_integer(
                     raw["receive_id"], f"{label}.receive_id", minimum=1, maximum=0x7FF
                 ),
-                motor_type=_text(raw["motor_type"], f"{label}.motor_type"),
+                motor_type=_choice(
+                    raw["motor_type"], tuple(MOTOR_TYPE_CODES), f"{label}.motor_type"
+                ),
             )
         )
     if tuple(item.name for item in motors) != MOTOR_NAMES:
@@ -737,6 +776,9 @@ def _parse_teleoperation(value: Any, *, config_path: Path) -> TeleoperationConfi
         "can_health_poll_s",
         "startup_timeout_s",
         "shutdown_timeout_s",
+        "motor_probe_duration_s",
+        "motor_probe_rate_hz",
+        "joint_safety",
         "commissioned",
     }
     _exact_keys(raw, keys, "teleoperation")
@@ -765,11 +807,37 @@ def _parse_teleoperation(value: Any, *, config_path: Path) -> TeleoperationConfi
     shutdown_timeout_s = _positive_number(
         raw["shutdown_timeout_s"], "teleoperation.shutdown_timeout_s"
     )
+    motor_probe_duration_s = _positive_number(
+        raw["motor_probe_duration_s"], "teleoperation.motor_probe_duration_s"
+    )
+    motor_probe_rate_hz = _integer(
+        raw["motor_probe_rate_hz"],
+        "teleoperation.motor_probe_rate_hz",
+        minimum=1,
+        maximum=100,
+    )
+    if 2 * motor_probe_duration_s >= startup_timeout_s:
+        raise ConfigError("two teleoperation motor probes must fit within startup_timeout_s")
+    probe_rounds = motor_probe_duration_s * motor_probe_rate_hz
+    if not probe_rounds.is_integer():
+        raise ConfigError(
+            "teleoperation.motor_probe_duration_s and motor_probe_rate_hz "
+            "must resolve to a whole number of rounds"
+        )
     if can_health_poll_s > state_timeout_s:
         raise ConfigError("teleoperation.can_health_poll_s must not exceed state_timeout_s")
+    joint_safety = _parse_teleoperation_joint_safety(raw["joint_safety"])
+    if joint_safety.following_error_timeout_s > state_timeout_s:
+        raise ConfigError(
+            "teleoperation.joint_safety.following_error_timeout_s must not exceed state_timeout_s"
+        )
     for label, seconds in (
         ("state_timeout_s", state_timeout_s),
         ("can_health_poll_s", can_health_poll_s),
+        (
+            "joint_safety.following_error_timeout_s",
+            joint_safety.following_error_timeout_s,
+        ),
     ):
         if not (seconds * 1000).is_integer():
             raise ConfigError(f"teleoperation.{label} must resolve to whole milliseconds")
@@ -791,7 +859,49 @@ def _parse_teleoperation(value: Any, *, config_path: Path) -> TeleoperationConfi
         can_health_poll_s=can_health_poll_s,
         startup_timeout_s=startup_timeout_s,
         shutdown_timeout_s=shutdown_timeout_s,
+        motor_probe_duration_s=motor_probe_duration_s,
+        motor_probe_rate_hz=motor_probe_rate_hz,
+        joint_safety=joint_safety,
         commissioned=_boolean(raw["commissioned"], "teleoperation.commissioned"),
+    )
+
+
+def _parse_teleoperation_joint_safety(value: Any) -> TeleoperationJointSafetyConfig:
+    label = "teleoperation.joint_safety"
+    raw = _mapping(value, label)
+    _exact_keys(raw, {"following_error_timeout_s", "following_error_action", *SIDES}, label)
+    side_configs: dict[str, JointSafetySideConfig] = {}
+    for side in SIDES:
+        side_label = f"{label}.{side}"
+        side_raw = _mapping(raw[side], side_label)
+        _exact_keys(
+            side_raw,
+            {"min_deg", "max_deg", "max_following_error_deg"},
+            side_label,
+        )
+        minimum = _number_vector(side_raw["min_deg"], f"{side_label}.min_deg", 7, positive=False)
+        maximum = _number_vector(side_raw["max_deg"], f"{side_label}.max_deg", 7, positive=False)
+        following = _number_vector(
+            side_raw["max_following_error_deg"],
+            f"{side_label}.max_following_error_deg",
+            7,
+            positive=True,
+        )
+        for index, (lower, upper) in enumerate(zip(minimum, maximum, strict=True), start=1):
+            if lower >= upper:
+                raise ConfigError(f"{side_label} joint_{index} min_deg must be less than max_deg")
+        side_configs[side] = JointSafetySideConfig(minimum, maximum, following)
+    return TeleoperationJointSafetyConfig(
+        following_error_timeout_s=_positive_number(
+            raw["following_error_timeout_s"],
+            f"{label}.following_error_timeout_s",
+        ),
+        following_error_action=_choice(
+            raw["following_error_action"],
+            ("stop", "warn"),
+            f"{label}.following_error_action",
+        ),
+        sides=MappingProxyType(side_configs),
     )
 
 
@@ -1045,6 +1155,19 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
             config.teleoperation.can_health_poll_s,
             config.teleoperation.startup_timeout_s,
             config.teleoperation.shutdown_timeout_s,
+            config.teleoperation.motor_probe_duration_s,
+            config.teleoperation.motor_probe_rate_hz,
+            config.teleoperation.joint_safety.following_error_timeout_s,
+            config.teleoperation.joint_safety.following_error_action,
+            tuple(
+                (
+                    side,
+                    config.teleoperation.joint_safety.for_side(side).min_deg,
+                    config.teleoperation.joint_safety.for_side(side).max_deg,
+                    config.teleoperation.joint_safety.for_side(side).max_following_error_deg,
+                )
+                for side in SIDES
+            ),
             config.teleoperation.commissioned,
         ),
         (config.runtime.transport, str(config.runtime.socket_path)),

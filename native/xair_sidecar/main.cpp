@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <algorithm>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
@@ -61,6 +62,7 @@ struct Options {
     int can_health_poll_ms = 0;
     int control_owner_uid = 0;
     int control_owner_gid = 0;
+    vlai_l1::JointSafetyLimits joint_safety;
 };
 
 struct StateSnapshot {
@@ -122,6 +124,16 @@ public:
         return true;
     }
 
+    bool copy_for_safety(StateSnapshot& output) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!available_ || latest_.source_sequence == last_safety_sequence_) {
+            return false;
+        }
+        output = latest_;
+        last_safety_sequence_ = latest_.source_sequence;
+        return true;
+    }
+
     CallbackFault fault() const noexcept { return fault_.load(std::memory_order_acquire); }
 
     std::optional<std::uint64_t> last_update_ns() {
@@ -155,6 +167,7 @@ private:
     StateSnapshot latest_;
     std::uint64_t next_sequence_ = 0;
     std::uint64_t last_published_sequence_ = std::numeric_limits<std::uint64_t>::max();
+    std::uint64_t last_safety_sequence_ = std::numeric_limits<std::uint64_t>::max();
     bool available_ = false;
     std::atomic<CallbackFault> fault_{CallbackFault::kNone};
 };
@@ -392,12 +405,16 @@ std::string usage(const char* program) {
            " --leader-urdf <path> --follower-urdf <path> --config-dir <path>"
            " --state-socket <path> --publish-hz <hz> --state-timeout-ms <ms>"
            " --rt-priority <1..99> --can-health-poll-ms <ms>"
+           " --joint-min-deg <7-value-csv> --joint-max-deg <7-value-csv>"
+           " --max-following-error-deg <7-value-csv>"
+           " --following-error-timeout-ms <ms>"
+           " --following-error-action <stop|warn>"
            " --control-socket <path> --control-owner-uid <uid>"
            " --control-owner-gid <gid>";
 }
 
 Options parse_options(int argc, char** argv) {
-    if (argc != 29) {
+    if (argc != 39) {
         throw std::invalid_argument(usage(argv[0]));
     }
     std::unordered_map<std::string, std::string> values;
@@ -407,10 +424,12 @@ Options parse_options(int argc, char** argv) {
             throw std::invalid_argument(usage(argv[0]));
         }
     }
-    const std::array<const char*, 14> required{
+    const std::array<const char*, 19> required{
         "--side",         "--leader-can",   "--follower-can", "--leader-urdf",
         "--follower-urdf", "--config-dir",   "--state-socket", "--publish-hz",
         "--state-timeout-ms", "--rt-priority", "--can-health-poll-ms",
+        "--joint-min-deg", "--joint-max-deg", "--max-following-error-deg",
+        "--following-error-timeout-ms", "--following-error-action",
         "--control-socket", "--control-owner-uid", "--control-owner-gid",
     };
     for (const char* key : required) {
@@ -446,15 +465,65 @@ Options parse_options(int argc, char** argv) {
     options.can_health_poll_ms = integer("--can-health-poll-ms");
     options.control_owner_uid = integer("--control-owner-uid");
     options.control_owner_gid = integer("--control-owner-gid");
+    const auto vector = [&values](const char* key) {
+        std::array<double, vlai_l1::kArmJointCount> result{};
+        const auto& payload = values.at(key);
+        if (payload.back() == ',') {
+            throw std::invalid_argument(std::string(key + 2) +
+                                        " must contain exactly 7 finite values");
+        }
+        std::istringstream input(payload);
+        std::string item;
+        std::size_t index = 0;
+        while (std::getline(input, item, ',')) {
+            if (index >= result.size() || item.empty()) {
+                throw std::invalid_argument(std::string(key + 2) +
+                                            " must contain exactly 7 finite values");
+            }
+            try {
+                std::size_t consumed = 0;
+                result[index] = std::stod(item, &consumed);
+                if (consumed != item.size() || !std::isfinite(result[index])) {
+                    throw std::invalid_argument("invalid value");
+                }
+            } catch (const std::exception&) {
+                throw std::invalid_argument(std::string(key + 2) +
+                                            " must contain exactly 7 finite values");
+            }
+            ++index;
+        }
+        if (index != result.size()) {
+            throw std::invalid_argument(std::string(key + 2) +
+                                        " must contain exactly 7 finite values");
+        }
+        return result;
+    };
+    options.joint_safety.min_deg = vector("--joint-min-deg");
+    options.joint_safety.max_deg = vector("--joint-max-deg");
+    options.joint_safety.max_following_error_deg =
+        vector("--max-following-error-deg");
+    const int following_error_timeout_ms = integer("--following-error-timeout-ms");
     if ((options.side != "left" && options.side != "right") || options.publish_hz <= 0 ||
         options.publish_hz > 500 || options.state_timeout_ms <= 0 ||
         options.rt_priority <= 0 || options.rt_priority >= 100 ||
         options.can_health_poll_ms <= 0 ||
         options.can_health_poll_ms > options.state_timeout_ms ||
+        following_error_timeout_ms <= 0 ||
+        following_error_timeout_ms > options.state_timeout_ms ||
         options.control_owner_uid < 0 || options.control_owner_gid < 0 ||
         options.leader_can == options.follower_can) {
         throw std::invalid_argument(usage(argv[0]));
     }
+    options.joint_safety.following_error_timeout_ns =
+        static_cast<std::uint64_t>(following_error_timeout_ms) * 1'000'000;
+    const auto& following_error_action = values.at("--following-error-action");
+    if (following_error_action != "stop" && following_error_action != "warn") {
+        throw std::invalid_argument(usage(argv[0]));
+    }
+    options.joint_safety.stop_on_following_error = following_error_action == "stop";
+    const vlai_l1::JointSafetyMonitor validated_joint_safety(options.side,
+                                                             options.joint_safety);
+    static_cast<void>(validated_joint_safety);
     for (const auto& path : {options.leader_urdf, options.follower_urdf}) {
         if (!std::filesystem::is_regular_file(path)) {
             throw std::invalid_argument("URDF is not a regular file: " + path.string());
@@ -479,6 +548,7 @@ int run(const Options& options) {
     DatagramPublisher publisher(options.state_socket, options.side, options.publish_hz);
     vlai_l1::CanHealthMonitor can_health({options.leader_can, options.follower_can});
     StateSlot slot;
+    vlai_l1::JointSafetyMonitor joint_safety(options.side, options.joint_safety);
     TeleopHandle handle;
     // Declare the control endpoint last so scope unwinding removes it before a
     // potentially blocking vendor-handle destructor.
@@ -510,7 +580,8 @@ int run(const Options& options) {
 
     std::thread publisher_thread([&publisher, &slot]() { publisher.run(slot); });
     std::cout << "PASS x_air " << arm_side << " control running (SDK "
-              << xarm_teleop_version() << ")\n";
+              << xarm_teleop_version() << ")\n"
+              << std::flush;
     int result = 0;
     const auto started_at = std::chrono::steady_clock::now();
     const auto state_timeout = std::chrono::milliseconds(options.state_timeout_ms);
@@ -522,6 +593,25 @@ int run(const Options& options) {
             std::cerr << "FAIL x_air state callback fault: " << static_cast<int>(fault) << '\n';
             result = 1;
             break;
+        }
+        StateSnapshot safety_snapshot;
+        if (slot.copy_for_safety(safety_snapshot)) {
+            std::array<double, vlai_l1::kArmJointCount> leader_arm{};
+            std::array<double, vlai_l1::kArmJointCount> follower_arm{};
+            std::copy_n(safety_snapshot.leader.begin(), leader_arm.size(),
+                        leader_arm.begin());
+            std::copy_n(safety_snapshot.follower.begin(), follower_arm.size(),
+                        follower_arm.begin());
+            const auto joint_fault = joint_safety.observe(
+                safety_snapshot.monotonic_ns, leader_arm, follower_arm);
+            if (joint_fault.has_value()) {
+                if (joint_fault->fatal) {
+                    std::cerr << "FAIL x_air joint safety: " << joint_fault->detail << '\n';
+                    result = 1;
+                    break;
+                }
+                std::cerr << "WARN x_air joint following error: " << joint_fault->detail << '\n';
+            }
         }
         const auto now = std::chrono::steady_clock::now();
         const auto last_update_ns = slot.last_update_ns();
@@ -563,6 +653,7 @@ int run(const Options& options) {
                             << "FAIL x_air state callback did not resume after AdjustPosition\n";
                         fatal_control_error = true;
                     } else {
+                        joint_safety.reset();
                         vlai_l1::require_all_threads_fifo(options.rt_priority, 5);
                         can_health.check();
                         ControlServer::reply(client, "OK\n");
@@ -594,6 +685,10 @@ int run(const Options& options) {
             next_runtime_health_check = now + can_health_period;
         }
         std::this_thread::sleep_for(kHealthPoll);
+    }
+    if (xarm_teleop_stop(handle.get()) != XARM_TELEOP_OK) {
+        std::cerr << "FAIL x_air stop: " << xarm_teleop_get_last_error() << '\n';
+        result = 1;
     }
     g_stop_requested.store(true, std::memory_order_relaxed);
     publisher_thread.join();

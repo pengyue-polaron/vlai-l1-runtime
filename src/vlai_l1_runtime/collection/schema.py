@@ -10,8 +10,8 @@ from typing import Any
 from embodied_ops import require_fresh_sample, require_pair_skew
 
 from ..cameras import CameraFrameMetadata, CameraSetValidator
-from ..configuration import CameraConfig, SystemConfig
-from ..contracts import FEATURE_NAMES, NamedJointVector, validate_named_values
+from ..configuration import CameraConfig
+from ..contracts import NamedJointVector, validate_named_values
 from .configuration import CollectionConfig
 from .dependencies import collection_dependency_error, require_collection_python
 
@@ -20,7 +20,7 @@ ACTION_KEY = "action"
 IMAGE_PREFIX = "observation.images."
 WRIST_LEFT_IMAGE_KEY = f"{IMAGE_PREFIX}wrist_left"
 WRIST_RIGHT_IMAGE_KEY = f"{IMAGE_PREFIX}wrist_right"
-DATASET_SCHEMA = "vlai_l1_lerobot_dataset_v3_v2"
+DATASET_SCHEMA = "vlai_l1_lerobot_dataset_v3_v3"
 
 
 class CollectionContractError(ValueError):
@@ -74,8 +74,16 @@ class CollectionSample:
 
     def __post_init__(self) -> None:
         try:
-            observation = NamedJointVector(self.observation.values, self.observation.metadata)
-            action = NamedJointVector(self.action.values, self.action.metadata)
+            observation = NamedJointVector(
+                self.observation.values,
+                self.observation.metadata,
+                self.observation.feature_names,
+            )
+            action = NamedJointVector(
+                self.action.values,
+                self.action.metadata,
+                self.action.feature_names,
+            )
         except (AttributeError, TypeError, ValueError) as exc:
             raise CollectionContractError("joint samples are malformed") from exc
         if not isinstance(self.cameras, Mapping) or not all(
@@ -134,7 +142,10 @@ class SampleAssembler:
         if not isinstance(config, CollectionConfig):
             raise TypeError("SampleAssembler requires CollectionConfig")
         self._config = config
-        self._camera_validator = CameraSetValidator(config.system.cameras)
+        self._camera_validator = CameraSetValidator(
+            config.system.cameras,
+            roles=config.record_camera_roles,
+        )
         self._last_observation_sequence: int | None = None
         self._last_action_sequence: int | None = None
 
@@ -177,19 +188,28 @@ class SampleAssembler:
             label="leader action",
         )
 
-        state_values = validate_named_values(sample.observation.values)
-        action_values = validate_named_values(sample.action.values)
-        state = tuple(state_values[name] for name in FEATURE_NAMES)
-        candidate_action = tuple(action_values[name] for name in FEATURE_NAMES)
+        expected_features = self._config.feature_names
+        if sample.observation.feature_names != expected_features:
+            raise CollectionContractError("follower observation feature contract differs")
+        if sample.action.feature_names != expected_features:
+            raise CollectionContractError("leader action feature contract differs")
+        state_values = validate_named_values(
+            sample.observation.values,
+            feature_names=expected_features,
+        )
+        action_values = validate_named_values(
+            sample.action.values,
+            feature_names=expected_features,
+        )
+        state = tuple(state_values[name] for name in expected_features)
+        candidate_action = tuple(action_values[name] for name in expected_features)
 
         images: dict[str, Any] = {}
-        stream_by_role = {stream.role: stream for stream in self._config.system.cameras.streams}
-        enabled_roles = tuple(
-            stream.role for stream in self._config.system.cameras.streams if stream.enabled
-        )
-        if set(sample.cameras) != set(enabled_roles):
-            raise CollectionContractError("sample must contain every enabled camera role exactly")
-        for role in enabled_roles:
+        stream_by_role = {stream.role: stream for stream in self._config.recording_camera_streams}
+        recorded_roles = self._config.record_camera_roles
+        if tuple(sample.cameras) != recorded_roles:
+            raise CollectionContractError("sample must contain recorded camera roles in order")
+        for role in recorded_roles:
             stream = stream_by_role[role]
             validate_camera_image(sample.cameras[role].image, stream)
             images[f"{IMAGE_PREFIX}{role}"] = _crop_camera_image(
@@ -226,17 +246,18 @@ class _TimedSample:
     monotonic_s: float
 
 
-def canonical_dataset_contract(system: SystemConfig) -> DatasetContract:
+def canonical_dataset_contract(config: CollectionConfig) -> DatasetContract:
+    if not isinstance(config, CollectionConfig):
+        raise TypeError("canonical_dataset_contract requires CollectionConfig")
     cameras = tuple(
         CameraSpec(
             stream.role,
             stream.height if stream.crop is None else stream.crop.height,
             stream.width if stream.crop is None else stream.crop.width,
         )
-        for stream in system.cameras.streams
-        if stream.enabled
+        for stream in config.recording_camera_streams
     )
-    return DatasetContract(FEATURE_NAMES, FEATURE_NAMES, cameras)
+    return DatasetContract(config.feature_names, config.feature_names, cameras)
 
 
 def normalize_task(value: str) -> str:

@@ -1,4 +1,4 @@
-schema_version = 3
+schema_version = 4
 robot_id = "vlai_l1"
 topology_id = "vlai_l1_nyush_verified_2026_07_23"
 position_unit = "degree"
@@ -22,28 +22,28 @@ tx_queue_length = 1000
 [[can.endpoints]]
 id = "leader_right"
 interface = "can0"
-parentdev = "1-2.2.1:1.0"
+parentdev = "1-3.1:1.0"
 side = "right"
 role = "leader"
 
 [[can.endpoints]]
 id = "leader_left"
 interface = "can1"
-parentdev = "1-2.2.2:1.0"
+parentdev = "1-3.2:1.0"
 side = "left"
 role = "leader"
 
 [[can.endpoints]]
 id = "follower_right"
 interface = "can2"
-parentdev = "1-2.2.3:1.0"
+parentdev = "1-3.3:1.0"
 side = "right"
 role = "follower"
 
 [[can.endpoints]]
 id = "follower_left"
 interface = "can3"
-parentdev = "1-2.2.4:1.0"
+parentdev = "1-3.4:1.0"
 side = "left"
 role = "follower"
 
@@ -169,7 +169,23 @@ rt_priority = 20
 can_health_poll_s = 0.1
 startup_timeout_s = 45.0
 shutdown_timeout_s = 8.0
+motor_probe_duration_s = 2.0
+motor_probe_rate_hz = 20
 commissioned = true
+
+[teleoperation.joint_safety]
+following_error_timeout_s = 0.1
+following_error_action = "warn"
+
+[teleoperation.joint_safety.left]
+min_deg = [-120.0, -90.0, -90.0, 0.0, -90.0, -45.0, -90.0]
+max_deg = [80.0, 10.0, 90.0, 140.0, 90.0, 45.0, 90.0]
+max_following_error_deg = [9.0, 8.0, 3.0, 10.0, 4.0, 2.0, 6.0]
+
+[teleoperation.joint_safety.right]
+min_deg = [-80.0, -10.0, -90.0, 0.0, -90.0, -45.0, -90.0]
+max_deg = [120.0, 180.0, 90.0, 140.0, 90.0, 45.0, 90.0]
+max_following_error_deg = [9.0, 8.0, 3.0, 10.0, 4.0, 2.0, 6.0]
 
 [runtime]
 transport = "unimplemented"

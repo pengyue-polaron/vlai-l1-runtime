@@ -4,6 +4,7 @@ from .lifecycle import remove_orphaned_xair_control_socket, run_xair_side
 from .xair import (
     XAirBimanualAssembler,
     XAirDependencyReport,
+    XAirSingleSideAssembler,
     XAirStatePacket,
     XAirStateReceiver,
     describe_xair_side,
@@ -17,6 +18,7 @@ from .xair import (
 __all__ = [
     "XAirBimanualAssembler",
     "XAirDependencyReport",
+    "XAirSingleSideAssembler",
     "XAirStatePacket",
     "XAirStateReceiver",
     "describe_xair_side",

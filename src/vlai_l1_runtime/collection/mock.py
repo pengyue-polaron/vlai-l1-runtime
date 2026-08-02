@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 from ..cameras import CameraFrameMetadata
-from ..contracts import FEATURE_NAMES, NamedJointVector, SampleMetadata
+from ..contracts import NamedJointVector, SampleMetadata
 from .configuration import CollectionConfig
 from .schema import CameraSample, CollectionSample
 
@@ -44,7 +44,7 @@ class SyntheticSampleSource:
         if isinstance(start_ns, bool) or not isinstance(start_ns, int) or start_ns < 0:
             raise ValueError("synthetic start_ns must be a non-negative integer")
         period_ns = round(1_000_000_000 / self._config.fps)
-        pose = dict.fromkeys(FEATURE_NAMES, 0.0)
+        pose = dict.fromkeys(self._config.feature_names, 0.0)
         for sequence in range(count):
             timestamp_ns = start_ns + sequence * period_ns
             metadata = SampleMetadata(sequence, timestamp_ns)
@@ -64,13 +64,12 @@ class SyntheticSampleSource:
                         sequence,
                     ),
                 )
-                for stream in self._config.system.cameras.streams
-                if stream.enabled
+                for stream in self._config.recording_camera_streams
             }
             yield (
                 CollectionSample(
-                    NamedJointVector(pose, metadata),
-                    NamedJointVector(pose, metadata),
+                    NamedJointVector(pose, metadata, self._config.feature_names),
+                    NamedJointVector(pose, metadata, self._config.feature_names),
                     cameras,
                 ),
                 timestamp_ns,

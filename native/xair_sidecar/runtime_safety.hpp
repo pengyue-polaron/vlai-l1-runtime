@@ -2,13 +2,48 @@
 
 #include <linux/can/netlink.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace vlai_l1 {
+
+constexpr std::size_t kArmJointCount = 7;
+
+struct JointSafetyLimits {
+    std::array<double, kArmJointCount> min_deg{};
+    std::array<double, kArmJointCount> max_deg{};
+    std::array<double, kArmJointCount> max_following_error_deg{};
+    std::uint64_t following_error_timeout_ns = 0;
+    bool stop_on_following_error = true;
+};
+
+struct JointSafetyEvent {
+    bool fatal = true;
+    std::string detail;
+};
+
+class JointSafetyMonitor {
+public:
+    JointSafetyMonitor(std::string side, JointSafetyLimits limits);
+
+    std::optional<JointSafetyEvent> observe(
+        std::uint64_t monotonic_ns,
+        const std::array<double, kArmJointCount>& leader_radians,
+        const std::array<double, kArmJointCount>& follower_radians);
+    void reset() noexcept;
+
+private:
+    std::string side_;
+    JointSafetyLimits limits_;
+    std::array<std::optional<std::uint64_t>, kArmJointCount> error_started_ns_{};
+    std::array<bool, kArmJointCount> following_warning_emitted_{};
+    std::optional<std::uint64_t> last_monotonic_ns_;
+};
 
 struct CanHealthSnapshot {
     can_state state = CAN_STATE_MAX;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import threading
 from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from vlai_l1_runtime.collection.managed import (
     ManagedXAirRuntimes,
     _pump_runtime_output,
     _record_interactive_episode,
+    _release_bimanual_startup,
     _wait_for_episode_start,
     collect_managed_session,
 )
@@ -20,6 +22,7 @@ from vlai_l1_runtime.collection.orchestration import EpisodeResult
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = load_collection_config(ROOT / "configs/collection/default.toml")
+RIGHT_CONFIG = load_collection_config(ROOT / "configs/collection/right_only.toml")
 
 
 @pytest.fixture(autouse=True)
@@ -48,8 +51,11 @@ def _stub_persistent_camera_service(monkeypatch) -> None:
 class _Process:
     _next_pid = 1200
 
-    def __init__(self) -> None:
-        self.stdout = io.StringIO("PASS runtime ready\n")
+    def __init__(self, side: str = "left") -> None:
+        self.stdin = io.StringIO()
+        self.stdout = io.StringIO(
+            f"PASS x_air {side} motion-free preflight ready\nPASS runtime ready\n"
+        )
         self.returncode: int | None = None
         self.pid = self._next_pid
         type(self)._next_pid += 1
@@ -64,6 +70,72 @@ class _Process:
 
     def kill(self) -> None:
         self.returncode = -9
+
+
+class _StartupInput:
+    def __init__(self) -> None:
+        self.closed = False
+        self.writes: list[str] = []
+
+    def write(self, value: str) -> None:
+        self.writes.append(value)
+
+    def flush(self) -> None:
+        return None
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_bimanual_startup_releases_both_motion_capable_constructors_together() -> None:
+    runtimes = []
+    for side in ("left", "right"):
+        ready = threading.Event()
+        ready.set()
+        runtimes.append(
+            SimpleNamespace(
+                side=side,
+                process=SimpleNamespace(
+                    poll=lambda: None,
+                    stdin=_StartupInput(),
+                ),
+                output=deque(),
+                preflight_ready=ready,
+            )
+        )
+
+    _release_bimanual_startup(runtimes, timeout_s=0.1)
+
+    assert [runtime.process.stdin.writes for runtime in runtimes] == [
+        ["START\n"],
+        ["START\n"],
+    ]
+    assert all(runtime.process.stdin.closed for runtime in runtimes)
+
+
+def test_bimanual_startup_never_releases_peer_when_one_preflight_exits() -> None:
+    left_ready = threading.Event()
+    left_ready.set()
+    left_input = _StartupInput()
+    runtimes = [
+        SimpleNamespace(
+            side="left",
+            process=SimpleNamespace(poll=lambda: None, stdin=left_input),
+            output=deque(["PASS x_air left motion-free preflight ready"]),
+            preflight_ready=left_ready,
+        ),
+        SimpleNamespace(
+            side="right",
+            process=SimpleNamespace(poll=lambda: 1, stdin=_StartupInput()),
+            output=deque(["FAIL can2 unhealthy"]),
+            preflight_ready=threading.Event(),
+        ),
+    ]
+
+    with pytest.raises(RuntimeError, match=r"right.*motion-free preflight"):
+        _release_bimanual_startup(runtimes, timeout_s=0.1)
+
+    assert left_input.writes == []
 
 
 def test_episode_start_waits_for_an_explicit_operator_confirmation(monkeypatch) -> None:
@@ -115,8 +187,9 @@ def test_managed_runtimes_stop_both_sides_and_run_disable_fallback(monkeypatch) 
     commands: list[tuple[str, ...]] = []
     cleaned_sides: list[str] = []
 
-    def popen(*args, **kwargs):
-        process = _Process()
+    def popen(command, **kwargs):
+        side = command[command.index("--side") + 1]
+        process = _Process(side)
         processes.append(process)
         return process
 
@@ -146,6 +219,49 @@ def test_managed_runtimes_stop_both_sides_and_run_disable_fallback(monkeypatch) 
     assert signals == [(processes[0].pid, "INT"), (processes[1].pid, "INT")]
     assert [command[1] for command in commands] == ["left_arm", "right_arm"]
     assert cleaned_sides == ["left", "right"]
+
+
+def test_right_only_runtime_uses_isolation_and_never_disables_left(monkeypatch) -> None:
+    processes: list[_Process] = []
+    launches: list[tuple[str, ...]] = []
+    disable_commands: list[tuple[str, ...]] = []
+    cleaned_sides: list[str] = []
+
+    def popen(command, **kwargs):
+        del kwargs
+        launches.append(tuple(command))
+        process = _Process("right")
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr("vlai_l1_runtime.collection.managed.os.geteuid", lambda: 0)
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.verify_xair_dependency",
+        lambda config: None,
+    )
+    monkeypatch.setattr("vlai_l1_runtime.collection.managed.subprocess.Popen", popen)
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed._signal_runtime",
+        lambda _sudo, _process_group, signal_name: setattr(processes[0], "returncode", 0),
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.subprocess.run",
+        lambda command, **kwargs: disable_commands.append(tuple(command)),
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.remove_orphaned_xair_control_socket",
+        lambda _config, side: cleaned_sides.append(side),
+    )
+
+    with pytest.raises(RuntimeError, match="capture failed"), ManagedXAirRuntimes(RIGHT_CONFIG):
+        raise RuntimeError("capture failed")
+
+    assert len(launches) == 1
+    assert launches[0][launches[0].index("--side") + 1] == "right"
+    assert "--isolated-side" in launches[0]
+    assert "--managed-startup-gate" not in launches[0]
+    assert [command[1] for command in disable_commands] == ["right_arm"]
+    assert cleaned_sides == ["right"]
 
 
 def test_partial_runtime_start_failure_stops_started_side(monkeypatch) -> None:
@@ -324,7 +440,7 @@ def test_managed_collection_keeps_runtime_and_resets_between_episodes(monkeypatc
     )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed.XAirStateReceiver",
-        lambda _config: object(),
+        lambda _config, **_kwargs: object(),
     )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.live.LiveCollectionSource",
@@ -400,18 +516,18 @@ def test_managed_collection_keeps_runtime_and_resets_between_episodes(monkeypatc
         "sink_enter",
         "samples",
         "record",
+        "runtime_adjust",
         "complete",
         "sink_exit",
-        "runtime_adjust",
         "runtime_check",
         "operator_start",
         "camera_preflight",
         "sink_enter",
         "samples",
         "record",
+        "runtime_adjust",
         "complete",
         "sink_exit",
-        "runtime_adjust",
         "runtime_check",
         "operator_quit",
         "runtime_exit",

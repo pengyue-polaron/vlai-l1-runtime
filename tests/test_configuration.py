@@ -22,10 +22,10 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         "can3",
     ]
     assert [endpoint.parentdev for endpoint in config.can.endpoints] == [
-        "1-2.2.1:1.0",
-        "1-2.2.2:1.0",
-        "1-2.2.3:1.0",
-        "1-2.2.4:1.0",
+        "1-3.1:1.0",
+        "1-3.2:1.0",
+        "1-3.3:1.0",
+        "1-3.4:1.0",
     ]
     assert config.can.tx_queue_length == 1000
     assert tuple(motor.name for motor in config.motors) == MOTOR_NAMES
@@ -48,8 +48,39 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
     assert config.teleoperation.can_health_poll_s == 0.1
     assert config.teleoperation.startup_timeout_s == 45.0
     assert config.teleoperation.shutdown_timeout_s == 8.0
+    assert config.teleoperation.motor_probe_duration_s == 2.0
+    assert config.teleoperation.motor_probe_rate_hz == 20
+    assert config.teleoperation.joint_safety.following_error_timeout_s == 0.1
+    assert config.teleoperation.joint_safety.following_error_action == "warn"
+    assert config.teleoperation.joint_safety.for_side("right").min_deg == (
+        -80.0,
+        -10.0,
+        -90.0,
+        0.0,
+        -90.0,
+        -45.0,
+        -90.0,
+    )
+    assert config.teleoperation.joint_safety.for_side("right").max_deg == (
+        120.0,
+        180.0,
+        90.0,
+        140.0,
+        90.0,
+        45.0,
+        90.0,
+    )
+    assert config.teleoperation.joint_safety.for_side("right").max_following_error_deg == (
+        9.0,
+        8.0,
+        3.0,
+        10.0,
+        4.0,
+        2.0,
+        6.0,
+    )
     assert config.teleoperation.blockers == ()
-    assert config.schema_version == 3
+    assert config.schema_version == 4
     assert config.safety.command_ready is False
     assert config.command_blockers == (
         "command_transport_unimplemented",
@@ -124,6 +155,36 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
             "can_health_poll_s = 0.2",
             "must not exceed state_timeout_s",
         ),
+        (
+            "motor_probe_rate_hz = 20",
+            "motor_probe_rate_hz = 0",
+            "outside the allowed range",
+        ),
+        (
+            "following_error_timeout_s = 0.1",
+            "following_error_timeout_s = 0.2",
+            "must not exceed state_timeout_s",
+        ),
+        (
+            'following_error_action = "warn"',
+            'following_error_action = "ignore"',
+            "must be one of",
+        ),
+        (
+            "min_deg = [-80.0, -10.0, -90.0, 0.0, -90.0, -45.0, -90.0]",
+            "min_deg = [120.0, -10.0, -90.0, 0.0, -90.0, -45.0, -90.0]",
+            "joint_1 min_deg must be less than max_deg",
+        ),
+        (
+            "max_following_error_deg = [9.0, 8.0, 3.0, 10.0, 4.0, 2.0, 6.0]",
+            "max_following_error_deg = [10.0]",
+            "exactly 7",
+        ),
+        (
+            'motor_type = "DM8009"',
+            'motor_type = "unknown"',
+            "must be one of",
+        ),
     ],
 )
 def test_system_config_rejects_unsafe_or_ambiguous_edits(
@@ -160,9 +221,9 @@ def test_system_config_rejects_special_files_before_opening(tmp_path: Path) -> N
 
 
 def test_tracked_config_is_the_physical_identity_authority(tmp_path: Path) -> None:
-    content = SYSTEM_CONFIG.read_text().replace("1-2.2.1:1.0", "1-2.2.9:1.0", 1)
+    content = SYSTEM_CONFIG.read_text().replace("1-3.1:1.0", "1-3.9:1.0", 1)
     candidate = tmp_path / "system.toml"
     candidate.write_text(content)
 
     config = load_system_config(candidate)
-    assert config.can.endpoints[0].parentdev == "1-2.2.9:1.0"
+    assert config.can.endpoints[0].parentdev == "1-3.9:1.0"

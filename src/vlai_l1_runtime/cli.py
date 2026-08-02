@@ -61,6 +61,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_xair.add_argument("--config", type=Path, required=True)
     run_xair.add_argument("--side", choices=("left", "right"), required=True)
+    run_xair.add_argument(
+        "--managed-startup-gate",
+        action="store_true",
+        help="wait after motion-free preflight for the bimanual parent release",
+    )
+    run_xair.add_argument(
+        "--isolated-side",
+        action="store_true",
+        help="require the inactive arm pair to remain fully down",
+    )
     camera_check = subparsers.add_parser(
         "camera-check", help="validate a finite live camera sample window"
     )
@@ -101,7 +111,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "observe-xair":
             return _run_xair_observer(args)
         if args.command == "run-xair":
-            return run_xair_side(load_system_config(args.config), args.side)
+            return run_xair_side(
+                load_system_config(args.config),
+                args.side,
+                managed_startup_gate=args.managed_startup_gate,
+                isolated_side=args.isolated_side,
+            )
         if args.command == "camera-check":
             return _run_camera_check(args)
         if args.command in {"camera-service", "camera-service-run"}:
@@ -178,13 +193,15 @@ def _run_collection_command(args: argparse.Namespace) -> int:
         print(f"PASS {config.path}")
         return 0
     if args.command == "describe-collection":
-        contract = canonical_dataset_contract(config.system)
+        contract = canonical_dataset_contract(config)
         print(
             json.dumps(
                 {
                     "dataset_schema": DATASET_SCHEMA,
                     "repo_id_prefix": config.repo_id_prefix,
                     "fps": config.fps,
+                    "teleoperation_sides": list(config.teleoperation_sides),
+                    "record_camera_roles": list(config.record_camera_roles),
                     "features": contract.features(),
                     "collection_ready": config.collection_ready,
                     "collection_blockers": list(config.collection_blockers),

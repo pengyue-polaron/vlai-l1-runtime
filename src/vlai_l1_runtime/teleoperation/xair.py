@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..configuration import MOTOR_NAMES, ROLES, SIDES, ControlProfile, SystemConfig
-from ..contracts import NamedJointVector, SampleMetadata
+from ..contracts import NamedJointVector, SampleMetadata, feature_names_for_sides
 
 _PACKET = struct.Struct("<4sHBBQQ16d")
 _MAGIC = b"VL1S"
@@ -35,6 +35,15 @@ _REQUIRED_SYMBOLS = (
     "xarm_teleop_start",
     "xarm_teleop_stop",
     "xarm_teleop_version",
+)
+_REQUIRED_CAN_PROBE_SYMBOLS = (
+    "xarm_sdk_create",
+    "xarm_sdk_destroy",
+    "xarm_sdk_get_last_error",
+    "xarm_sdk_init_arm_motors",
+    "xarm_sdk_init_gripper_motor",
+    "xarm_sdk_recv_all",
+    "xarm_sdk_refresh_all",
 )
 _ELF_MACHINE = {"aarch64": 183, "x86_64": 62}
 _PROFILE_FIELDS = {
@@ -165,17 +174,62 @@ class XAirBimanualAssembler:
         )
 
 
-class XAirStateReceiver:
-    """Own the configured Unix datagram endpoint and emit paired named vectors."""
+class XAirSingleSideAssembler:
+    """Convert one selected side into exact named degree-valued vectors."""
 
-    def __init__(self, config: SystemConfig) -> None:
+    def __init__(self, side: str) -> None:
+        if side not in SIDES:
+            raise ValueError(f"side must be one of {SIDES}")
+        self._side = side
+        self._feature_names = feature_names_for_sides((side,))
+        self._last_received: int | None = None
+        self._output_sequence = 0
+
+    def accept(self, packet: XAirStatePacket) -> tuple[NamedJointVector, NamedJointVector] | None:
+        if not isinstance(packet, XAirStatePacket):
+            raise TypeError("packet must be an XAirStatePacket")
+        if packet.side != self._side:
+            return None
+        if self._last_received is not None and packet.source_sequence <= self._last_received:
+            raise ValueError(f"x_air {packet.side} source sequence did not increase")
+        self._last_received = packet.source_sequence
+        action_values: dict[str, float] = {}
+        observation_values: dict[str, float] = {}
+        for motor, leader, follower in zip(
+            MOTOR_NAMES,
+            packet.leader_radians,
+            packet.follower_radians,
+            strict=True,
+        ):
+            action_values[f"{self._side}_{motor}.pos"] = math.degrees(leader)
+            observation_values[f"{self._side}_{motor}.pos"] = math.degrees(follower)
+        metadata = SampleMetadata(self._output_sequence, packet.monotonic_ns)
+        self._output_sequence += 1
+        return NamedJointVector(
+            observation_values,
+            metadata,
+            self._feature_names,
+        ), NamedJointVector(action_values, metadata, self._feature_names)
+
+
+class XAirStateReceiver:
+    """Own the configured Unix datagram endpoint and emit selected named vectors."""
+
+    def __init__(self, config: SystemConfig, *, sides: tuple[str, ...] = SIDES) -> None:
         if not isinstance(config, SystemConfig):
             raise TypeError("XAirStateReceiver requires SystemConfig")
+        feature_names_for_sides(sides)
         self._path = config.teleoperation.state_socket_path
         self._max_side_skew_s = config.teleoperation.max_side_skew_s
-        self._assembler = XAirBimanualAssembler(max_side_skew_s=self._max_side_skew_s)
+        self._sides = sides
+        self._assembler = self._new_assembler()
         self._socket: socket.socket | None = None
         self._socket_inode: int | None = None
+
+    def _new_assembler(self) -> XAirBimanualAssembler | XAirSingleSideAssembler:
+        if len(self._sides) == 1:
+            return XAirSingleSideAssembler(self._sides[0])
+        return XAirBimanualAssembler(max_side_skew_s=self._max_side_skew_s)
 
     def __enter__(self) -> XAirStateReceiver:
         if self._socket is not None:
@@ -262,7 +316,7 @@ class XAirStateReceiver:
             if not readable:
                 break
             self._socket.recv(_PACKET.size + 1)
-        self._assembler = XAirBimanualAssembler(max_side_skew_s=self._max_side_skew_s)
+        self._assembler = self._new_assembler()
 
     def __exit__(self, exc_type, exc, traceback) -> None:
         receiver, self._socket = self._socket, None
@@ -333,6 +387,7 @@ def describe_xair_side(config: SystemConfig, side: str) -> dict[str, object]:
     leader = endpoints[(side, "leader")]
     follower = endpoints[(side, "follower")]
     teleop = config.teleoperation
+    joint_safety = teleop.joint_safety.for_side(side)
     if teleop.state_protocol_version != _PROTOCOL_VERSION:
         raise ValueError("tracked x_air state protocol version is unsupported")
     return {
@@ -351,12 +406,28 @@ def describe_xair_side(config: SystemConfig, side: str) -> dict[str, object]:
         "can_data_bitrate": config.can.data_bitrate,
         "can_restart_ms": config.can.restart_ms,
         "can_tx_queue_length": config.can.tx_queue_length,
+        "motors": [
+            {
+                "name": motor.name,
+                "send_id": motor.send_id,
+                "receive_id": motor.receive_id,
+                "motor_type": motor.motor_type,
+            }
+            for motor in config.motors
+        ],
+        "motor_probe_duration_s": teleop.motor_probe_duration_s,
+        "motor_probe_rate_hz": teleop.motor_probe_rate_hz,
         "state_socket_path": str(teleop.state_socket_path),
         "control_socket_path": str(xair_control_socket_path(config, side)),
         "publish_hz": teleop.publish_hz,
         "state_timeout_ms": round(teleop.state_timeout_s * 1000),
         "rt_priority": teleop.rt_priority,
         "can_health_poll_ms": round(teleop.can_health_poll_s * 1000),
+        "joint_min_deg": list(joint_safety.min_deg),
+        "joint_max_deg": list(joint_safety.max_deg),
+        "max_following_error_deg": list(joint_safety.max_following_error_deg),
+        "following_error_timeout_ms": round(teleop.joint_safety.following_error_timeout_s * 1000),
+        "following_error_action": teleop.joint_safety.following_error_action,
         "commissioned": teleop.commissioned,
     }
 
@@ -463,6 +534,7 @@ def verify_xair_dependency(config: SystemConfig) -> XAirDependencyReport:
     )
     can_library = root / "publish/xarm_can/package/lib" / architecture / "libxarm_can_sdk.so"
     header = teleop_root / "include/xarm_teleop_sdk.h"
+    can_header = root / "publish/xarm_can/package/include/xarm_can_sdk.h"
     package_manifest = teleop_root / "package.xml"
     xacro = (
         root / "publish/modules/src/xarm_description/urdf/robot" / f"{teleop.arm_type}.urdf.xacro"
@@ -471,6 +543,7 @@ def verify_xair_dependency(config: SystemConfig) -> XAirDependencyReport:
         ("teleoperation library", teleop_library),
         ("CAN library", can_library),
         ("public SDK header", header),
+        ("public CAN SDK header", can_header),
         ("package manifest", package_manifest),
         ("robot xacro", xacro),
     ):
@@ -486,10 +559,28 @@ def verify_xair_dependency(config: SystemConfig) -> XAirDependencyReport:
     missing_exports = [symbol for symbol in _REQUIRED_SYMBOLS if symbol not in symbols]
     if missing_exports:
         raise ValueError(f"x_air teleoperation library is missing exports: {missing_exports}")
+    can_symbols = {
+        line.split()[-1]
+        for line in _command_output("nm", "-D", "--defined-only", str(can_library)).splitlines()
+        if line.split()
+    }
+    missing_can_exports = [
+        symbol for symbol in _REQUIRED_CAN_PROBE_SYMBOLS if symbol not in can_symbols
+    ]
+    if missing_can_exports:
+        raise ValueError(f"x_air CAN library is missing probe exports: {missing_can_exports}")
     header_text = header.read_text(encoding="utf-8")
     missing = [symbol for symbol in _REQUIRED_SYMBOLS if symbol not in header_text]
     if missing:
         raise ValueError(f"x_air public header is missing symbols: {missing}")
+    can_header_text = can_header.read_text(encoding="utf-8")
+    missing_can_declarations = [
+        symbol for symbol in _REQUIRED_CAN_PROBE_SYMBOLS if symbol not in can_header_text
+    ]
+    if missing_can_declarations:
+        raise ValueError(
+            f"x_air public CAN header is missing probe symbols: {missing_can_declarations}"
+        )
     version_match = _PACKAGE_VERSION.search(package_manifest.read_text(encoding="utf-8"))
     if version_match is None or version_match.group(1) != teleop.sdk_version:
         actual = None if version_match is None else version_match.group(1)

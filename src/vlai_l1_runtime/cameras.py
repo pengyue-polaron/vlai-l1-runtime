@@ -53,7 +53,12 @@ class _CameraContinuity:
 class CameraSetValidator:
     """Own cross-frame continuity for one commissioned camera bridge."""
 
-    def __init__(self, config: CamerasConfig) -> None:
+    def __init__(
+        self,
+        config: CamerasConfig,
+        *,
+        roles: tuple[str, ...] | None = None,
+    ) -> None:
         if not isinstance(config, CamerasConfig):
             raise TypeError("CameraSetValidator requires CamerasConfig")
         try:
@@ -79,14 +84,24 @@ class CameraSetValidator:
             )
         except (AttributeError, ConfigError) as exc:
             raise CameraContractError("camera configuration is malformed") from exc
-        if not config_snapshot.collection_ready:
+        if roles is None and not config_snapshot.collection_ready:
             raise CameraContractError(
                 "all tracked camera roles must be commissioned for collection"
             )
         self._config = config_snapshot
-        self._enabled = {
-            stream.role: stream for stream in config_snapshot.streams if stream.enabled
-        }
+        enabled = {stream.role: stream for stream in config_snapshot.streams if stream.enabled}
+        if roles is None:
+            roles = tuple(enabled)
+        if not isinstance(roles, tuple) or not roles:
+            raise CameraContractError("camera validation roles must be a non-empty tuple")
+        if not all(isinstance(role, str) for role in roles):
+            raise CameraContractError("camera validation roles must be text")
+        if len(roles) != len(set(roles)):
+            raise CameraContractError("camera validation roles must be unique")
+        unavailable = [role for role in roles if role not in enabled]
+        if unavailable:
+            raise CameraContractError(f"camera validation roles are unavailable: {unavailable}")
+        self._enabled = {role: enabled[role] for role in roles}
         self._previous: Mapping[str, _CameraContinuity] | None = None
         self._pending_restart_epochs: Mapping[str, str] | None = None
 

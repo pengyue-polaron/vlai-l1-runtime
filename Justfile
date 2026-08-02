@@ -6,6 +6,7 @@ vpy := repo + "/.venv/bin/python"
 uv := env("UV_BIN", "uv")
 system_config := repo + "/configs/system/vlai_l1.toml"
 collection_config := repo + "/configs/collection/default.toml"
+right_collection_config := repo + "/configs/collection/right_only.toml"
 
 default:
     @just --list
@@ -48,6 +49,13 @@ sdk-start side="left":
     sudo {{ vpy }} -m vlai_l1_runtime.cli run-xair \
         --config {{ system_config }} \
         --side "{{ side }}"
+
+sdk-start-right-only:
+    {{ vpy }} -m vlai_l1_runtime.cli verify-xair --config {{ system_config }}
+    sudo {{ vpy }} -m vlai_l1_runtime.cli run-xair \
+        --config {{ system_config }} \
+        --side right \
+        --isolated-side
 
 sdk-status:
     #!/usr/bin/env bash
@@ -103,12 +111,24 @@ cameras action="start":
 panel:
     {{ vpy }} -m vlai_l1_runtime.cli panel --config {{ collection_config }}
 
+panel-right:
+    {{ vpy }} -m vlai_l1_runtime.cli panel --config {{ right_collection_config }}
+
 reset:
     {{ vpy }} -m vlai_l1_runtime.cli reset --config {{ collection_config }}
+
+reset-right:
+    {{ vpy }} -m vlai_l1_runtime.cli reset --config {{ right_collection_config }}
 
 collect experiment task:
     {{ repo }}/scripts/collect.sh \
         --config {{ collection_config }} \
+        --experiment "{{ experiment }}" \
+        --task "{{ task }}"
+
+collect-right experiment task:
+    {{ repo }}/scripts/collect.sh \
+        --config {{ right_collection_config }} \
         --experiment "{{ experiment }}" \
         --task "{{ task }}"
 
@@ -117,7 +137,17 @@ dataset-doctor experiment:
         --config {{ collection_config }} \
         --experiment "{{ experiment }}"
 
+dataset-doctor-right experiment:
+    {{ vpy }} -m vlai_l1_runtime.cli dataset-doctor \
+        --config {{ right_collection_config }} \
+        --experiment "{{ experiment }}"
+
 export-v21 experiment:
     {{ vpy }} -m vlai_l1_runtime.cli export-v21 \
         --config {{ collection_config }} \
+        --experiment "{{ experiment }}"
+
+export-v21-right experiment:
+    {{ vpy }} -m vlai_l1_runtime.cli export-v21 \
+        --config {{ right_collection_config }} \
         --experiment "{{ experiment }}"

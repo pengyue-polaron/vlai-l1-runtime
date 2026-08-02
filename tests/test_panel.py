@@ -11,6 +11,7 @@ from vlai_l1_runtime.panel import L1OperatorPanelAdapter
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "configs/collection/default.toml"
+RIGHT_CONFIG = ROOT / "configs/collection/right_only.toml"
 
 
 def test_panel_exposes_the_commissioned_collection_stack() -> None:
@@ -74,6 +75,30 @@ def test_panel_builds_live_collection_from_tracked_contract() -> None:
         InputAction("discard", "Discard", "d\n", "danger"),
         InputAction("quit", "Quit", "q\n", "quiet"),
     )
+
+
+def test_right_only_panel_exposes_only_recorded_camera_roles() -> None:
+    adapter = L1OperatorPanelAdapter(ROOT, RIGHT_CONFIG)
+    catalog = adapter.catalog()
+
+    assert [camera["id"] for camera in catalog["cameras"]] == ["wrist_right", "agent"]
+    collect = next(workflow for workflow in catalog["workflows"] if workflow["id"] == "collect")
+    assert "right" in collect["description"]
+    assert "wrist_right, agent" in collect["description"]
+    task_field = next(field for field in collect["fields"] if field["name"] == "task")
+    assert task_field["type"] == "combobox"
+    assert "put the blue block into the red plate" in {
+        option["value"] for option in task_field["options"]
+    }
+    reset = next(workflow for workflow in catalog["workflows"] if workflow["id"] == "reset")
+    assert "right leader/follower" in reset["confirm"]
+    prompts = {
+        item["value"]
+        for group in catalog["configuration_groups"]
+        if group["label"] == "Registered prompts"
+        for item in group["items"]
+    }
+    assert "put the blue block into the red plate" in prompts
 
 
 def test_panel_uses_shared_collection_camera_health(monkeypatch) -> None:

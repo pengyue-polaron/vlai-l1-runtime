@@ -9,6 +9,7 @@ from vlai_l1_runtime.contracts import FEATURE_NAMES, NamedJointVector, SampleMet
 ROOT = Path(__file__).resolve().parents[1]
 SYSTEM_CONFIG = ROOT / "configs/system/vlai_l1.toml"
 COLLECTION_CONFIG = ROOT / "configs/collection/default.toml"
+RIGHT_COLLECTION_CONFIG = ROOT / "configs/collection/right_only.toml"
 
 
 def test_hardware_free_cli_validates_and_describes(capsys) -> None:
@@ -44,7 +45,9 @@ def test_hardware_free_cli_validates_and_describes_collection(capsys) -> None:
 
     assert main(["describe-collection", "--config", str(COLLECTION_CONFIG)]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["dataset_schema"] == "vlai_l1_lerobot_dataset_v3_v2"
+    assert payload["dataset_schema"] == "vlai_l1_lerobot_dataset_v3_v3"
+    assert payload["teleoperation_sides"] == ["left", "right"]
+    assert payload["record_camera_roles"] == ["wrist_left", "wrist_right", "agent"]
     assert payload["collection_ready"] is True
     assert set(payload["features"]) == {
         "action",
@@ -53,6 +56,13 @@ def test_hardware_free_cli_validates_and_describes_collection(capsys) -> None:
         "observation.images.wrist_right",
         "observation.state",
     }
+
+    assert main(["describe-collection", "--config", str(RIGHT_COLLECTION_CONFIG)]) == 0
+    right = json.loads(capsys.readouterr().out)
+    assert right["teleoperation_sides"] == ["right"]
+    assert right["record_camera_roles"] == ["wrist_right", "agent"]
+    assert right["features"]["action"]["shape"] == [8]
+    assert "observation.images.wrist_left" not in right["features"]
 
 
 def test_reset_cli_uses_the_managed_teleoperation_lifecycle(monkeypatch) -> None:
@@ -64,6 +74,31 @@ def test_reset_cli_uses_the_managed_teleoperation_lifecycle(monkeypatch) -> None
 
     assert main(["reset", "--config", str(COLLECTION_CONFIG)]) == 0
     assert called == [COLLECTION_CONFIG.resolve()]
+
+
+def test_right_only_cli_selects_the_existing_side_with_isolation(monkeypatch) -> None:
+    called = []
+
+    def run(config, side, *, managed_startup_gate, isolated_side):
+        called.append((config.path, side, managed_startup_gate, isolated_side))
+        return 0
+
+    monkeypatch.setattr("vlai_l1_runtime.cli.run_xair_side", run)
+
+    assert (
+        main(
+            [
+                "run-xair",
+                "--config",
+                str(SYSTEM_CONFIG),
+                "--side",
+                "right",
+                "--isolated-side",
+            ]
+        )
+        == 0
+    )
+    assert called == [(SYSTEM_CONFIG.resolve(), "right", False, True)]
 
 
 def test_xair_observer_reports_paired_bimanual_state(monkeypatch, capsys) -> None:

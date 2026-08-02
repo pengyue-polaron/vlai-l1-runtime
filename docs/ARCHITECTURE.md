@@ -13,8 +13,9 @@ VLAI workflows / embodied-ops adapter
 
 The pure configuration, public contracts, command-session state machine, and
 hardware-independent collection/dataset layer exist today. The teleoperation
-observation path is commissioned, while the independent policy-command
-transport remains unimplemented.
+observation path is commissioned after recovery of `can0` and a bounded test of
+the new joint-safety monitor. The independent policy-command transport remains
+unimplemented.
 
 ## Teleoperation observation path
 
@@ -32,6 +33,17 @@ timestamp, and both eight-value vectors. A stale callback, wrong DOF, or
 non-finite value stops the sidecar process. Missing datagram consumers never
 block the control loop.
 
+The pinned unilateral path is a direct joint-space reference path rather than
+Cartesian inverse kinematics: the public wrapper copies leader arm state into
+the follower references and the pinned release's JointMapper is identity. The
+native boundary therefore independently checks both seven-joint feedback
+vectors against side-specific System-owned bounds and measures leader/follower
+following error on increasing callback timestamps. A bound violation is
+immediately fatal. The configured following-error action is `warn`, so an
+over-limit error that persists for the tracked timeout emits one nonfatal event
+per excursion with side and joint detail. The gripper remains covered by the
+existing finite/stale/CAN checks but is not part of the seven-joint arm envelope.
+
 The Python adapter accepts only exact protocol packets, requires increasing
 per-side sequences and bounded left/right skew, then converts radians to the
 sixteen named degree-valued Runtime features. Leader positions become the
@@ -43,6 +55,23 @@ SDK's internal FIFO request at the System-owned priority, verifies every thread,
 and polls both CAN controllers through rtnetlink. A live error counter or any
 increase in warning, passive, bus-off, bus-error, arbitration-loss, or restart
 statistics terminates the session and lets SDK destruction disable the motors.
+The outer lifecycle independently watches CAN state while the opaque SDK is
+still inside its blocking constructor. Before invoking that motion-capable
+constructor, it opens each endpoint sequentially through the low-level CAN SDK
+without enabling motors. At the tracked rate and duration, every round must
+receive the exact eight System-owned motor response IDs; one missing response
+blocks alignment. Startup faults close the pair without rebinding or retrying
+an adapter, so evidence is preserved and state continuity is never fabricated
+across a control fault. Managed bimanual orchestration holds both processes
+after their complete motion-free probes and releases the motion-capable SDK
+constructors only when both sides are ready.
+
+An isolated single-side launch reuses the same configured lifecycle rather
+than defining another hardware mapping. It acquires the lifecycle lock
+exclusively, requires both peer CAN interfaces to be administratively `DOWN`
+before active-side setup, and continues checking that condition until shutdown.
+Ordinary paired side launches take shared ownership, so neither can overlap an
+isolated session.
 
 Teleoperation and policy commands are separate readiness domains. Collection
 depends on a commissioned teleoperation observer and commissioned cameras; it
@@ -107,10 +136,11 @@ lagging stream or streams until it forms a coherent set or the bounded capture
 deadline expires. Validation still rejects any incoherent set that crosses the
 bridge boundary.
 
-Both required wrist roles are mapped to their visually verified D405 serials
-and enabled. The optional AgentView role is mapped to its verified D455 serial
-and enabled for the current dataset contract. The three-camera collection
-contract is commissioned. A physical USB disconnect still fails the current
+Both wrist roles are mapped to their visually verified D405 serials and
+enabled in the complete physical camera contract. The optional AgentView role
+is mapped to its verified D455 serial and enabled. A collection config selects
+which enabled roles are persisted without redefining physical identity. A
+physical USB disconnect still fails the current
 episode closed and requires the operator to restore the affected device before
 retrying.
 
@@ -127,29 +157,34 @@ x_air state observer + Camera Bridge
   -> independently generated v2.1 derivative
 ```
 
-`CollectionSample` holds named follower state, named leader action, and the
-enabled timestamped camera frames. `SampleAssembler` is the only place that
+`CollectionSample` holds selected named follower state, selected named leader
+action, and the explicitly recorded timestamped camera frames. `SampleAssembler` is the only place that
 combines freshness, skew, continuity, finite-value, and image-shape checks. It
 also applies the tracked observation crop without importing an image library.
 It stays free of LeRobot, NumPy, ROS, and device APIs. NumPy materialization
 happens only at the dataset writer boundary. The Runtime does not apply joint
-or gripper position ranges to observation or teleoperation action values.
+or gripper normalization to stored observation or teleoperation action values;
+the live sidecar's separate arm envelope is a fail-closed lifecycle guard and
+never clamps or rewrites a sample.
 
 For each frame, live collection targets the midpoint of the earliest and latest
-camera timestamps and selects the complete left/right robot-state pair closest
+recorded-camera timestamps and selects the configured robot state closest
 to that time. The configured robot/camera skew remains a validation boundary,
 not a queue-draining heuristic.
 
-The canonical dataset uses the same 16 degree-valued features at observation
-and action boundaries. It is not named after a policy and no model-specific
-normalization is stored. The v2.1 exporter always reads the canonical v3
+The bimanual collection contract uses the same 16 degree-valued features at
+observation and action boundaries. The right-only contract uses exactly the
+eight right-side features and records only Right Wrist plus AgentView. Neither
+contract fabricates inactive-side values. No model-specific normalization is
+stored. The v2.1 exporter always reads the canonical v3
 dataset; one derivative never becomes the source of another derivative.
 
 Every saved episode is appended through a hidden sibling dataset snapshot.
 Camera frames enter LeRobot through the tracked asynchronous image writer, and
-the complete live loop must meet the tracked minimum capture rate. Robot
-runtimes stop immediately after capture; encoding and publication run after
-motion shutdown while the read-only Camera Service may remain available.
+the complete live loop must meet the tracked minimum capture rate. After each
+save/discard capture stops, the active runtime runs `AdjustPosition` before
+encoding or discard finalization. It remains enabled at Reset until another
+episode begins or the operator quits; the read-only Camera Service may remain available.
 Existing data, video, and image payloads are
 hard-linked as immutable inputs; metadata is copied. LeRobot finalization,
 provenance generation, and a complete payload doctor run before the staging
@@ -158,17 +193,20 @@ dataset authoritative. Staging or backup leftovers block reuse until they are
 inspected.
 
 Managed collection starts or verifies the marked Camera Service, connects one
-raw client, and preflights cameras before motor enable. It then starts both
-guarded x_air runtimes; SDK construction performs `AdjustPosition` once on each
-side before the workflow accepts paired state. The operator may run the same
+raw client, and preflights recorded camera roles before motor enable. Bimanual
+mode starts both guarded x_air runtimes and releases their SDK constructors only
+after both sides pass the motion-free CAN preflight. Isolated mode starts only
+the selected side with the peer CAN pair locked down. SDK construction performs
+`AdjustPosition` before the workflow accepts selected state.
+The operator may run the same
 routine again with `r`, uses teleoperation to refine the episode start pose,
 and presses Enter. The workflow rechecks all cameras before the first recorded
 frame. During recording, Enter saves, `d` discards, and `q` discards and quits.
 Recording is operator-bounded and has no automatic duration limit.
-One collection command owns both sidecars across every episode. Save/discard
-finalization runs while the realtime control loops remain active, then
-`AdjustPosition` resets both sides on the same handles before the next episode.
-Only quit, failure, or interruption stops the sidecars and returns all four CAN
+One collection command owns the selected sidecar(s) across every episode.
+Save/discard first resets the selected side(s) on the same active handles;
+finalization then runs while the realtime loop remains active at Reset. Only
+quit, failure, or interruption stops the sidecars and returns their owned CAN
 links to `DOWN`. Collection shutdown closes only its raw client, so preview
 remains available. The
 standalone reset workflow uses this same startup alignment lifecycle without

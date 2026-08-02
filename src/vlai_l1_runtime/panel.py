@@ -67,9 +67,16 @@ class L1OperatorPanelAdapter:
             ),
         ]
         if not config.system.teleoperation.blockers:
-            workflows.insert(1, _reset_workflow())
+            workflows.insert(1, _reset_workflow(config.teleoperation_sides))
         if config.collection_ready:
-            workflows.insert(1, _collect_workflow())
+            workflows.insert(
+                1,
+                _collect_workflow(
+                    config.teleoperation_sides,
+                    config.record_camera_roles,
+                    prompt_catalogs,
+                ),
+            )
         return {
             "product": {"brand": "VLAI L1", "title": "Operations"},
             "cameras": [
@@ -79,8 +86,7 @@ class L1OperatorPanelAdapter:
                     "port": preview_port,
                     "path": f"/{stream.role}.mjpg",
                 }
-                for stream in config.system.cameras.streams
-                if stream.enabled
+                for stream in config.recording_camera_streams
             ],
             "camera_controls": [
                 {
@@ -271,13 +277,21 @@ def _experiment_workflow(
     }
 
 
-def _collect_workflow() -> dict[str, Any]:
+def _collect_workflow(
+    teleoperation_sides: tuple[str, ...],
+    camera_roles: tuple[str, ...],
+    prompt_catalogs: tuple[TaskCatalog, ...],
+) -> dict[str, Any]:
+    side_label = ", ".join(teleoperation_sides)
+    camera_label = ", ".join(camera_roles)
     return {
         "id": "collect",
         "label": "Collect",
         "eyebrow": "LIVE",
         "title": "Collect episodes",
-        "description": "Record save/discard episodes with paired state and three cameras.",
+        "description": (
+            f"Record {side_label} state with {camera_label}; return to Reset after each episode."
+        ),
         "submit_label": "Start collection",
         "fields": [
             {
@@ -290,24 +304,35 @@ def _collect_workflow() -> dict[str, Any]:
             {
                 "name": "task",
                 "label": "Task",
-                "type": "text",
+                "type": "combobox",
                 "required": True,
                 "placeholder": "place the fruit in the bowl",
+                "help_text": "Select a registered prompt or enter a new normalized task.",
+                "options": [
+                    {
+                        "value": task.prompt,
+                        "label": f"{task.task_id} · {task.distribution.upper()}",
+                    }
+                    for catalog in prompt_catalogs
+                    for task in catalog.tasks
+                ],
             },
         ],
     }
 
 
-def _reset_workflow() -> dict[str, Any]:
+def _reset_workflow(teleoperation_sides: tuple[str, ...]) -> dict[str, Any]:
+    side_label = ", ".join(teleoperation_sides)
     return {
         "id": "reset",
         "label": "Reset",
         "eyebrow": "ROBOT",
         "title": "Reset teleoperation alignment",
-        "description": "Run x_air AdjustPosition on both teleoperation sides.",
+        "description": f"Run x_air AdjustPosition on selected sides: {side_label}.",
         "submit_label": "Reset robot",
         "confirm": (
-            "This moves both leader and follower arm pairs. Confirm the workspace is clear?"
+            f"This moves the {side_label} leader/follower arm pair(s). "
+            "Confirm the workspace is clear?"
         ),
         "fields": [],
     }

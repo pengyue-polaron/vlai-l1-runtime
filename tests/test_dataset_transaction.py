@@ -122,6 +122,10 @@ def test_failed_episode_never_exposes_a_partial_dataset(tmp_path: Path) -> None:
     assert not list(tmp_path.glob(".dataset.staging-*"))
 
 
+@pytest.mark.skipif(
+    sys.version_info < (3, 12),
+    reason="LeRobot dataset operations require Python 3.12",
+)
 def test_lerobot_factory_configures_async_image_writers(monkeypatch, tmp_path: Path) -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 

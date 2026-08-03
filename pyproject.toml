@@ -58,6 +58,7 @@ explicit = true
 [dependency-groups]
 dev = [
     "build>=1.2",
+    "numpy>=2.2,<3",
     "pytest>=8.3",
     "ruff>=0.11",
 ]

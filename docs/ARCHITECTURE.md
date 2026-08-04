@@ -5,9 +5,6 @@ The intended dependency direction is:
 ```text
 embodied-ops workflow and Operator Panel contracts
   -> VLAI workflow adapter and LeRobot dataset composition
-  -> LeRobot Robot and Teleoperator clients
-  -> VLAI L1 Runtime transport
-  -> command lease and safety gates
   -> realtime C++ device owners
   -> CAN and cameras
 ```
@@ -16,16 +13,19 @@ The pure configuration, public contracts, command-session state machine, and
 hardware-independent collection/dataset layer exist today. The teleoperation
 observation path is commissioned after recovery of `can0` and a bounded test of
 the new joint-safety monitor. The independent policy-command transport remains
-unimplemented.
+unimplemented. LeRobot Robot/Teleoperator clients and their command-session
+boundary are also target architecture only; no such plugin packages are
+currently shipped.
 
 `embodied-ops` is the cross-robot operator-workflow layer, not a competing
 hardware API. It owns stable CLI presentation, collection input/decision
 contracts, reset-policy selection, task registries, timing checks, atomic
 artifacts, canonical contract digests, and the versioned Operator Panel catalog
-and form builders. VLAI composes those contracts with its extra pre-recording
+and form builders, plus shared LeRobot v3 graph validation and v2.1 format
+conversion. VLAI composes those contracts with its extra pre-recording
 AdjustPosition action. Joint names, degrees, CAN ownership, camera identities,
-LeRobot layout, physical Reset behavior, and every readiness decision remain
-L1-specific.
+LeRobot task/provenance policy, physical Reset behavior, and every readiness
+decision remain L1-specific.
 
 ## Teleoperation observation path
 

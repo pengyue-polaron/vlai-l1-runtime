@@ -20,12 +20,14 @@ unavailable capabilities.
 - The pinned x_air SDK owns each leader/follower CAN pair. The Runtime sidecar
   consumes its public callback; it does not open a second CAN handle or use the
   upstream ROS2 gripper bridge.
-- LeRobot Robot and Teleoperator plugins are separate thin clients. They use
-  this Runtime and must not open CAN devices.
+- LeRobot Robot and Teleoperator plugins are a future boundary, not currently
+  shipped by this project. When implemented, they must be thin Runtime clients
+  and must not open CAN devices.
 - `embodied-ops` supplies the shared CLI presentation, collection interaction,
-  timing, artifact, contract-digest, task-registry, and versioned Operator Panel
-  contracts. L1 feature names, datasets, Reset mechanics, provenance, and
-  hardware readiness remain here.
+  timing, artifact, contract-digest, task-registry, versioned Operator Panel,
+  and shared LeRobot v3 validation/v2.1 format mechanics. L1 feature names,
+  task/provenance policy, Reset mechanics, collection composition, and hardware
+  readiness remain here.
 
 ## Dataset contract
 

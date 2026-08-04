@@ -13,6 +13,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  native-safety:
+    name: Hardware-free native safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Configure native safety tests without the vendor SDK
+        run: cmake -S native/xair_sidecar -B build/native-safety -DVLAI_L1_SAFETY_ONLY=ON
+      - name: Build native safety tests
+        run: cmake --build build/native-safety --parallel
+      - name: Run native safety tests
+        run: ctest --test-dir build/native-safety --output-on-failure
+
   hardware-free:
     name: Hardware-free / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest

@@ -56,9 +56,9 @@ Repository responsibilities:
 | Component | Owns | Must not own |
 | --- | --- | --- |
 | `vlai-l1-runtime` | L1 topology, safety, devices, sidecars, camera identities, named state/action schema, dataset composition and readiness | Generic cross-robot workflow policy |
-| pinned `external/embodied-ops` | Generic episode, task registry, transaction, timing, artifact, camera-health presentation and Operator Panel primitives | L1 CAN, joints, cameras or readiness decisions |
+| pinned `external/embodied-ops` | Generic episode, task registry, transaction, timing, artifact, camera-health, Operator Panel and LeRobot format mechanics | L1 CAN, joints, cameras, task/provenance policy or readiness decisions |
 | pinned `external/x-air-sdk` | Reviewed x_air public ABI and opaque controller dependency | Runtime orchestration or dataset behavior |
-| LeRobot plugins outside this workspace | Thin Robot/Teleoperator clients of Runtime contracts | Direct ownership of CAN or cameras |
+| Future LeRobot plugins (not yet shipped) | Thin Robot/Teleoperator clients of Runtime contracts | Direct ownership of CAN or cameras |
 
 The canonical dataset is written directly as LeRobot v3.0. A v2.1 dataset is
 an independently generated derivative of that canonical source. There is no

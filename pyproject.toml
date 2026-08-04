@@ -15,7 +15,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "embodied-ops>=0.6,<0.7",
+    "embodied-ops[lerobot-dataset]>=0.7,<0.8",
     "tomli>=2.0; python_version < '3.11'",
 ]
 

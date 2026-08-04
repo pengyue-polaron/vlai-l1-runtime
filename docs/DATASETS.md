@@ -92,6 +92,11 @@ extra but never opens robot or camera devices.
 
 ## v2.1 export
 
+The Runtime validates its L1 feature/task/provenance contract, then delegates
+the shared LeRobot file-graph traversal, episode Parquet rewrite, H.264 slicing,
+and v2.1 metadata generation to `embodied-ops[lerobot-dataset]`. L1 derivative
+identity and atomic publication remain owned here.
+
 ```bash
 vlai-l1 export-v21 \
   --config configs/collection/default.toml \

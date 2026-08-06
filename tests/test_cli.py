@@ -21,12 +21,6 @@ def test_hardware_free_cli_validates_and_describes(capsys) -> None:
     assert payload["teleoperation_ready"] is True
     assert payload["command_ready"] is False
     assert payload["collection_ready"] is True
-    assert payload["reset"] == {
-        "after_discard": True,
-        "after_save": True,
-        "before_collection": True,
-    }
-    assert payload["leading_stillness"]["enabled"] is True
     assert len(payload["action_features"]) == 16
 
     assert (
@@ -55,6 +49,12 @@ def test_hardware_free_cli_validates_and_describes_collection(capsys) -> None:
     assert payload["teleoperation_sides"] == ["left", "right"]
     assert payload["record_camera_roles"] == ["wrist_left", "wrist_right", "agent"]
     assert payload["collection_ready"] is True
+    assert payload["reset"] == {
+        "after_discard": True,
+        "after_save": True,
+        "before_collection": True,
+    }
+    assert payload["leading_stillness"]["enabled"] is True
     assert set(payload["features"]) == {
         "action",
         "observation.images.agent",

@@ -7,12 +7,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
 import pytest
 from embodied_ops import LeadingStillnessConfig
 
 from vlai_l1_runtime.collection.configuration import load_collection_config
 from vlai_l1_runtime.collection.dataset import DirectDatasetState
 from vlai_l1_runtime.collection.migration import (
+    _normalize_frame_value,
     plan_leading_stillness,
     trim_leading_stillness_dataset,
 )
@@ -83,6 +85,24 @@ def test_trim_plan_fails_closed_when_an_episode_never_moves() -> None:
             TRIM_CONFIG,
             expected_episodes=1,
             expected_frames=4,
+        )
+
+
+def test_migration_normalizes_decoded_chw_video_frames_to_writer_hwc() -> None:
+    chw = np.zeros((3, 4, 5), dtype=np.uint8)
+    hwc = _normalize_frame_value(
+        "observation.images.test",
+        chw,
+        {"dtype": "video", "shape": (4, 5, 3)},
+    )
+
+    assert hwc.shape == (4, 5, 3)
+    assert np.shares_memory(chw, hwc)
+    with pytest.raises(ValueError, match="differs from HWC"):
+        _normalize_frame_value(
+            "observation.images.test",
+            np.zeros((4, 3, 5), dtype=np.uint8),
+            {"dtype": "video", "shape": (4, 5, 3)},
         )
 
 

@@ -287,7 +287,8 @@ def _write_trimmed_episodes(
     episode_completed: Callable[[EpisodeTrimPlan], None] | None,
 ) -> None:
     finalized = False
-    feature_keys = tuple(target.contract.features())
+    feature_specs = target.contract.features()
+    feature_keys = tuple(feature_specs)
     try:
         for episode in plan.episodes:
             for source_index in range(episode.retained_from_index, episode.source_to_index):
@@ -300,7 +301,10 @@ def _write_trimmed_episodes(
                 missing = [key for key in feature_keys if key not in item]
                 if missing:
                     raise ValueError(f"source frame {source_index} is missing features: {missing}")
-                frame = {key: item[key] for key in feature_keys}
+                frame = {
+                    key: _normalize_frame_value(key, item[key], feature_specs[key])
+                    for key in feature_keys
+                }
                 frame["task"] = frame_task
                 writer.add_frame(frame)
             writer.save_episode(parallel_encoding=False)
@@ -345,6 +349,45 @@ def _action_tuple(value: Any) -> tuple[float, ...]:
         return tuple(float(item) for item in value)
     except (TypeError, ValueError) as exc:
         raise ValueError("source action must be a numeric sequence") from exc
+
+
+def _normalize_frame_value(
+    key: str,
+    value: Any,
+    feature: Mapping[str, Any],
+) -> Any:
+    if feature.get("dtype") != "video":
+        return value
+    expected_shape = tuple(feature.get("shape", ()))
+    actual_shape = getattr(value, "shape", None)
+    if actual_shape is None:
+        return value
+    actual_shape = tuple(actual_shape)
+    if actual_shape == expected_shape:
+        return value
+    if len(expected_shape) != 3:
+        raise ValueError(f"video feature {key!r} has a malformed contract shape")
+    channel_first_shape = (expected_shape[2], expected_shape[0], expected_shape[1])
+    if actual_shape != channel_first_shape:
+        raise ValueError(
+            f"source video feature {key!r} shape {actual_shape} differs from "
+            f"HWC {expected_shape} and CHW {channel_first_shape}"
+        )
+
+    permute = getattr(value, "permute", None)
+    if callable(permute):
+        converted = permute(1, 2, 0)
+        contiguous = getattr(converted, "contiguous", None)
+        if callable(contiguous):
+            converted = contiguous()
+    else:
+        transpose = getattr(value, "transpose", None)
+        if not callable(transpose):
+            raise ValueError(f"source video feature {key!r} cannot convert CHW to HWC")
+        converted = transpose(1, 2, 0)
+    if tuple(getattr(converted, "shape", ())) != expected_shape:
+        raise RuntimeError(f"source video feature {key!r} did not convert to HWC")
+    return converted
 
 
 def _non_negative_integer(row: Mapping[str, Any], key: str) -> int:

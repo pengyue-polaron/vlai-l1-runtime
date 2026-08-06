@@ -25,7 +25,7 @@ def test_panel_exposes_the_commissioned_collection_stack() -> None:
 
     assert catalog["schema_version"] == PANEL_CATALOG_SCHEMA_VERSION
     assert validate_panel_catalog(catalog) is catalog
-    assert catalog["product"] == {"brand": "VLAI L1", "title": "Operations"}
+    assert catalog["product"] == {"brand": "VLAI L1", "title": "Operator Panel"}
     assert {(camera["id"], camera["port"], camera["path"]) for camera in catalog["cameras"]} == {
         ("wrist_left", 8088, "/wrist_left.mjpg"),
         ("wrist_right", 8088, "/wrist_right.mjpg"),
@@ -35,14 +35,21 @@ def test_panel_exposes_the_commissioned_collection_stack() -> None:
     assert [
         (control["label"], control["values"]["action"]) for control in catalog["camera_controls"]
     ] == [("Start cameras", "start"), ("Stop cameras", "stop")]
-    assert {workflow["id"] for workflow in catalog["workflows"]} == {
-        "validate-collection",
+    assert [workflow["id"] for workflow in catalog["workflows"]] == [
+        "hardware",
         "collect",
         "reset",
         "dataset-doctor",
         "export-v21",
-    }
-    launch = adapter.build_launch("dataset-doctor", {"experiment": "pick_v1"})
+        "validate-collection",
+    ]
+    launch = adapter.build_launch(
+        "dataset-doctor",
+        {
+            "config": "configs/collection/default.toml",
+            "experiment": "pick_v1",
+        },
+    )
     assert launch.command[:3] == (sys.executable, "-m", "vlai_l1_runtime.cli")
     assert launch.command[-2:] == (
         str(CONFIG),
@@ -59,6 +66,12 @@ def test_panel_exposes_the_commissioned_collection_stack() -> None:
         "--config",
         str(CONFIG),
     )
+    hardware = adapter.build_launch("hardware", {"config": "configs/collection/right_only.toml"})
+    assert hardware.command[-3:] == (
+        "hardware",
+        "--config",
+        str(RIGHT_CONFIG),
+    )
 
 
 def test_panel_builds_live_collection_from_tracked_contract() -> None:
@@ -66,6 +79,7 @@ def test_panel_builds_live_collection_from_tracked_contract() -> None:
     launch = adapter.build_launch(
         "collect",
         {
+            "config": "configs/collection/default.toml",
             "experiment": "pick_v1",
             "task": "pick up the object",
         },
@@ -85,15 +99,20 @@ def test_right_only_panel_exposes_only_recorded_camera_roles() -> None:
 
     assert [camera["id"] for camera in catalog["cameras"]] == ["wrist_right", "agent"]
     collect = next(workflow for workflow in catalog["workflows"] if workflow["id"] == "collect")
-    assert "right" in collect["description"]
-    assert "wrist_right, agent" in collect["description"]
+    assert "trim leading stillness" in collect["description"]
+    config_field = next(field for field in collect["fields"] if field["name"] == "config")
+    assert config_field["default"] == "configs/collection/right_only.toml"
+    assert {item["value"] for item in config_field["options"]} == {
+        "configs/collection/default.toml",
+        "configs/collection/right_only.toml",
+    }
     task_field = next(field for field in collect["fields"] if field["name"] == "task")
     assert task_field["type"] == "combobox"
     assert "put the blue block into the red plate" in {
         option["value"] for option in task_field["options"]
     }
     reset = next(workflow for workflow in catalog["workflows"] if workflow["id"] == "reset")
-    assert "right leader/follower" in reset["confirm"]
+    assert "selected leader/follower" in reset["confirm"]
     prompts = {
         item["value"]
         for group in catalog["configuration_groups"]

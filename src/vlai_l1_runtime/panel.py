@@ -19,7 +19,11 @@ from embodied_ops.operator_panel import (
     combobox_field,
     fetch_camera_health,
     option,
+    order_workflow_forms,
     select_field,
+    standard_camera_controls,
+    standard_core_workflows,
+    standard_panel_product,
     text_field,
 )
 
@@ -45,42 +49,67 @@ class L1OperatorPanelAdapter:
         prompt_catalogs = self._prompt_catalogs()
         preview_port = config.system.camera_preview.port
         config_reference = self._reference(config.path)
-        workflows = [
-            _validate_workflow(config_reference),
-            _experiment_workflow(
-                workflow="dataset-doctor",
-                label="Doctor",
-                eyebrow="DATASET",
-                title="Inspect canonical dataset",
-                description="Validate metadata, episode ranges, Parquet, and videos.",
-                submit_label="Run doctor",
-            ),
-            _experiment_workflow(
-                workflow="export-v21",
-                label="Export v2.1",
-                eyebrow="DERIVATIVE",
-                title="Export LeRobot v2.1",
-                description="Create a new v2.1 derivative from canonical v3 data.",
-                submit_label="Export",
+        collection_options, experiment_options = self._collection_options()
+        collection_field = select_field(
+            "config",
+            "Collection config",
+            collection_options,
+            default=config_reference,
+        )
+        dataset_fields = [
+            collection_field,
+            combobox_field(
+                "experiment",
+                "Experiment",
+                experiment_options,
+                placeholder="fruit_placement_v1",
+                help_text="Select an existing canonical dataset or enter its exact name.",
+                depends_on="config",
             ),
         ]
-        if not config.system.teleoperation.blockers:
-            workflows.insert(
-                1,
-                _reset_workflow(config.teleoperation_sides, config_reference),
-            )
-        if config.collection_ready:
-            workflows.insert(
-                1,
-                _collect_workflow(
-                    config.teleoperation_sides,
-                    config.record_camera_roles,
-                    prompt_catalogs,
+        workflows = standard_core_workflows(
+            hardware_fields=[collection_field],
+            collect_fields=[
+                collection_field,
+                combobox_field(
+                    "experiment",
+                    "Experiment",
+                    experiment_options,
+                    placeholder="fruit_placement_v1",
+                    help_text=(
+                        "Select an existing experiment to append episodes, or type "
+                        "a new name to create one."
+                    ),
+                    depends_on="config",
                 ),
-            )
+                combobox_field(
+                    "task",
+                    "Task prompt",
+                    [
+                        option(task.prompt, f"{task.task_id} · {task.distribution.upper()}")
+                        for catalog in prompt_catalogs
+                        for task in catalog.tasks
+                    ],
+                    placeholder="place the fruit in the bowl",
+                    help_text=(
+                        "Select a tracked training prompt or type an exact new prompt. "
+                        "One experiment may contain episodes from multiple prompts."
+                    ),
+                ),
+            ],
+            reset_fields=[collection_field],
+            dataset_fields=dataset_fields,
+            reset_confirm=(
+                "This moves the selected leader/follower arm pair(s). "
+                "Confirm the workspace is clear?"
+            ),
+        )
+        workflows = order_workflow_forms(
+            [*workflows, _validate_workflow(collection_options, config_reference)]
+        )
         return {
             "schema_version": PANEL_CATALOG_SCHEMA_VERSION,
-            "product": {"brand": "VLAI L1", "title": "Operations"},
+            "product": standard_panel_product("VLAI L1"),
             "cameras": [
                 {
                     "id": stream.role,
@@ -90,20 +119,9 @@ class L1OperatorPanelAdapter:
                 }
                 for stream in config.recording_camera_streams
             ],
-            "camera_controls": [
-                {
-                    "label": "Start cameras",
-                    "workflow": "camera",
-                    "values": {"action": "start"},
-                },
-                {
-                    "label": "Stop cameras",
-                    "workflow": "camera",
-                    "values": {"action": "stop"},
-                    "tone": "danger",
-                    "confirm": "Stop the persistent read-only camera service?",
-                },
-            ],
+            "camera_controls": standard_camera_controls(
+                stop_confirm="Stop the persistent read-only camera service?"
+            ),
             "workflows": workflows,
             "registrations": [_prompt_registration(prompt_catalogs, self.repo_root)],
             "configuration_types": [],
@@ -144,25 +162,39 @@ class L1OperatorPanelAdapter:
                 f"camera:{action}",
                 (str(self.repo_root / "scripts/camera_service.sh"), action),
             )
-        base = (
-            sys.executable,
-            "-m",
-            "vlai_l1_runtime.cli",
-            workflow,
-            "--config",
-            str(self.collection_config.path),
-        )
-        if workflow in {"validate-collection", "reset"}:
+        if workflow in {
+            "hardware",
+            "validate-collection",
+            "reset",
+            "dataset-doctor",
+            "export-v21",
+            "collect",
+        }:
+            expected_keys = {"config"}
+            if workflow in {"dataset-doctor", "export-v21"}:
+                expected_keys.add("experiment")
+            elif workflow == "collect":
+                expected_keys.update(("experiment", "task"))
+            if set(values) != expected_keys:
+                joined = ", ".join(sorted(expected_keys))
+                raise ValueError(f"{workflow} requires exactly {joined}")
+            selected_config = self._selected_collection_config(values["config"])
+        if workflow in {"hardware", "validate-collection", "reset"}:
             if set(values) != {"config"}:
                 raise ValueError(f"{workflow} requires exactly config")
-            selected = _text(values["config"], "config")
-            expected = self._reference(self.collection_config.path)
-            if selected != expected:
-                raise ValueError(f"{workflow} must use the active collection config")
-            return WorkflowLaunch(workflow, workflow, base)
+            return WorkflowLaunch(
+                workflow,
+                workflow,
+                (
+                    sys.executable,
+                    "-m",
+                    "vlai_l1_runtime.cli",
+                    workflow,
+                    "--config",
+                    str(selected_config.path),
+                ),
+            )
         if workflow in {"dataset-doctor", "export-v21"}:
-            if set(values) != {"experiment"}:
-                raise ValueError(f"{workflow} requires exactly experiment")
             experiment = validate_experiment_name(_text(values["experiment"], "experiment"))
             return WorkflowLaunch(
                 workflow,
@@ -174,16 +206,14 @@ class L1OperatorPanelAdapter:
                     "dataset",
                     "doctor" if workflow == "dataset-doctor" else "export-v21",
                     "--config",
-                    str(self.collection_config.path),
+                    str(selected_config.path),
                     experiment,
                 ),
             )
         if workflow == "collect":
-            if not self.collection_config.collection_ready:
-                blockers = ", ".join(self.collection_config.collection_blockers)
+            if not selected_config.collection_ready:
+                blockers = ", ".join(selected_config.collection_blockers)
                 raise RuntimeError(f"live collection is unavailable: {blockers}")
-            if set(values) != {"experiment", "task"}:
-                raise ValueError("collect requires experiment and task")
             experiment = validate_experiment_name(_text(values["experiment"], "experiment"))
             task = normalize_task(values["task"])
             return WorkflowLaunch(
@@ -192,7 +222,7 @@ class L1OperatorPanelAdapter:
                 (
                     str(self.repo_root / "scripts/collect.sh"),
                     "--config",
-                    str(self.collection_config.path),
+                    str(selected_config.path),
                     "--task",
                     task,
                     experiment,
@@ -246,31 +276,47 @@ class L1OperatorPanelAdapter:
         load_task_catalog(candidate, repo_root=self.repo_root)
         return candidate
 
+    def _collection_options(self) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+        collection_options = []
+        experiment_options = []
+        for path in sorted((self.repo_root / "configs/collection").glob("*.toml")):
+            config = load_collection_config(path)
+            if config.repo_root != self.repo_root:
+                raise ValueError("panel repo_root does not own the collection config")
+            reference = self._reference(config.path)
+            collection_options.append(option(reference, path.stem))
+            if not config.dataset_root.is_dir():
+                continue
+            for dataset in sorted(config.dataset_root.iterdir(), key=lambda item: item.name):
+                if not dataset.is_dir() or dataset.name.startswith("."):
+                    continue
+                try:
+                    experiment = validate_experiment_name(dataset.name)
+                except ValueError:
+                    continue
+                experiment_options.append(option(experiment, experiment, depends_value=reference))
+        return collection_options, experiment_options
 
-def _experiment_workflow(
-    *,
-    workflow: str,
-    label: str,
-    eyebrow: str,
-    title: str,
-    description: str,
-    submit_label: str,
+    def _selected_collection_config(self, value: Any):
+        reference = _text(value, "config")
+        candidate = (self.repo_root / reference).resolve()
+        allowed = (self.repo_root / "configs/collection").resolve()
+        if not candidate.is_relative_to(allowed) or candidate.suffix != ".toml":
+            raise ValueError("config must be a repository TOML under configs/collection")
+        if not candidate.is_file():
+            raise FileNotFoundError(f"repository config is missing: {candidate}")
+        config = load_collection_config(candidate)
+        if config.repo_root != self.repo_root:
+            raise ValueError("panel repo_root does not own the collection config")
+        return config
+
+
+def _validate_workflow(
+    config_options: list[dict[str, str]], config_reference: str
 ) -> dict[str, Any]:
     return {
-        "id": workflow,
-        "label": label,
-        "eyebrow": eyebrow,
-        "title": title,
-        "description": description,
-        "submit_label": submit_label,
-        "fields": [text_field("experiment", "Experiment", placeholder="fruit_placement_v1")],
-    }
-
-
-def _validate_workflow(config_reference: str) -> dict[str, Any]:
-    return {
         "id": "validate-collection",
-        "label": "Validate",
+        "label": "Config check",
         "eyebrow": "CONFIGURATION",
         "title": "Validate collection contract",
         "description": "Validate tracked collection and System configuration.",
@@ -279,68 +325,7 @@ def _validate_workflow(config_reference: str) -> dict[str, Any]:
             select_field(
                 "config",
                 "Collection config",
-                [option(config_reference, "Active collection contract")],
-                default=config_reference,
-            )
-        ],
-    }
-
-
-def _collect_workflow(
-    teleoperation_sides: tuple[str, ...],
-    camera_roles: tuple[str, ...],
-    prompt_catalogs: tuple[TaskCatalog, ...],
-) -> dict[str, Any]:
-    side_label = ", ".join(teleoperation_sides)
-    camera_label = ", ".join(camera_roles)
-    return {
-        "id": "collect",
-        "label": "Collect",
-        "eyebrow": "LIVE",
-        "title": "Collect episodes",
-        "description": (
-            f"Reset before capture, record {side_label} state with {camera_label}, "
-            "trim leading stillness, and Reset after each episode."
-        ),
-        "submit_label": "Start collection",
-        "fields": [
-            text_field("experiment", "Experiment", placeholder="fruit_placement_v1"),
-            combobox_field(
-                "task",
-                "Task",
-                [
-                    option(task.prompt, f"{task.task_id} · {task.distribution.upper()}")
-                    for catalog in prompt_catalogs
-                    for task in catalog.tasks
-                ],
-                placeholder="place the fruit in the bowl",
-                help_text="Select a registered prompt or enter a new normalized task.",
-            ),
-        ],
-    }
-
-
-def _reset_workflow(
-    teleoperation_sides: tuple[str, ...],
-    config_reference: str,
-) -> dict[str, Any]:
-    side_label = ", ".join(teleoperation_sides)
-    return {
-        "id": "reset",
-        "label": "Reset",
-        "eyebrow": "ROBOT",
-        "title": "Reset teleoperation alignment",
-        "description": f"Run x_air AdjustPosition on selected sides: {side_label}.",
-        "submit_label": "Reset robot",
-        "confirm": (
-            f"This moves the {side_label} leader/follower arm pair(s). "
-            "Confirm the workspace is clear?"
-        ),
-        "fields": [
-            select_field(
-                "config",
-                "Collection config",
-                [option(config_reference, f"Active {side_label} contract")],
+                config_options,
                 default=config_reference,
             )
         ],

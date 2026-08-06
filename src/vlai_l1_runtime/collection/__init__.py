@@ -10,6 +10,12 @@ from .dataset import (
     provenance_from_config,
 )
 from .interaction import L1_COLLECTION_INTERACTION
+from .migration import (
+    EpisodeTrimPlan,
+    LeadingStillnessMigrationPlan,
+    plan_leading_stillness,
+    trim_leading_stillness_dataset,
+)
 from .mock import SyntheticSampleSource
 from .orchestration import EpisodeResult, record_episode
 from .schema import (
@@ -37,11 +43,15 @@ __all__ = [
     "DirectDatasetState",
     "DirectLeRobotEpisode",
     "EpisodeResult",
+    "EpisodeTrimPlan",
+    "LeadingStillnessMigrationPlan",
     "SampleAssembler",
     "SyntheticSampleSource",
     "identity_from_config",
     "inspect_direct_dataset",
     "load_collection_config",
+    "plan_leading_stillness",
     "provenance_from_config",
     "record_episode",
+    "trim_leading_stillness_dataset",
 ]

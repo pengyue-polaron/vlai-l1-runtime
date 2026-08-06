@@ -126,6 +126,18 @@ def build_parser() -> argparse.ArgumentParser:
         child = dataset_commands.add_parser(command, help=help_text)
         _add_collection_selection(child)
         child.add_argument("experiment")
+    trim_stillness = dataset_commands.add_parser(
+        "trim-leading-stillness",
+        help="rebuild a canonical dataset without stationary episode prefixes",
+    )
+    _add_collection_selection(trim_stillness)
+    trim_stillness.add_argument("source_experiment")
+    trim_stillness.add_argument("target_experiment")
+    trim_stillness.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the exact per-episode trim plan without creating the target",
+    )
     for command, help_text in (
         ("dataset-doctor", "compatibility alias for 'dataset doctor'"),
         ("export-v21", "compatibility alias for 'dataset export-v21'"),
@@ -240,7 +252,11 @@ def _run_collection_command(args: argparse.Namespace) -> int:
     config = _load_selected_collection_config(args)
     command = args.command
     if command == "dataset":
-        command = "dataset-doctor" if args.dataset_command == "doctor" else "export-v21"
+        command = {
+            "doctor": "dataset-doctor",
+            "export-v21": "export-v21",
+            "trim-leading-stillness": "trim-leading-stillness",
+        }[args.dataset_command]
     if command == "validate-collection":
         print(f"PASS {config.path}")
         return 0
@@ -321,6 +337,21 @@ def _run_collection_command(args: argparse.Namespace) -> int:
         from .collection.managed import reset_managed_teleoperation
 
         reset_managed_teleoperation(config)
+        return 0
+    if command == "trim-leading-stillness":
+        from .collection.migration import trim_leading_stillness_dataset
+
+        result = trim_leading_stillness_dataset(
+            config,
+            source_experiment=args.source_experiment,
+            target_experiment=args.target_experiment,
+            dry_run=args.dry_run,
+            episode_completed=lambda episode: console.info(
+                f"Rebuilt episode {episode.episode_index + 1}: "
+                f"trimmed {episode.trimmed_frames} of {episode.source_frames} frames"
+            ),
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
     identity = identity_from_config(config, args.experiment)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from vlai_l1_runtime.cli import main
+from vlai_l1_runtime.cli import build_parser, main
 from vlai_l1_runtime.contracts import FEATURE_NAMES, NamedJointVector, SampleMetadata
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,6 +69,26 @@ def test_hardware_free_cli_validates_and_describes_collection(capsys) -> None:
     assert right["record_camera_roles"] == ["wrist_right", "agent"]
     assert right["features"]["action"]["shape"] == [8]
     assert "observation.images.wrist_left" not in right["features"]
+
+
+def test_trim_leading_stillness_cli_keeps_the_just_facing_dataset_shape() -> None:
+    args = build_parser().parse_args(
+        [
+            "dataset",
+            "trim-leading-stillness",
+            "--side",
+            "right",
+            "block_plate",
+            "block_plate_trimmed_v1",
+            "--dry-run",
+        ]
+    )
+
+    assert args.dataset_command == "trim-leading-stillness"
+    assert args.source_experiment == "block_plate"
+    assert args.target_experiment == "block_plate_trimmed_v1"
+    assert args.side == "right"
+    assert args.dry_run is True
 
 
 def test_reset_cli_uses_the_managed_teleoperation_lifecycle(monkeypatch) -> None:

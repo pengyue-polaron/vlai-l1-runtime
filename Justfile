@@ -145,3 +145,22 @@ export-v21 experiment side="bimanual":
 
 export-v21-right experiment:
     just export-v21 "{{ experiment }}" right
+
+trim-leading-stillness source target side="bimanual":
+    {{ vpy }} -m vlai_l1_runtime.cli dataset trim-leading-stillness \
+        --side "{{ side }}" \
+        "{{ source }}" \
+        "{{ target }}"
+
+trim-leading-stillness-right source target:
+    just trim-leading-stillness "{{ source }}" "{{ target }}" right
+
+plan-leading-stillness source target side="bimanual":
+    {{ vpy }} -m vlai_l1_runtime.cli dataset trim-leading-stillness \
+        --side "{{ side }}" \
+        --dry-run \
+        "{{ source }}" \
+        "{{ target }}"
+
+plan-leading-stillness-right source target:
+    just plan-leading-stillness "{{ source }}" "{{ target }}" right

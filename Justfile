@@ -5,8 +5,6 @@ repo := justfile_directory()
 vpy := repo + "/.venv/bin/python"
 uv := env("UV_BIN", "uv")
 system_config := repo + "/configs/system/vlai_l1.toml"
-collection_config := repo + "/configs/collection/default.toml"
-right_collection_config := repo + "/configs/collection/right_only.toml"
 
 default:
     @just --list
@@ -108,46 +106,42 @@ camera-check samples="30" timeout="0.25":
 cameras action="start":
     {{ repo }}/scripts/camera_service.sh "{{ action }}"
 
-panel:
-    {{ vpy }} -m vlai_l1_runtime.cli panel --config {{ collection_config }}
+hardware side="bimanual" *args:
+    {{ vpy }} -m vlai_l1_runtime.cli hardware --side "{{ side }}" {{ args }}
+
+panel side="bimanual":
+    {{ vpy }} -m vlai_l1_runtime.cli panel --side "{{ side }}"
 
 panel-right:
-    {{ vpy }} -m vlai_l1_runtime.cli panel --config {{ right_collection_config }}
+    just panel right
 
-reset:
-    {{ vpy }} -m vlai_l1_runtime.cli reset --config {{ collection_config }}
+reset side="bimanual":
+    {{ vpy }} -m vlai_l1_runtime.cli reset --side "{{ side }}"
 
 reset-right:
-    {{ vpy }} -m vlai_l1_runtime.cli reset --config {{ right_collection_config }}
+    just reset right
 
-collect experiment task:
+collect experiment task side="bimanual":
     {{ repo }}/scripts/collect.sh \
-        --config {{ collection_config }} \
-        --experiment "{{ experiment }}" \
-        --task "{{ task }}"
+        --side "{{ side }}" \
+        --task "{{ task }}" \
+        "{{ experiment }}"
 
 collect-right experiment task:
-    {{ repo }}/scripts/collect.sh \
-        --config {{ right_collection_config }} \
-        --experiment "{{ experiment }}" \
-        --task "{{ task }}"
+    just collect "{{ experiment }}" "{{ task }}" right
 
-dataset-doctor experiment:
-    {{ vpy }} -m vlai_l1_runtime.cli dataset-doctor \
-        --config {{ collection_config }} \
-        --experiment "{{ experiment }}"
+dataset-doctor experiment side="bimanual":
+    {{ vpy }} -m vlai_l1_runtime.cli dataset doctor \
+        --side "{{ side }}" \
+        "{{ experiment }}"
 
 dataset-doctor-right experiment:
-    {{ vpy }} -m vlai_l1_runtime.cli dataset-doctor \
-        --config {{ right_collection_config }} \
-        --experiment "{{ experiment }}"
+    just dataset-doctor "{{ experiment }}" right
 
-export-v21 experiment:
-    {{ vpy }} -m vlai_l1_runtime.cli export-v21 \
-        --config {{ collection_config }} \
-        --experiment "{{ experiment }}"
+export-v21 experiment side="bimanual":
+    {{ vpy }} -m vlai_l1_runtime.cli dataset export-v21 \
+        --side "{{ side }}" \
+        "{{ experiment }}"
 
 export-v21-right experiment:
-    {{ vpy }} -m vlai_l1_runtime.cli export-v21 \
-        --config {{ right_collection_config }} \
-        --experiment "{{ experiment }}"
+    just export-v21 "{{ experiment }}" right

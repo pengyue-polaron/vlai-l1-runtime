@@ -17,9 +17,10 @@ from typing import Protocol, TextIO
 
 from embodied_ops import (
     EpisodeDecision,
+    LeadingStillnessConfig,
+    LeadingStillnessTrimmer,
     normalize_collection_start,
     normalize_episode_decision,
-    reset_required_after_episode,
 )
 from embodied_ops.operator_panel import announce_input, announce_progress
 
@@ -336,6 +337,9 @@ def collect_managed_session(
         console.success("Recorded cameras are fresh, synchronized, and ready")
         with runtime_factory(config) as runtimes:
             runtimes.wait_until_ready(receiver)
+            if config.reset_policy.before_collection:
+                runtimes.adjust_position(receiver)
+                console.success("Pre-collection Reset complete")
             while True:
                 if not _wait_for_episode_start(
                     lambda: runtimes.adjust_position(receiver),
@@ -360,12 +364,9 @@ def collect_managed_session(
                         task=task,
                         target_fps=config.fps,
                         minimum_fps=config.minimum_capture_fps,
+                        leading_stillness=config.leading_stillness,
                     )
-                    if reset_required_after_episode(
-                        decision,
-                        after_save=True,
-                        after_discard=True,
-                    ):
+                    if config.reset_policy.required_after(decision):
                         runtimes.adjust_position(receiver)
                         console.success("Robot is at Reset position; finalizing the episode")
                     result = _complete_interactive_episode(
@@ -480,6 +481,7 @@ def _record_interactive_episode(
     task: str,
     target_fps: int,
     minimum_fps: float,
+    leading_stillness: LeadingStillnessConfig,
 ) -> tuple[int, EpisodeDecision]:
     """Record until the operator explicitly saves, discards, or quits."""
 
@@ -489,7 +491,9 @@ def _record_interactive_episode(
     status = console.LiveStatusLine()
     started = time.monotonic()
     captured = 0
+    sampled = 0
     decision: EpisodeDecision | None = None
+    trimmer = LeadingStillnessTrimmer[dict[str, object]](leading_stillness)
     announce_progress(
         "collection",
         "Recording episode",
@@ -510,21 +514,26 @@ def _record_interactive_episode(
                     announce_input(L1_COLLECTION_INTERACTION.recording_action_ids)
                 else:
                     break
-            sink.add_frame(assembler.validate(sample, now_ns=now_ns).lerobot_frame(task=task))
-            captured += 1
-            status.update(f"Recording frame {captured}")
+            validated = assembler.validate(sample, now_ns=now_ns)
+            sampled += 1
+            frame = validated.lerobot_frame(task=task)
+            for ready in trimmer.push(frame, validated.action):
+                sink.add_frame(ready)
+                captured += 1
+            phase = "recording" if trimmer.result.started else "waiting for motion"
+            status.update(f"{phase.title()} · stored {captured} · sampled {sampled}")
             announce_progress(
                 "collection",
                 "Recording episode",
                 captured,
                 None,
                 phase="capture",
-                detail=f"frame {captured}",
+                detail=f"stored {captured} · sampled {sampled}",
             )
     finally:
         status.close()
     elapsed_s = time.monotonic() - started
-    effective_fps = captured / elapsed_s if elapsed_s > 0 else 0.0
+    effective_fps = sampled / elapsed_s if elapsed_s > 0 else 0.0
     if decision is None:
         raise RuntimeError("live sample stream ended before an operator decision")
     announce_progress(
@@ -533,14 +542,15 @@ def _record_interactive_episode(
         captured,
         None,
         phase="complete" if decision is EpisodeDecision.SAVE else decision.value,
-        detail=f"{effective_fps:.2f} FPS",
+        detail=(f"{effective_fps:.2f} FPS · trimmed {trimmer.result.trimmed_frames}"),
         force=True,
     )
     console.info(
-        f"Captured {captured} frames in {elapsed_s:.2f}s "
+        f"Sampled {sampled} and stored {captured} frames in {elapsed_s:.2f}s "
+        f"· trimmed {trimmer.result.trimmed_frames} leading frames "
         f"· {effective_fps:.2f} FPS · {decision.value}"
     )
-    if captured > 0 and effective_fps < minimum_fps:
+    if sampled > 0 and effective_fps < minimum_fps:
         raise RuntimeError(
             f"capture rate {effective_fps:.2f} FPS is below the tracked "
             f"minimum {minimum_fps:.2f} FPS"

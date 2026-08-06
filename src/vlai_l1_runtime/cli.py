@@ -28,6 +28,10 @@ from .teleoperation import (
     verify_xair_dependency,
 )
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_COLLECTION_CONFIG = _REPO_ROOT / "configs/collection/default.toml"
+_RIGHT_COLLECTION_CONFIG = _REPO_ROOT / "configs/collection/right_only.toml"
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = console.ArgumentParser(prog="vlai-l1")
@@ -90,19 +94,56 @@ def build_parser() -> argparse.ArgumentParser:
     for command, help_text in (
         ("validate-collection", "validate collection and System contracts"),
         ("describe-collection", "print the canonical dataset contract as JSON"),
-        ("collect", "record one commissioned live episode"),
-        ("reset", "MOVES HARDWARE: run x_air AdjustPosition on both teleoperation sides"),
-        ("dataset-doctor", "validate one canonical LeRobot v3 dataset"),
-        ("export-v21", "export one canonical dataset to LeRobot v2.1"),
+    ):
+        child = subparsers.add_parser(command, help=help_text)
+        _add_collection_selection(child)
+    collect = subparsers.add_parser(
+        "collect",
+        help="MOVES HARDWARE: reset, then record commissioned live episodes",
+    )
+    _add_collection_selection(collect)
+    collect.add_argument("experiment", nargs="?")
+    collect.add_argument("--experiment", dest="legacy_experiment")
+    collect.add_argument("--task", required=True)
+    for command, help_text in (
+        ("reset", "MOVES HARDWARE: run x_air AdjustPosition on selected sides"),
         ("panel", "serve the hardware-free VLAI L1 Operator Panel"),
     ):
         child = subparsers.add_parser(command, help=help_text)
-        child.add_argument("--config", type=Path, required=True)
-        if command in {"collect", "dataset-doctor", "export-v21"}:
-            child.add_argument("--experiment", required=True)
-        if command == "collect":
-            child.add_argument("--task", required=True)
+        _add_collection_selection(child)
+    hardware = subparsers.add_parser(
+        "hardware",
+        help="passively inspect selected CAN and camera hardware",
+    )
+    _add_collection_selection(hardware)
+    hardware.add_argument("--json", action="store_true")
+    dataset = subparsers.add_parser("dataset", help="inspect or export canonical datasets")
+    dataset_commands = dataset.add_subparsers(dest="dataset_command", required=True)
+    for command, help_text in (
+        ("doctor", "validate one canonical LeRobot v3 dataset"),
+        ("export-v21", "export one canonical dataset to LeRobot v2.1"),
+    ):
+        child = dataset_commands.add_parser(command, help=help_text)
+        _add_collection_selection(child)
+        child.add_argument("experiment")
+    for command, help_text in (
+        ("dataset-doctor", "compatibility alias for 'dataset doctor'"),
+        ("export-v21", "compatibility alias for 'dataset export-v21'"),
+    ):
+        child = subparsers.add_parser(command, help=help_text)
+        _add_collection_selection(child)
+        child.add_argument("--experiment", required=True)
     return parser
+
+
+def _add_collection_selection(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--config", type=Path)
+    parser.add_argument(
+        "--side",
+        choices=("bimanual", "right"),
+        default=None,
+        help="select the bimanual or commissioned right-only collection contract",
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -121,6 +162,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_camera_check(args)
         if args.command in {"camera-service", "camera-service-run"}:
             return _run_camera_service_command(args)
+        if args.command == "hardware":
+            from .hardware_check import inspect_hardware, print_hardware_report
+
+            config = _load_selected_collection_config(args)
+            return print_hardware_report(
+                inspect_hardware(config),
+                json_output=args.json,
+            )
         if args.command in {
             "validate-config",
             "describe",
@@ -188,11 +237,14 @@ def _run_system_command(
 
 
 def _run_collection_command(args: argparse.Namespace) -> int:
-    config = load_collection_config(args.config)
-    if args.command == "validate-collection":
+    config = _load_selected_collection_config(args)
+    command = args.command
+    if command == "dataset":
+        command = "dataset-doctor" if args.dataset_command == "doctor" else "export-v21"
+    if command == "validate-collection":
         print(f"PASS {config.path}")
         return 0
-    if args.command == "describe-collection":
+    if command == "describe-collection":
         contract = canonical_dataset_contract(config)
         print(
             json.dumps(
@@ -205,13 +257,25 @@ def _run_collection_command(args: argparse.Namespace) -> int:
                     "features": contract.features(),
                     "collection_ready": config.collection_ready,
                     "collection_blockers": list(config.collection_blockers),
+                    "reset": {
+                        "before_collection": config.reset_policy.before_collection,
+                        "after_save": config.reset_policy.after_save,
+                        "after_discard": config.reset_policy.after_discard,
+                    },
+                    "leading_stillness": {
+                        "enabled": config.leading_stillness.enabled,
+                        "reference_frames": config.leading_stillness.reference_frames,
+                        "motion_frames": config.leading_stillness.motion_frames,
+                        "preroll_frames": config.leading_stillness.preroll_frames,
+                        "action_thresholds": list(config.leading_stillness.action_thresholds),
+                    },
                 },
                 indent=2,
                 sort_keys=True,
             )
         )
         return 0
-    if args.command == "panel":
+    if command == "panel":
         from embodied_ops.operator_panel import serve_operator_panel
 
         from .panel import L1OperatorPanelAdapter
@@ -222,12 +286,15 @@ def _run_collection_command(args: argparse.Namespace) -> int:
             bind=adapter.panel_bind,
             port=adapter.panel_port,
         )
-    if args.command == "collect":
+    if command == "collect":
         from .collection.managed import collect_managed_session
 
+        experiment = args.experiment or args.legacy_experiment
+        if experiment is None:
+            raise ValueError("collect requires an experiment")
         results = collect_managed_session(
             config,
-            experiment=args.experiment,
+            experiment=experiment,
             task=args.task,
         )
         print(
@@ -250,7 +317,7 @@ def _run_collection_command(args: argparse.Namespace) -> int:
             )
         )
         return 0
-    if args.command == "reset":
+    if command == "reset":
         from .collection.managed import reset_managed_teleoperation
 
         reset_managed_teleoperation(config)
@@ -258,7 +325,7 @@ def _run_collection_command(args: argparse.Namespace) -> int:
 
     identity = identity_from_config(config, args.experiment)
     expected_provenance = provenance_from_config(config)
-    if args.command == "dataset-doctor":
+    if command == "dataset-doctor":
         state = inspect_direct_dataset(identity, expected_provenance=expected_provenance)
         if state.total_episodes == 0:
             raise ValueError(f"canonical dataset does not exist: {identity.target_root}")
@@ -266,11 +333,12 @@ def _run_collection_command(args: argparse.Namespace) -> int:
             json.dumps(
                 {
                     "status": "PASS",
+                    "experiment": args.experiment,
                     "root": str(identity.target_root),
                     "repo_id": identity.repo_id,
                     "episodes": state.total_episodes,
                     "frames": state.total_frames,
-                    "task": state.task,
+                    "tasks": [state.task],
                 },
                 indent=2,
                 sort_keys=True,
@@ -285,6 +353,21 @@ def _run_collection_command(args: argparse.Namespace) -> int:
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+
+def _load_selected_collection_config(args: argparse.Namespace):
+    path = args.config
+    selected_side = args.side or "bimanual"
+    if path is None:
+        path = _RIGHT_COLLECTION_CONFIG if selected_side == "right" else _DEFAULT_COLLECTION_CONFIG
+    config = load_collection_config(path)
+    expected_sides = ("right",) if selected_side == "right" else ("left", "right")
+    if args.side is not None and config.teleoperation_sides != expected_sides:
+        raise ValueError(
+            f"--side {selected_side} does not match collection config sides "
+            f"{config.teleoperation_sides}"
+        )
+    return config
 
 
 def _run_xair_observer(args: argparse.Namespace) -> int:

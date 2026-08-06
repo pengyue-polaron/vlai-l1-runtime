@@ -65,6 +65,7 @@ are documented in [Datasets](docs/DATASETS.md).
 ```bash
 just sdk-verify
 just sdk-describe right
+just hardware
 just panel
 just dataset-doctor <experiment>
 just export-v21 <experiment>
@@ -107,11 +108,15 @@ owner, authorizes the privileged robot lifecycle, preflights the selected raw
 frames before enabling motors, starts exactly the configured x_air runtime(s),
 and waits for fresh selected state.
 Runtime creation performs the SDK's startup alignment once for the collection
-session. Use teleoperation to refine the episode start pose, then press `Enter`
+session, and the managed collection contract explicitly runs Reset once more
+before presenting the first episode gate. Use teleoperation to refine the
+episode start pose, then press `Enter`
 in the terminal or **Start recording** in the Panel. Enter `r` or use **Reset**
 before recording to run `AdjustPosition` again. The workflow
-rechecks the recorded camera roles after that confirmation before recording the atomic
-canonical dataset transaction. During recording, press `Enter` to save, enter
+rechecks the recorded camera roles after that confirmation before recording the
+atomic canonical dataset transaction. Recording buffers the stationary prefix
+and starts writing only after tracked action thresholds indicate sustained
+motion, while preserving a short preroll. During recording, press `Enter` to save, enter
 `d` to discard, or enter `q` to discard the current episode and quit. After a
 save or discard, recording stops and the same active runtime immediately runs
 `AdjustPosition`; encoding and publication then run with the selected arm(s)

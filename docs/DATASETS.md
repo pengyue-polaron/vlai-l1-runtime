@@ -5,7 +5,8 @@
 Each tracked collection config owns dataset roots, repository ID prefix, active
 teleoperation sides, recorded camera roles, FPS,
 minimum effective capture rate, asynchronous image-writer concurrency, sample
-freshness, and state/action, robot/camera and camera-pair skew. It points to
+freshness, reset points, leading-stillness thresholds, and state/action,
+robot/camera and camera-pair skew. It points to
 exactly one System config; camera dimensions and physical identities, joint
 names, physical units, and robot identity are not duplicated.
 
@@ -58,7 +59,14 @@ Wrist pixels are neither passed to LeRobot nor encoded into this dataset.
 
 Camera frames are persisted through LeRobot's configured asynchronous image
 writer. The Runtime measures the complete capture loop, including validation
-and frame enqueue, and rejects a run below `minimum_capture_fps`. There is no
+and frame enqueue, and rejects a run below `minimum_capture_fps`. Before any
+frame reaches LeRobot, the shared streaming trimmer builds its reference from
+the configured initial action window and waits for consecutive threshold
+crossings. It keeps only the configured preroll plus motion-confirmation window
+in memory, then publishes that window and every following frame. An episode
+with no detected movement remains empty and is discarded. Joint and gripper
+thresholds stay in the robot-owned collection config because L1 actions are
+truthful degrees. There is no
 per-frame action-delta limit; named state and action values must still be
 finite, fresh, synchronized, and increasing in sequence. The Runtime does not
 apply joint or gripper position ranges to collected values.
@@ -79,9 +87,9 @@ never guess whether a crash leftover is safe to delete.
 ## Doctor
 
 ```bash
-vlai-l1 dataset-doctor \
-  --config configs/collection/default.toml \
-  --experiment pick_blocks_v1
+vlai-l1 dataset doctor pick_blocks_v1
+# Right-only:
+vlai-l1 dataset doctor --side right pick_blocks_v1
 ```
 
 The doctor compares the dataset with the currently tracked collection and
@@ -98,9 +106,9 @@ and v2.1 metadata generation to `embodied-ops[lerobot-dataset]`. L1 derivative
 identity and atomic publication remain owned here.
 
 ```bash
-vlai-l1 export-v21 \
-  --config configs/collection/default.toml \
-  --experiment pick_blocks_v1
+vlai-l1 dataset export-v21 pick_blocks_v1
+# Right-only:
+vlai-l1 dataset export-v21 --side right pick_blocks_v1
 ```
 
 This creates `data/derivatives/pick_blocks_v1-v2.1` as a new, atomic output. It

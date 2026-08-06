@@ -1,4 +1,4 @@
-schema_version = 4
+schema_version = 5
 system_config = "../system/vlai_l1.toml"
 dataset_root = "../../data/datasets-right-only"
 derivative_root = "../../data/derivatives-right-only"
@@ -11,3 +11,14 @@ image_writer_threads = 8
 max_sample_age_s = 0.25
 max_state_action_skew_s = 0.05
 max_robot_camera_skew_s = 0.05
+auto_reset_before_collection = true
+auto_reset_after_save = true
+auto_reset_after_discard = true
+
+[leading_stillness]
+enabled = true
+# Truthful L1 actions are degrees: seven right joints then right gripper.
+action_thresholds = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0]
+reference_frames = 3
+motion_frames = 3
+preroll_frames = 6

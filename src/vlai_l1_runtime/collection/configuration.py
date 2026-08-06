@@ -14,7 +14,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - exercised by the Python 3.10 check
     import tomli as tomllib
 
-from embodied_ops import validate_experiment_name
+from embodied_ops import (
+    CollectionResetPolicy,
+    LeadingStillnessConfig,
+    validate_experiment_name,
+)
 
 from ..configuration import (
     CAMERA_ROLES,
@@ -23,6 +27,7 @@ from ..configuration import (
     CameraConfig,
     ConfigError,
     SystemConfig,
+    _boolean,
     _exact_keys,
     _integer,
     _list,
@@ -51,6 +56,8 @@ class CollectionConfig:
     max_sample_age_s: float
     max_state_action_skew_s: float
     max_robot_camera_skew_s: float
+    reset_policy: CollectionResetPolicy
+    leading_stillness: LeadingStillnessConfig
     teleoperation_sides: tuple[str, ...]
     record_camera_roles: tuple[str, ...]
     config_sha256: str
@@ -118,12 +125,16 @@ def load_collection_config(path: Path) -> CollectionConfig:
         "max_sample_age_s",
         "max_state_action_skew_s",
         "max_robot_camera_skew_s",
+        "auto_reset_before_collection",
+        "auto_reset_after_save",
+        "auto_reset_after_discard",
+        "leading_stillness",
         "teleoperation_sides",
         "record_camera_roles",
     }
     _exact_keys(root, keys, "collection")
     schema_version = _integer(root["schema_version"], "schema_version", minimum=1)
-    if schema_version != 4:
+    if schema_version != 5:
         raise ConfigError(f"unsupported collection schema_version: {schema_version}")
 
     system_path = _relative_path(root["system_config"], "system_config", resolved.parent)
@@ -182,6 +193,59 @@ def load_collection_config(path: Path) -> CollectionConfig:
     unavailable = [role for role in record_camera_roles if not stream_by_role[role].enabled]
     if unavailable:
         raise ConfigError(f"record_camera_roles are disabled in System config: {unavailable}")
+    reset_policy = CollectionResetPolicy(
+        before_collection=_boolean(
+            root["auto_reset_before_collection"],
+            "auto_reset_before_collection",
+        ),
+        after_save=_boolean(root["auto_reset_after_save"], "auto_reset_after_save"),
+        after_discard=_boolean(
+            root["auto_reset_after_discard"],
+            "auto_reset_after_discard",
+        ),
+    )
+    stillness = _mapping(root["leading_stillness"], "leading_stillness")
+    _exact_keys(
+        stillness,
+        {
+            "enabled",
+            "action_thresholds",
+            "reference_frames",
+            "motion_frames",
+            "preroll_frames",
+        },
+        "leading_stillness",
+    )
+    thresholds = tuple(
+        _positive_number(value, f"leading_stillness.action_thresholds[{index}]")
+        for index, value in enumerate(
+            _list(stillness["action_thresholds"], "leading_stillness.action_thresholds")
+        )
+    )
+    if len(thresholds) != len(teleoperation_sides) * len(MOTOR_NAMES):
+        raise ConfigError(
+            "leading_stillness.action_thresholds must match the selected "
+            f"{len(teleoperation_sides) * len(MOTOR_NAMES)}-value action contract"
+        )
+    leading_stillness = LeadingStillnessConfig(
+        enabled=_boolean(stillness["enabled"], "leading_stillness.enabled"),
+        action_thresholds=thresholds,
+        reference_frames=_integer(
+            stillness["reference_frames"],
+            "leading_stillness.reference_frames",
+            minimum=1,
+        ),
+        motion_frames=_integer(
+            stillness["motion_frames"],
+            "leading_stillness.motion_frames",
+            minimum=1,
+        ),
+        preroll_frames=_integer(
+            stillness["preroll_frames"],
+            "leading_stillness.preroll_frames",
+            minimum=0,
+        ),
+    )
     return CollectionConfig(
         path=resolved,
         repo_root=repo_root,
@@ -196,6 +260,8 @@ def load_collection_config(path: Path) -> CollectionConfig:
         max_sample_age_s=sample_age,
         max_state_action_skew_s=state_action_skew,
         max_robot_camera_skew_s=robot_camera_skew,
+        reset_policy=reset_policy,
+        leading_stillness=leading_stillness,
         teleoperation_sides=teleoperation_sides,
         record_camera_roles=record_camera_roles,
         config_sha256=hashlib.sha256(content).hexdigest(),

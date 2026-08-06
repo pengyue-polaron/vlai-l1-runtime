@@ -64,7 +64,9 @@ Runtime.
 - Stop the deployed teleoperation services before any direct CAN investigation.
 - A read that enables motors or emits zero-torque frames is not read-only.
 - Starting a managed collection creates exactly the configured x_air runtimes
-  once. Save and discard stop accepting frames, run `AdjustPosition` on the
+  once. After fresh state resumes, collection explicitly runs `AdjustPosition`
+  before the first episode gate. Save and discard stop accepting frames, run
+  `AdjustPosition` on the
   active handles, and only then encode or discard the episode;
   `r` or the Panel's Reset input can run it again at the episode-start gate.
   Keep the workspace clear for either motion and use teleoperation to refine

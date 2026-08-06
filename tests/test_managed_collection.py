@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from embodied_ops import EpisodeDecision
+from embodied_ops import EpisodeDecision, LeadingStillnessConfig
 
 from vlai_l1_runtime.collection.configuration import load_collection_config
 from vlai_l1_runtime.collection.managed import (
@@ -23,6 +23,13 @@ from vlai_l1_runtime.collection.orchestration import EpisodeResult
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = load_collection_config(ROOT / "configs/collection/default.toml")
 RIGHT_CONFIG = load_collection_config(ROOT / "configs/collection/right_only.toml")
+NO_TRIM = LeadingStillnessConfig(
+    enabled=False,
+    action_thresholds=(1.0,),
+    reference_frames=1,
+    motion_frames=1,
+    preroll_frames=0,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -510,6 +517,7 @@ def test_managed_collection_keeps_runtime_and_resets_between_episodes(monkeypatc
         "camera_preflight",
         "runtime_enter",
         "runtime_ready",
+        "runtime_adjust",
         "runtime_check",
         "operator_start",
         "camera_preflight",
@@ -541,6 +549,8 @@ def test_recording_decision_is_taken_during_capture(monkeypatch) -> None:
     announcements: list[tuple[str, ...]] = []
 
     class Validated:
+        action = (0.0,)
+
         def lerobot_frame(self, *, task):
             return {"task": task}
 
@@ -578,6 +588,7 @@ def test_recording_decision_is_taken_during_capture(monkeypatch) -> None:
         task="place fruit",
         target_fps=30,
         minimum_fps=1.0,
+        leading_stillness=NO_TRIM,
     )
 
     assert (captured, decision) == (1, EpisodeDecision.DISCARD)
@@ -590,6 +601,8 @@ def test_interactive_capture_rejects_non_realtime_collection(monkeypatch) -> Non
     commands = iter((None, None, None, ""))
 
     class Validated:
+        action = (0.0,)
+
         def lerobot_frame(self, *, task):
             return {"task": task}
 
@@ -619,6 +632,7 @@ def test_interactive_capture_rejects_non_realtime_collection(monkeypatch) -> Non
             task="place fruit",
             target_fps=30,
             minimum_fps=27.0,
+            leading_stillness=NO_TRIM,
         )
 
 
@@ -628,6 +642,8 @@ def test_capture_progress_is_published_to_the_panel(monkeypatch) -> None:
     commands = iter((None, None, None, ""))
 
     class Validated:
+        action = (0.0,)
+
         def lerobot_frame(self, *, task):
             return {"task": task}
 
@@ -660,6 +676,7 @@ def test_capture_progress_is_published_to_the_panel(monkeypatch) -> None:
         task="place fruit",
         target_fps=30,
         minimum_fps=27.0,
+        leading_stillness=NO_TRIM,
     ) == (3, EpisodeDecision.SAVE)
     assert events[0] == (
         "collection",
@@ -673,5 +690,70 @@ def test_capture_progress_is_published_to_the_panel(monkeypatch) -> None:
         "Recording episode",
         3,
         None,
-        {"phase": "complete", "detail": "30.00 FPS", "force": True},
+        {
+            "phase": "complete",
+            "detail": "30.00 FPS · trimmed 0",
+            "force": True,
+        },
     )
+
+
+def test_interactive_capture_trims_stationary_prefix_and_keeps_preroll(
+    monkeypatch,
+) -> None:
+    commands = iter((None, None, None, None, None, ""))
+    times = iter((0.0, 0.2))
+
+    class Validated:
+        def __init__(self, action):
+            self.action = action
+
+        def lerobot_frame(self, *, task):
+            return {"task": task, "action": self.action}
+
+    class Assembler:
+        def validate(self, action, *, now_ns):
+            del now_ns
+            return Validated(action)
+
+    class Sink:
+        def __init__(self):
+            self.frames = []
+
+        def add_frame(self, frame):
+            self.frames.append(frame)
+
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed._poll_stdin_line",
+        lambda: next(commands),
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.time.monotonic",
+        lambda: next(times),
+    )
+    sink = Sink()
+    captured, decision = _record_interactive_episode(
+        samples=(
+            ((0.0,), 0),
+            ((0.0,), 1),
+            ((0.1,), 2),
+            ((0.7,), 3),
+            ((0.8,), 4),
+            ((0.9,), 5),
+        ),
+        assembler=Assembler(),
+        sink=sink,
+        task="place fruit",
+        target_fps=30,
+        minimum_fps=1.0,
+        leading_stillness=LeadingStillnessConfig(
+            enabled=True,
+            action_thresholds=(0.5,),
+            reference_frames=2,
+            motion_frames=2,
+            preroll_frames=1,
+        ),
+    )
+
+    assert (captured, decision) == (3, EpisodeDecision.SAVE)
+    assert [frame["action"] for frame in sink.frames] == [(0.1,), (0.7,), (0.8,)]

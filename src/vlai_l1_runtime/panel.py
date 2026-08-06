@@ -167,7 +167,16 @@ class L1OperatorPanelAdapter:
             return WorkflowLaunch(
                 workflow,
                 f"{workflow}:{experiment}",
-                (*base, "--experiment", experiment),
+                (
+                    sys.executable,
+                    "-m",
+                    "vlai_l1_runtime.cli",
+                    "dataset",
+                    "doctor" if workflow == "dataset-doctor" else "export-v21",
+                    "--config",
+                    str(self.collection_config.path),
+                    experiment,
+                ),
             )
         if workflow == "collect":
             if not self.collection_config.collection_ready:
@@ -184,10 +193,9 @@ class L1OperatorPanelAdapter:
                     str(self.repo_root / "scripts/collect.sh"),
                     "--config",
                     str(self.collection_config.path),
-                    "--experiment",
-                    experiment,
                     "--task",
                     task,
+                    experiment,
                 ),
                 input_actions=L1_COLLECTION_INTERACTION.input_actions,
             )
@@ -291,7 +299,8 @@ def _collect_workflow(
         "eyebrow": "LIVE",
         "title": "Collect episodes",
         "description": (
-            f"Record {side_label} state with {camera_label}; return to Reset after each episode."
+            f"Reset before capture, record {side_label} state with {camera_label}, "
+            "trim leading stillness, and Reset after each episode."
         ),
         "submit_label": "Start collection",
         "fields": [

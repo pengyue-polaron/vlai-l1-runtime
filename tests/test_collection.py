@@ -147,11 +147,29 @@ def test_collection_config_and_schema_have_one_complete_contract() -> None:
 
     assert config.collection_ready is True
     assert config.collection_blockers == ()
-    assert config.schema_version == 4
+    assert config.schema_version == 5
     assert config.teleoperation_sides == ("left", "right")
     assert config.record_camera_roles == ("wrist_left", "wrist_right", "agent")
     assert config.minimum_capture_fps == 27.0
     assert config.image_writer_threads == 12
+    assert config.reset_policy.before_collection is True
+    assert config.reset_policy.after_save is True
+    assert config.reset_policy.after_discard is True
+    assert config.leading_stillness.enabled is True
+    assert (
+        config.leading_stillness.action_thresholds
+        == (
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            1.0,
+        )
+        * 2
+    )
     assert config.repo_id_for("pick_v1") == "pengyue-polaron/vlai-l1-pick_v1"
     assert set(contract.features()) == {
         STATE_KEY,
@@ -177,6 +195,7 @@ def test_right_only_collection_contract_is_exact_and_omits_left_wrist() -> None:
 
     assert config.teleoperation_sides == ("right",)
     assert config.record_camera_roles == ("wrist_right", "agent")
+    assert len(config.leading_stillness.action_thresholds) == 8
     assert contract.state_names == tuple(
         name for name in FEATURE_NAMES if name.startswith("right_")
     )

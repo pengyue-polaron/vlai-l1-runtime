@@ -21,6 +21,12 @@ def test_hardware_free_cli_validates_and_describes(capsys) -> None:
     assert payload["teleoperation_ready"] is True
     assert payload["command_ready"] is False
     assert payload["collection_ready"] is True
+    assert payload["reset"] == {
+        "after_discard": True,
+        "after_save": True,
+        "before_collection": True,
+    }
+    assert payload["leading_stillness"]["enabled"] is True
     assert len(payload["action_features"]) == 16
 
     assert (
@@ -74,6 +80,21 @@ def test_reset_cli_uses_the_managed_teleoperation_lifecycle(monkeypatch) -> None
 
     assert main(["reset", "--config", str(COLLECTION_CONFIG)]) == 0
     assert called == [COLLECTION_CONFIG.resolve()]
+
+
+def test_hardware_cli_selects_the_right_only_contract(monkeypatch) -> None:
+    selected = []
+    monkeypatch.setattr(
+        "vlai_l1_runtime.hardware_check.inspect_hardware",
+        lambda config: selected.append(config.teleoperation_sides) or (),
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.hardware_check.print_hardware_report",
+        lambda checks, *, json_output: 0,
+    )
+
+    assert main(["hardware", "--side", "right", "--json"]) == 0
+    assert selected == [("right",)]
 
 
 def test_right_only_cli_selects_the_existing_side_with_isolation(monkeypatch) -> None:

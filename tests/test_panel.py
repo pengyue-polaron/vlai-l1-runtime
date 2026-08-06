@@ -44,7 +44,10 @@ def test_panel_exposes_the_commissioned_collection_stack() -> None:
     }
     launch = adapter.build_launch("dataset-doctor", {"experiment": "pick_v1"})
     assert launch.command[:3] == (sys.executable, "-m", "vlai_l1_runtime.cli")
-    assert launch.command[-2:] == ("--experiment", "pick_v1")
+    assert launch.command[-2:] == (
+        str(CONFIG),
+        "pick_v1",
+    )
     camera = adapter.build_launch("camera", {"action": "start"})
     assert camera.command == (
         str(ROOT / "scripts/camera_service.sh"),
@@ -68,11 +71,10 @@ def test_panel_builds_live_collection_from_tracked_contract() -> None:
         },
     )
     assert launch.command[0] == str(ROOT / "scripts/collect.sh")
-    assert launch.command[-4:] == (
-        "--experiment",
-        "pick_v1",
+    assert launch.command[-3:] == (
         "--task",
         "pick up the object",
+        "pick_v1",
     )
     assert launch.input_actions == L1_COLLECTION_INTERACTION.input_actions
 

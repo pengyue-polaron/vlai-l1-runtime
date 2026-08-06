@@ -424,12 +424,14 @@ Start with no manual x_air runtime, observer, camera reader, or competing
 controller active. `just collect` starts or reuses the marked Camera Service,
 connects one raw client, preflights all three cameras before motor enable,
 starts both configured runtimes, waits for both motion-free arm preflights,
-releases both SDK constructors, and waits for fresh paired state. Use the SDK
-startup `AdjustPosition` as the initial alignment, then use
+releases both SDK constructors, waits for fresh paired state, and explicitly
+runs the tracked pre-collection Reset on the active handles. Then use
 teleoperation to refine the episode start pose. Enter `r` or use Reset to
 repeat alignment on the active handles if needed, then press Enter in the
 terminal or Start recording in the Panel. The workflow rechecks all cameras
-after confirmation and records until Enter, discard, or quit. Save/discard
+after confirmation, buffers the stationary prefix until sustained action
+motion, keeps the configured preroll, and records until Enter, discard, or
+quit. Save/discard
 resets both sides on the same active handles before the next episode. A normal
 return, error, or `Ctrl+C` closes the collection client, disables both pairs
 and returns can0-can3 to `DOWN`; the read-only preview remains available.

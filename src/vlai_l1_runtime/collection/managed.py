@@ -16,9 +16,14 @@ from dataclasses import dataclass
 from typing import Protocol, TextIO
 
 from embodied_ops import (
+    EpisodeCaptureReport,
     EpisodeDecision,
     LeadingStillnessConfig,
     LeadingStillnessTrimmer,
+    announce_collection_session,
+    announce_collection_summary,
+    announce_episode_capture,
+    announce_episode_outcome,
     normalize_collection_start,
     normalize_episode_decision,
 )
@@ -301,16 +306,23 @@ def collect_managed_session(
     task = normalize_task(task)
     identity = identity_from_config(config, experiment)
     provenance = provenance_from_config(config)
-    console.info(
-        f"Collection session · experiment={experiment} · task={task} "
-        f"· sides={','.join(config.teleoperation_sides)} "
-        f"· cameras={','.join(config.record_camera_roles)}"
-    )
     console.step("Validating the atomic dataset destination")
-    inspect_direct_dataset(
+    existing = inspect_direct_dataset(
         identity,
         expected_task=task,
         expected_provenance=provenance,
+    )
+    episode_index = existing.total_episodes
+    announce_collection_session(
+        experiment=experiment,
+        task=task,
+        repo_id=identity.repo_id,
+        dataset_root=str(identity.target_root),
+        next_episode=episode_index,
+        configuration=(
+            f"sides={','.join(config.teleoperation_sides)} "
+            f"· cameras={','.join(config.record_camera_roles)}"
+        ),
     )
     backend_factory = LeRobotBackendFactory(config.image_writer_threads)
     backend_factory.verify_dependency()
@@ -344,6 +356,7 @@ def collect_managed_session(
                 if not _wait_for_episode_start(
                     lambda: runtimes.adjust_position(receiver),
                     runtimes.require_running,
+                    episode_index=episode_index,
                 ):
                     break
                 console.step("Rechecking cameras after operator confirmation")
@@ -357,33 +370,38 @@ def collect_managed_session(
                 )
                 console.step("Preparing atomic episode transaction")
                 with sink:
-                    captured_frames, decision = _record_interactive_episode(
+                    capture = _record_interactive_episode(
                         samples=source.samples(),
                         assembler=SampleAssembler(config),
                         sink=sink,
                         task=task,
+                        episode_index=episode_index,
                         target_fps=config.fps,
                         minimum_fps=config.minimum_capture_fps,
                         leading_stillness=config.leading_stillness,
                     )
+                    decision = capture.decision
                     if config.reset_policy.required_after(decision):
                         runtimes.adjust_position(receiver)
                         console.success("Robot is at Reset position; finalizing the episode")
                     result = _complete_interactive_episode(
                         sink,
-                        captured_frames=captured_frames,
+                        captured_frames=capture.stored_frames,
                         decision=decision,
                     )
-                _report_episode_result(result)
+                _report_episode_result(result, episode_index=episode_index)
                 if result.decision is EpisodeDecision.QUIT:
                     break
                 results.append(result)
+                if result.decision is EpisodeDecision.SAVE:
+                    episode_index += 1
 
-    console.info(
-        f"Collection stopped · saved="
-        f"{sum(item.decision is EpisodeDecision.SAVE for item in results)} "
-        f"· discarded="
-        f"{sum(item.decision is EpisodeDecision.DISCARD for item in results)}"
+    announce_collection_summary(
+        saved=sum(item.decision is EpisodeDecision.SAVE for item in results),
+        discarded=sum(item.decision is EpisodeDecision.DISCARD for item in results),
+        saved_frames=sum(
+            item.frame_count for item in results if item.decision is EpisodeDecision.SAVE
+        ),
     )
     return tuple(results)
 
@@ -411,18 +429,21 @@ def _complete_interactive_episode(
     )
 
 
-def _report_episode_result(result: EpisodeResult) -> None:
-    if result.decision is EpisodeDecision.SAVE:
-        console.success(f"Saved {result.frame_count} frames to {result.dataset_root}")
-        return
-    verb = "quit after" if result.decision is EpisodeDecision.QUIT else "discarded"
-    console.success(f"Captured and {verb} {result.frame_count} frames")
+def _report_episode_result(result: EpisodeResult, *, episode_index: int) -> None:
+    announce_episode_outcome(
+        episode_index=episode_index,
+        decision=result.decision,
+        frame_count=result.frame_count,
+        dataset_root=str(result.dataset_root) if result.dataset_root is not None else None,
+    )
 
 
 def _wait_for_episode_start(
     reset_position: Callable[[], None],
     require_runtime: Callable[[], None],
     read_command: Callable[[], str | None] | None = None,
+    *,
+    episode_index: int = 0,
 ) -> bool:
     """Wait until the operator confirms the teleoperated episode start pose."""
 
@@ -434,8 +455,7 @@ def _wait_for_episode_start(
         raise TypeError("episode-start callbacks must be callable")
     if read_command is None:
         read_command = _poll_stdin_line
-    console.step("Use teleoperation to place the robot at the episode start pose")
-    console.info("Enter=start recording, r=reset with AdjustPosition, q=quit")
+    console.step(L1_COLLECTION_INTERACTION.start_notice(episode_index))
     while True:
         announce_input(L1_COLLECTION_INTERACTION.start_action_ids)
         require_runtime()
@@ -446,8 +466,7 @@ def _wait_for_episode_start(
         command = command.strip().lower()
         if command in {"r", "reset"}:
             reset_position()
-            console.step("Use teleoperation to place the robot at the episode start pose")
-            console.info("Enter=start recording, r=reset with AdjustPosition, q=quit")
+            console.step(L1_COLLECTION_INTERACTION.start_notice(episode_index))
             continue
         try:
             decision = normalize_collection_start(command)
@@ -479,14 +498,14 @@ def _record_interactive_episode(
     assembler: SampleAssembler,
     sink: DirectLeRobotEpisode,
     task: str,
+    episode_index: int = 0,
     target_fps: int,
     minimum_fps: float,
     leading_stillness: LeadingStillnessConfig,
-) -> tuple[int, EpisodeDecision]:
+) -> EpisodeCaptureReport:
     """Record until the operator explicitly saves, discards, or quits."""
 
-    console.step(f"Recording episode · target {target_fps} FPS")
-    console.warning("Enter=save, d+Enter=discard, q+Enter=quit")
+    console.warning(L1_COLLECTION_INTERACTION.recording_notice(episode_index))
     announce_input(L1_COLLECTION_INTERACTION.recording_action_ids)
     status = console.LiveStatusLine()
     started = time.monotonic()
@@ -545,17 +564,22 @@ def _record_interactive_episode(
         detail=(f"{effective_fps:.2f} FPS · trimmed {trimmer.result.trimmed_frames}"),
         force=True,
     )
-    console.info(
-        f"Sampled {sampled} and stored {captured} frames in {elapsed_s:.2f}s "
-        f"· trimmed {trimmer.result.trimmed_frames} leading frames "
-        f"· {effective_fps:.2f} FPS · {decision.value}"
+    report = EpisodeCaptureReport(
+        episode_index=episode_index,
+        sampled_frames=sampled,
+        stored_frames=captured,
+        trimmed_frames=trimmer.result.trimmed_frames,
+        elapsed_s=elapsed_s,
+        effective_fps=effective_fps,
+        decision=decision,
     )
+    announce_episode_capture(report)
     if sampled > 0 and effective_fps < minimum_fps:
         raise RuntimeError(
             f"capture rate {effective_fps:.2f} FPS is below the tracked "
             f"minimum {minimum_fps:.2f} FPS"
         )
-    return captured, decision
+    return report
 
 
 def _poll_stdin_line() -> str | None:

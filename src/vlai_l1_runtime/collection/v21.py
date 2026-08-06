@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from embodied_ops import atomic_output_directory, atomic_write_text
+from embodied_ops import atomic_output_directory, atomic_write_text, directory_sha256
 from embodied_ops.datasets.lerobot import (
     V21_CHUNK_SIZE as CHUNK_SIZE,
 )
@@ -57,7 +57,13 @@ def export_v21_dataset(
                 "video_codec": "h264",
             },
         )
-        result.update({"repo_id": repo_id, "root": str(target)})
+        result.update(
+            {
+                "repo_id": repo_id,
+                "root": str(target),
+                "sha256": directory_sha256(staging),
+            }
+        )
     return result
 
 

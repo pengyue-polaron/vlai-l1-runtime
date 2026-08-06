@@ -5,9 +5,17 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
+
+from embodied_ops import (
+    print_dataset_report,
+    print_export_report,
+    standard_dataset_report,
+    standard_export_report,
+)
 
 from . import console
 from .collection.configuration import load_collection_config
@@ -34,83 +42,17 @@ _RIGHT_COLLECTION_CONFIG = _REPO_ROOT / "configs/collection/right_only.toml"
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = console.ArgumentParser(prog="vlai-l1")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    for command, help_text in (
-        ("validate-config", "validate the tracked System contract"),
-        ("describe", "print the static robot contract as JSON"),
-        ("verify-xair", "verify the pinned x_air SDK without opening hardware"),
-    ):
-        child = subparsers.add_parser(command, help=help_text)
-        child.add_argument("--config", type=Path, required=True)
-    xair = subparsers.add_parser(
-        "describe-xair", help="print one side's static x_air launch contract"
+    parser = console.ArgumentParser(
+        prog="vlai-l1",
+        description="Checks, reports, and tracked VLAI L1 operator workflows.",
     )
-    xair.add_argument("--config", type=Path, required=True)
-    xair.add_argument("--side", choices=("left", "right"), required=True)
-    prepare_xair = subparsers.add_parser(
-        "prepare-xair", help="render checked x_air assets without opening hardware"
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
+        metavar="{panel,hardware,dataset,collect,reset}",
     )
-    prepare_xair.add_argument("--config", type=Path, required=True)
-    prepare_xair.add_argument("--output", type=Path, required=True)
-    observe_xair = subparsers.add_parser(
-        "observe-xair", help="read sidecar state without opening robot hardware"
-    )
-    observe_xair.add_argument("--config", type=Path, required=True)
-    observe_xair.add_argument("--side", choices=("left", "right", "bimanual"), required=True)
-    observe_xair.add_argument("--samples", type=int, required=True)
-    observe_xair.add_argument("--timeout", type=float, default=1.0)
-    run_xair = subparsers.add_parser(
-        "run-xair", help="run one configured live x_air teleoperation side"
-    )
-    run_xair.add_argument("--config", type=Path, required=True)
-    run_xair.add_argument("--side", choices=("left", "right"), required=True)
-    run_xair.add_argument(
-        "--managed-startup-gate",
-        action="store_true",
-        help="wait after motion-free preflight for the bimanual parent release",
-    )
-    run_xair.add_argument(
-        "--isolated-side",
-        action="store_true",
-        help="require the inactive arm pair to remain fully down",
-    )
-    camera_check = subparsers.add_parser(
-        "camera-check", help="validate a finite live camera sample window"
-    )
-    camera_check.add_argument("--config", type=Path, required=True)
-    camera_check.add_argument("--samples", type=int, required=True)
-    camera_check.add_argument("--timeout", type=float, default=1.0)
-    camera_service = subparsers.add_parser(
-        "camera-service", help="manage the persistent read-only camera service"
-    )
-    camera_service.add_argument("--config", type=Path, required=True)
-    camera_service.add_argument("action", choices=("start", "stop", "status", "logs"))
-    camera_service_run = subparsers.add_parser(
-        "camera-service-run",
-        help="run the foreground camera owner (internal)",
-    )
-    camera_service_run.add_argument("--config", type=Path, required=True)
-    for command, help_text in (
-        ("validate-collection", "validate collection and System contracts"),
-        ("describe-collection", "print the canonical dataset contract as JSON"),
-    ):
-        child = subparsers.add_parser(command, help=help_text)
-        _add_collection_selection(child)
-    collect = subparsers.add_parser(
-        "collect",
-        help="MOVES HARDWARE: reset, then record commissioned live episodes",
-    )
-    _add_collection_selection(collect)
-    collect.add_argument("experiment", nargs="?")
-    collect.add_argument("--experiment", dest="legacy_experiment")
-    collect.add_argument("--task", required=True)
-    for command, help_text in (
-        ("reset", "MOVES HARDWARE: run x_air AdjustPosition on selected sides"),
-        ("panel", "serve the hardware-free VLAI L1 Operator Panel"),
-    ):
-        child = subparsers.add_parser(command, help=help_text)
-        _add_collection_selection(child)
+    panel = subparsers.add_parser("panel", help="serve the hardware-free VLAI L1 Operator Panel")
+    _add_collection_selection(panel)
     hardware = subparsers.add_parser(
         "hardware",
         help="passively inspect selected CAN and camera hardware",
@@ -126,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
         child = dataset_commands.add_parser(command, help=help_text)
         _add_collection_selection(child)
         child.add_argument("experiment")
+        child.add_argument("--json", action="store_true")
     trim_stillness = dataset_commands.add_parser(
         "trim-leading-stillness",
         help="rebuild a canonical dataset without stationary episode prefixes",
@@ -138,13 +81,65 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print the exact per-episode trim plan without creating the target",
     )
-    for command, help_text in (
-        ("dataset-doctor", "compatibility alias for 'dataset doctor'"),
-        ("export-v21", "compatibility alias for 'dataset export-v21'"),
-    ):
-        child = subparsers.add_parser(command, help=help_text)
+    trim_stillness.add_argument("--json", action="store_true")
+    collect = subparsers.add_parser(
+        "collect",
+        help="MOVES HARDWARE: reset, then record commissioned live episodes",
+    )
+    _add_collection_selection(collect)
+    collect.add_argument("experiment", nargs="?")
+    collect.add_argument("--experiment", dest="legacy_experiment", help=argparse.SUPPRESS)
+    collect.add_argument("--task", required=True)
+    reset = subparsers.add_parser(
+        "reset",
+        help="MOVES HARDWARE: run x_air AdjustPosition on selected sides",
+    )
+    _add_collection_selection(reset)
+
+    for command in ("validate-config", "describe", "verify-xair"):
+        child = subparsers.add_parser(command)
+        child.add_argument("--config", type=Path, required=True)
+    xair = subparsers.add_parser("describe-xair")
+    xair.add_argument("--config", type=Path, required=True)
+    xair.add_argument("--side", choices=("left", "right"), required=True)
+    prepare_xair = subparsers.add_parser("prepare-xair")
+    prepare_xair.add_argument("--config", type=Path, required=True)
+    prepare_xair.add_argument("--output", type=Path, required=True)
+    observe_xair = subparsers.add_parser("observe-xair")
+    observe_xair.add_argument("--config", type=Path, required=True)
+    observe_xair.add_argument("--side", choices=("left", "right", "bimanual"), required=True)
+    observe_xair.add_argument("--samples", type=int, required=True)
+    observe_xair.add_argument("--timeout", type=float, default=1.0)
+    run_xair = subparsers.add_parser("run-xair")
+    run_xair.add_argument("--config", type=Path, required=True)
+    run_xair.add_argument("--side", choices=("left", "right"), required=True)
+    run_xair.add_argument(
+        "--managed-startup-gate",
+        action="store_true",
+        help="wait after motion-free preflight for the bimanual parent release",
+    )
+    run_xair.add_argument(
+        "--isolated-side",
+        action="store_true",
+        help="require the inactive arm pair to remain fully down",
+    )
+    camera_check = subparsers.add_parser("camera-check")
+    camera_check.add_argument("--config", type=Path, required=True)
+    camera_check.add_argument("--samples", type=int, required=True)
+    camera_check.add_argument("--timeout", type=float, default=1.0)
+    camera_service = subparsers.add_parser("camera-service")
+    camera_service.add_argument("--config", type=Path, required=True)
+    camera_service.add_argument("action", choices=("start", "stop", "status", "logs"))
+    camera_service_run = subparsers.add_parser("camera-service-run")
+    camera_service_run.add_argument("--config", type=Path, required=True)
+    for command in ("validate-collection", "describe-collection"):
+        child = subparsers.add_parser(command)
+        _add_collection_selection(child)
+    for command in ("dataset-doctor", "export-v21"):
+        child = subparsers.add_parser(command)
         _add_collection_selection(child)
         child.add_argument("--experiment", required=True)
+        child.add_argument("--json", action="store_true")
     return parser
 
 
@@ -308,29 +303,10 @@ def _run_collection_command(args: argparse.Namespace) -> int:
         experiment = args.experiment or args.legacy_experiment
         if experiment is None:
             raise ValueError("collect requires an experiment")
-        results = collect_managed_session(
+        collect_managed_session(
             config,
             experiment=experiment,
             task=args.task,
-        )
-        print(
-            json.dumps(
-                {
-                    "saved": sum(result.decision.value == "save" for result in results),
-                    "discarded": sum(result.decision.value == "discard" for result in results),
-                    "frames": sum(result.frame_count for result in results),
-                    "dataset_root": next(
-                        (
-                            str(result.dataset_root)
-                            for result in reversed(results)
-                            if result.dataset_root is not None
-                        ),
-                        None,
-                    ),
-                },
-                indent=2,
-                sort_keys=True,
-            )
         )
         return 0
     if command == "reset":
@@ -346,12 +322,29 @@ def _run_collection_command(args: argparse.Namespace) -> int:
             source_experiment=args.source_experiment,
             target_experiment=args.target_experiment,
             dry_run=args.dry_run,
-            episode_completed=lambda episode: console.info(
-                f"Rebuilt episode {episode.episode_index + 1}: "
-                f"trimmed {episode.trimmed_frames} of {episode.source_frames} frames"
+            episode_completed=lambda episode: console.emit(
+                "INFO",
+                f"Rebuilt episode {episode.episode_index}: "
+                f"trimmed {episode.trimmed_frames} of {episode.source_frames} frames",
+                stream=sys.stderr if args.json else sys.stdout,
             ),
         )
-        print(json.dumps(result, indent=2, sort_keys=True))
+        if args.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        else:
+            console.success(
+                "Leading-stillness trim plan ready"
+                if args.dry_run
+                else "Leading-stillness migration complete"
+            )
+            console.info(
+                f"Dataset · source={result['source_experiment']} "
+                f"· target={result['target_experiment']} · episodes={result['episodes']}"
+            )
+            console.info(
+                f"Frames · source={result['source_frames']} "
+                f"· trimmed={result['trimmed_frames']} · output={result['output_frames']}"
+            )
         return 0
 
     identity = identity_from_config(config, args.experiment)
@@ -360,21 +353,16 @@ def _run_collection_command(args: argparse.Namespace) -> int:
         state = inspect_direct_dataset(identity, expected_provenance=expected_provenance)
         if state.total_episodes == 0:
             raise ValueError(f"canonical dataset does not exist: {identity.target_root}")
-        print(
-            json.dumps(
-                {
-                    "status": "PASS",
-                    "experiment": args.experiment,
-                    "root": str(identity.target_root),
-                    "repo_id": identity.repo_id,
-                    "episodes": state.total_episodes,
-                    "frames": state.total_frames,
-                    "tasks": [state.task],
-                },
-                indent=2,
-                sort_keys=True,
-            )
+        report = standard_dataset_report(
+            robot="vlai-l1",
+            experiment=args.experiment,
+            root=str(identity.target_root),
+            repo_id=identity.repo_id,
+            episodes=state.total_episodes,
+            frames=state.total_frames,
+            tasks=[state.task],
         )
+        print_dataset_report(report, json_output=args.json)
         return 0
     result = export_v21_dataset(
         source=identity,
@@ -382,7 +370,12 @@ def _run_collection_command(args: argparse.Namespace) -> int:
         repo_id=config.repo_id_for(args.experiment, derivative="v2.1"),
         expected_provenance=expected_provenance,
     )
-    print(json.dumps(result, indent=2, sort_keys=True))
+    report = standard_export_report(
+        robot="vlai-l1",
+        experiment=args.experiment,
+        result=result,
+    )
+    print_export_report(report, json_output=args.json)
     return 0
 
 

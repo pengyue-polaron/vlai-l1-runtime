@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from embodied_ops import EpisodeDecision, LeadingStillnessConfig
+from embodied_ops import EpisodeCaptureReport, EpisodeDecision, LeadingStillnessConfig
 
 from vlai_l1_runtime.collection.configuration import load_collection_config
 from vlai_l1_runtime.collection.managed import (
@@ -392,8 +392,8 @@ def test_managed_collection_keeps_runtime_and_resets_between_episodes(monkeypatc
     starts = iter((True, True, False))
     recordings = iter(
         (
-            (10, EpisodeDecision.SAVE),
-            (8, EpisodeDecision.DISCARD),
+            EpisodeCaptureReport(0, 10, 10, 0, 1.0, 10.0, EpisodeDecision.SAVE),
+            EpisodeCaptureReport(1, 8, 8, 0, 1.0, 8.0, EpisodeDecision.DISCARD),
         )
     )
 
@@ -459,14 +459,16 @@ def test_managed_collection_keeps_runtime_and_resets_between_episodes(monkeypatc
     )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed.inspect_direct_dataset",
-        lambda *_args, **_kwargs: events.append("dataset_preflight"),
+        lambda *_args, **_kwargs: (
+            events.append("dataset_preflight") or SimpleNamespace(total_episodes=0)
+        ),
     )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed._preflight_cameras",
         lambda _cameras, _config: events.append("camera_preflight"),
     )
 
-    def wait_for_start(_reset, require_runtime):
+    def wait_for_start(_reset, require_runtime, **_kwargs):
         require_runtime()
         start = next(starts)
         events.append("operator_start" if start else "operator_quit")
@@ -581,7 +583,7 @@ def test_recording_decision_is_taken_during_capture(monkeypatch) -> None:
     )
 
     sink = Sink()
-    captured, decision = _record_interactive_episode(
+    report = _record_interactive_episode(
         samples=(("first", 1), ("second", 2)),
         assembler=Assembler(),
         sink=sink,
@@ -591,7 +593,7 @@ def test_recording_decision_is_taken_during_capture(monkeypatch) -> None:
         leading_stillness=NO_TRIM,
     )
 
-    assert (captured, decision) == (1, EpisodeDecision.DISCARD)
+    assert (report.stored_frames, report.decision) == (1, EpisodeDecision.DISCARD)
     assert sink.frames == [{"task": "place fruit"}]
     assert announcements == [("save", "discard", "quit")]
 
@@ -669,7 +671,7 @@ def test_capture_progress_is_published_to_the_panel(monkeypatch) -> None:
         lambda: next(commands),
     )
 
-    assert _record_interactive_episode(
+    report = _record_interactive_episode(
         samples=((object(), 0), (object(), 1), (object(), 2), (object(), 3)),
         assembler=Assembler(),
         sink=Sink(),
@@ -677,7 +679,8 @@ def test_capture_progress_is_published_to_the_panel(monkeypatch) -> None:
         target_fps=30,
         minimum_fps=27.0,
         leading_stillness=NO_TRIM,
-    ) == (3, EpisodeDecision.SAVE)
+    )
+    assert (report.stored_frames, report.decision) == (3, EpisodeDecision.SAVE)
     assert events[0] == (
         "collection",
         "Recording episode",
@@ -732,7 +735,7 @@ def test_interactive_capture_trims_stationary_prefix_and_keeps_preroll(
         lambda: next(times),
     )
     sink = Sink()
-    captured, decision = _record_interactive_episode(
+    report = _record_interactive_episode(
         samples=(
             ((0.0,), 0),
             ((0.0,), 1),
@@ -755,5 +758,5 @@ def test_interactive_capture_trims_stationary_prefix_and_keeps_preroll(
         ),
     )
 
-    assert (captured, decision) == (3, EpisodeDecision.SAVE)
+    assert (report.stored_frames, report.decision) == (3, EpisodeDecision.SAVE)
     assert [frame["action"] for frame in sink.frames] == [(0.1,), (0.7,), (0.8,)]

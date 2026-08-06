@@ -88,6 +88,8 @@ never guess whether a crash leftover is safe to delete.
 
 ```bash
 vlai-l1 dataset doctor pick_blocks_v1
+# Machine-readable output:
+vlai-l1 dataset doctor pick_blocks_v1 --json
 # Right-only:
 vlai-l1 dataset doctor --side right pick_blocks_v1
 ```
@@ -107,6 +109,8 @@ identity and atomic publication remain owned here.
 
 ```bash
 vlai-l1 dataset export-v21 pick_blocks_v1
+# Machine-readable output:
+vlai-l1 dataset export-v21 pick_blocks_v1 --json
 # Right-only:
 vlai-l1 dataset export-v21 --side right pick_blocks_v1
 ```

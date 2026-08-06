@@ -68,13 +68,16 @@ just sdk-describe right
 just hardware
 just panel
 just dataset-doctor <experiment>
+just dataset-doctor <experiment> --json
 just export-v21 <experiment>
+just export-v21 <experiment> --json
 ```
 
 Validation and description do not import LeRobot, Torch, camera libraries, or
 device APIs. Camera checks and dataset operations have separate optional
-dependencies. The Panel exposes only operations permitted by the tracked
-readiness gates.
+dependencies. Dataset commands print a compact operator summary by default;
+`--json` writes one machine-readable object to stdout. The Panel exposes only
+operations permitted by the tracked readiness gates.
 
 ```bash
 git submodule update --init --recursive

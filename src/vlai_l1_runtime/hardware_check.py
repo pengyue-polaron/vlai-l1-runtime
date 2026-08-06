@@ -2,21 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
-from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from . import console
+from embodied_ops import CheckResult, finish_checks
+
 from .collection.configuration import CollectionConfig
 from .teleoperation.lifecycle import _read_can_health, _require_can_identity
 
-
-@dataclass(frozen=True)
-class HardwareCheck:
-    name: str
-    level: str
-    detail: str
+HardwareCheck = CheckResult
 
 
 def inspect_hardware(config: CollectionConfig) -> tuple[HardwareCheck, ...]:
@@ -91,10 +85,4 @@ def inspect_hardware(config: CollectionConfig) -> tuple[HardwareCheck, ...]:
 
 
 def print_hardware_report(checks: tuple[HardwareCheck, ...], *, json_output: bool) -> int:
-    if json_output:
-        print(json.dumps([asdict(check) for check in checks], indent=2, sort_keys=True))
-    else:
-        width = max((len(check.name) for check in checks), default=0)
-        for check in checks:
-            print(f"{console.padded_label(check.level)} {check.name:<{width}}  {check.detail}")
-    return 1 if any(check.level == "FAIL" for check in checks) else 0
+    return finish_checks(checks, json_output=json_output)

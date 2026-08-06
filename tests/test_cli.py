@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from vlai_l1_runtime.cli import build_parser, main
 from vlai_l1_runtime.contracts import FEATURE_NAMES, NamedJointVector, SampleMetadata
@@ -89,6 +90,56 @@ def test_trim_leading_stillness_cli_keeps_the_just_facing_dataset_shape() -> Non
     assert args.target_experiment == "block_plate_trimmed_v1"
     assert args.side == "right"
     assert args.dry_run is True
+
+
+def test_top_level_help_exposes_only_operator_workflows() -> None:
+    help_text = build_parser().format_help()
+
+    assert "{panel,hardware,dataset,collect,reset}" in help_text
+    assert "camera-service-run" not in help_text
+    assert "dataset-doctor" not in help_text
+    assert "tracked VLAI L1 operator workflows" in help_text
+
+
+def test_dataset_commands_accept_the_standard_json_mode() -> None:
+    doctor = build_parser().parse_args(["dataset", "doctor", "blocks_v1", "--json"])
+    export = build_parser().parse_args(["dataset", "export-v21", "blocks_v1", "--json"])
+
+    assert doctor.json is True
+    assert export.json is True
+
+
+def test_dataset_doctor_has_shared_human_and_json_output(monkeypatch, capsys) -> None:
+    identity = SimpleNamespace(
+        target_root=Path("/data/blocks_v1"),
+        repo_id="example/vlai-blocks-v1",
+    )
+    state = SimpleNamespace(total_episodes=3, total_frames=90, task="place the block")
+    monkeypatch.setattr(
+        "vlai_l1_runtime.cli._load_selected_collection_config", lambda _args: object()
+    )
+    monkeypatch.setattr("vlai_l1_runtime.cli.identity_from_config", lambda *_args: identity)
+    monkeypatch.setattr("vlai_l1_runtime.cli.provenance_from_config", lambda _config: {})
+    monkeypatch.setattr(
+        "vlai_l1_runtime.cli.inspect_direct_dataset", lambda *_args, **_kwargs: state
+    )
+
+    assert main(["dataset", "doctor", "blocks_v1"]) == 0
+    assert "[PASS] Dataset doctor passed" in capsys.readouterr().out
+
+    assert main(["dataset", "doctor", "blocks_v1", "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report == {
+        "episodes": 3,
+        "experiment": "blocks_v1",
+        "frames": 90,
+        "repo_id": "example/vlai-blocks-v1",
+        "robot": "vlai-l1",
+        "root": "/data/blocks_v1",
+        "status": "PASS",
+        "tasks": ["place the block"],
+        "workflow": "dataset-doctor",
+    }
 
 
 def test_reset_cli_uses_the_managed_teleoperation_lifecycle(monkeypatch) -> None:

@@ -67,6 +67,7 @@ sdk-status:
         tc -s qdisc show dev "${interface}"
     done
 
+# Stop managed x_air runtimes and disable both arm pairs.
 stop:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -103,64 +104,89 @@ camera-check samples="30" timeout="0.25":
         --samples "{{ samples }}" \
         --timeout "{{ timeout }}"
 
+# Start, stop, inspect, or read logs from the persistent cameras.
 cameras action="start":
     {{ repo }}/scripts/camera_service.sh "{{ action }}"
 
-hardware side="bimanual" *args:
-    {{ vpy }} -m vlai_l1_runtime.cli hardware --side "{{ side }}" {{ args }}
+# Check configured CAN and cameras without moving the robot.
+hardware *args:
+    {{ vpy }} -m vlai_l1_runtime.cli hardware {{ args }}
 
-panel side="bimanual":
-    {{ vpy }} -m vlai_l1_runtime.cli panel --side "{{ side }}"
+# Check only the commissioned right-side hardware.
+hardware-right *args:
+    {{ vpy }} -m vlai_l1_runtime.cli hardware --side right {{ args }}
 
+# Open the bimanual Operator Panel.
+panel:
+    {{ vpy }} -m vlai_l1_runtime.cli panel
+
+# Open the right-only Operator Panel.
 panel-right:
-    just panel right
+    {{ vpy }} -m vlai_l1_runtime.cli panel --side right
 
-reset side="bimanual":
-    {{ vpy }} -m vlai_l1_runtime.cli reset --side "{{ side }}"
+# Move the bimanual robot to its tracked collection reset state.
+reset:
+    {{ vpy }} -m vlai_l1_runtime.cli reset
 
+# Move only the right side to its tracked collection reset state.
 reset-right:
-    just reset right
+    {{ vpy }} -m vlai_l1_runtime.cli reset --side right
 
-collect experiment task side="bimanual":
+# Reset and collect bimanual episodes into one experiment.
+collect experiment task:
     {{ repo }}/scripts/collect.sh \
-        --side "{{ side }}" \
         --task "{{ task }}" \
         "{{ experiment }}"
 
+# Reset and collect right-only episodes into one experiment.
 collect-right experiment task:
-    just collect "{{ experiment }}" "{{ task }}" right
+    {{ repo }}/scripts/collect.sh \
+        --side right \
+        --task "{{ task }}" \
+        "{{ experiment }}"
 
-dataset-doctor experiment side="bimanual":
+# Validate a bimanual canonical dataset.
+dataset-doctor experiment *args:
     {{ vpy }} -m vlai_l1_runtime.cli dataset doctor \
-        --side "{{ side }}" \
-        "{{ experiment }}"
+        "{{ experiment }}" {{ args }}
 
-dataset-doctor-right experiment:
-    just dataset-doctor "{{ experiment }}" right
+# Validate a right-only canonical dataset.
+dataset-doctor-right experiment *args:
+    {{ vpy }} -m vlai_l1_runtime.cli dataset doctor \
+        --side right \
+        "{{ experiment }}" {{ args }}
 
-export-v21 experiment side="bimanual":
+# Export a bimanual canonical dataset to LeRobot v2.1.
+export-v21 experiment *args:
     {{ vpy }} -m vlai_l1_runtime.cli dataset export-v21 \
-        --side "{{ side }}" \
-        "{{ experiment }}"
+        "{{ experiment }}" {{ args }}
 
-export-v21-right experiment:
-    just export-v21 "{{ experiment }}" right
+# Export a right-only canonical dataset to LeRobot v2.1.
+export-v21-right experiment *args:
+    {{ vpy }} -m vlai_l1_runtime.cli dataset export-v21 \
+        --side right \
+        "{{ experiment }}" {{ args }}
 
-trim-leading-stillness source target side="bimanual":
+trim-leading-stillness source target:
     {{ vpy }} -m vlai_l1_runtime.cli dataset trim-leading-stillness \
-        --side "{{ side }}" \
         "{{ source }}" \
         "{{ target }}"
 
 trim-leading-stillness-right source target:
-    just trim-leading-stillness "{{ source }}" "{{ target }}" right
-
-plan-leading-stillness source target side="bimanual":
     {{ vpy }} -m vlai_l1_runtime.cli dataset trim-leading-stillness \
-        --side "{{ side }}" \
+        --side right \
+        "{{ source }}" \
+        "{{ target }}"
+
+plan-leading-stillness source target:
+    {{ vpy }} -m vlai_l1_runtime.cli dataset trim-leading-stillness \
         --dry-run \
         "{{ source }}" \
         "{{ target }}"
 
 plan-leading-stillness-right source target:
-    just plan-leading-stillness "{{ source }}" "{{ target }}" right
+    {{ vpy }} -m vlai_l1_runtime.cli dataset trim-leading-stillness \
+        --side right \
+        --dry-run \
+        "{{ source }}" \
+        "{{ target }}"

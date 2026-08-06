@@ -177,8 +177,10 @@ def trim_leading_stillness_dataset(
     source_state = inspector(source)
     if source_state.total_episodes == 0 or source_state.task is None:
         raise ValueError(f"canonical source dataset does not exist: {source.target_root}")
+    if target.target_root.exists():
+        raise FileExistsError(f"target canonical dataset already exists: {target.target_root}")
     target_state = inspector(target, expected_provenance=provenance_from_config(config))
-    if target_state.total_episodes != 0 or target.target_root.exists():
+    if target_state.total_episodes != 0:
         raise FileExistsError(f"target canonical dataset already exists: {target.target_root}")
 
     loader = reader_loader or _load_lerobot_dataset

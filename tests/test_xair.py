@@ -40,6 +40,7 @@ from vlai_l1_runtime.teleoperation.lifecycle import (
     _remove_orphaned_control_socket,
     _require_can_identity,
     _require_interfaces_down,
+    _ros_library_paths,
     _sidecar_command,
     _stop_sidecar,
 )
@@ -145,6 +146,17 @@ def test_sidecar_command_carries_config_owned_joint_safety() -> None:
     assert value("--max-following-error-deg") == "9,8,3,10,4,2,6"
     assert value("--following-error-timeout-ms") == "100"
     assert value("--following-error-action") == "warn"
+
+
+def test_ros_library_paths_follow_host_architecture() -> None:
+    assert _ros_library_paths("aarch64") == (
+        "/opt/ros/humble/lib/aarch64-linux-gnu",
+        "/opt/ros/humble/lib",
+    )
+    assert _ros_library_paths("x86_64") == (
+        "/opt/ros/humble/lib/x86_64-linux-gnu",
+        "/opt/ros/humble/lib",
+    )
 
 
 class _FakeProbeBackend:
@@ -286,7 +298,7 @@ def test_can_health_and_physical_identity_are_exact(tmp_path: Path) -> None:
     config = load_system_config(SYSTEM_CONFIG)
     payload = """
     [{
-      "parentdev": "1-3.2:1.0",
+      "parentdev": "1-3.1.1:1.0",
       "linkinfo": {
         "info_data": {
           "state": "ERROR-ACTIVE",
@@ -297,13 +309,13 @@ def test_can_health_and_physical_identity_are_exact(tmp_path: Path) -> None:
     """
     health = _decode_can_health("can1", payload)
     assert health.healthy
-    assert health.detail() == ("can1 parent=1-3.2:1.0 state=ERROR-ACTIVE txerr=0 rxerr=0")
+    assert health.detail() == ("can1 parent=1-3.1.1:1.0 state=ERROR-ACTIVE txerr=0 rxerr=0")
     assert not _decode_can_health(
         "can1",
         payload.replace('"ERROR-ACTIVE"', '"ERROR-PASSIVE"').replace('"tx": 0', '"tx": 128'),
     ).healthy
 
-    device = tmp_path / "devices/1-3.2:1.0"
+    device = tmp_path / "devices/1-3.1.1:1.0"
     driver = tmp_path / "bus/usb/drivers/peak_usb"
     interface = tmp_path / "class/net/can1"
     device.mkdir(parents=True)
@@ -311,7 +323,7 @@ def test_can_health_and_physical_identity_are_exact(tmp_path: Path) -> None:
     interface.mkdir(parents=True)
     (device / "driver").symlink_to(driver)
     (interface / "device").symlink_to(device)
-    assert _require_can_identity(config, "can1", sysfs_root=tmp_path) == "1-3.2:1.0"
+    assert _require_can_identity(config, "can1", sysfs_root=tmp_path) == "1-3.1.1:1.0"
 
     (interface / "device").unlink()
     wrong_device = tmp_path / "devices/1-3.9:1.0"
@@ -596,7 +608,7 @@ def test_configure_can_clears_diagnostic_modes(monkeypatch) -> None:
     monkeypatch.setattr(
         lifecycle_module,
         "_require_can_identity",
-        lambda checked_config, interface: "1-3.2:1.0",
+        lambda checked_config, interface: "1-3.1.1:1.0",
     )
 
     def fake_run(command, **kwargs):

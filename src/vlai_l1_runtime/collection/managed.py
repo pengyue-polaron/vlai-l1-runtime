@@ -13,6 +13,7 @@ from collections import deque
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, TextIO
 
 from embodied_ops import (
@@ -39,6 +40,7 @@ from ..teleoperation import (
     request_xair_adjust_position,
     verify_xair_dependency,
 )
+from ..teleoperation.lifecycle import _read_link_is_up, validate_feedback_log_options
 from .configuration import CollectionConfig
 from .dataset import (
     DirectLeRobotEpisode,
@@ -82,11 +84,31 @@ class _RuntimeProcess:
 class ManagedXAirRuntimes:
     """Start exactly the selected sidecars and disable only their owned CAN links."""
 
-    def __init__(self, config: CollectionConfig) -> None:
+    def __init__(
+        self,
+        config: CollectionConfig,
+        *,
+        feedback_log: Path | None = None,
+        feedback_max_frames: int | None = None,
+        feedback_retention: str = "full",
+    ) -> None:
         self._config = config
         self._sides = config.teleoperation_sides
         self._runtimes: list[_RuntimeProcess] = []
         self._sudo = () if os.geteuid() == 0 else ("sudo", "-n")
+        self._feedback_arguments: tuple[str, ...] = ()
+        if (
+            feedback_log is not None
+            or feedback_max_frames is not None
+            or feedback_retention != "full"
+        ):
+            if len(self._sides) != 1:
+                raise ValueError("passive feedback logging requires one isolated side")
+            arguments = validate_feedback_log_options(
+                config.system, self._sides[0], feedback_log, feedback_max_frames, feedback_retention
+            )
+            # Response IDs come from System config in the child, never user overrides.
+            self._feedback_arguments = arguments[:4] + arguments[6:]
 
     @staticmethod
     def authorize() -> None:
@@ -123,6 +145,7 @@ class ManagedXAirRuntimes:
                     "--side",
                     side,
                     *(("--managed-startup-gate",) if bimanual else ("--isolated-side",)),
+                    *self._feedback_arguments,
                 )
                 process = subprocess.Popen(
                     command,
@@ -246,6 +269,7 @@ class ManagedXAirRuntimes:
         console.step("Stopping teleoperation runtimes")
         system = self._config.system
         timeout_s = system.teleoperation.shutdown_timeout_s
+        cleanup_failures = []
         for runtime in self._runtimes:
             if runtime.process.stdin is not None and not runtime.process.stdin.closed:
                 runtime.process.stdin.close()
@@ -257,6 +281,7 @@ class ManagedXAirRuntimes:
                 runtime.process.wait(timeout=remaining)
             except subprocess.TimeoutExpired:
                 console.warning(f"{runtime.side} runtime exceeded graceful shutdown timeout")
+                cleanup_failures.append(f"{runtime.side}: graceful shutdown timed out")
                 _signal_runtime(self._sudo, runtime.process.pid, signal_name="KILL")
                 try:
                     runtime.process.wait(timeout=2)
@@ -266,22 +291,22 @@ class ManagedXAirRuntimes:
         for runtime in self._runtimes:
             if runtime.pump.ident is not None:
                 runtime.pump.join(timeout=1)
-        for side in self._sides:
+            if runtime.process.returncode != 0:
+                cleanup_failures.append(
+                    f"{runtime.side}: lifecycle exited with status {runtime.process.returncode}; "
+                    + " | ".join(runtime.output)
+                )
+            # The lifecycle owns motor disable and link teardown. The parent
+            # verifies completion without opening a second motor handle.
+            side = runtime.side
             launch = describe_xair_side(system, side)
-            subprocess.run(
-                (
-                    *self._sudo,
-                    "/opt/xarm_teleop/disable_unilateral_pair.sh",
-                    str(launch["arm_side"]),
-                    str(launch["leader_can"]),
-                    str(launch["follower_can"]),
-                ),
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        cleanup_failures = []
-        for side in self._sides:
+            for role in ("leader_can", "follower_can"):
+                interface = str(launch[role])
+                try:
+                    if _read_link_is_up(interface):
+                        cleanup_failures.append(f"{side}: {interface} remains UP after shutdown")
+                except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                    cleanup_failures.append(f"{side}: cannot verify {interface} DOWN: {exc}")
             try:
                 remove_orphaned_xair_control_socket(system, side)
             except (OSError, RuntimeError) as exc:
@@ -289,7 +314,7 @@ class ManagedXAirRuntimes:
         self._runtimes.clear()
         if cleanup_failures:
             raise RuntimeError(
-                "teleoperation control endpoint cleanup failed: " + "; ".join(cleanup_failures)
+                "teleoperation shutdown could not be verified: " + "; ".join(cleanup_failures)
             )
         console.success("Teleoperation stopped; selected CAN links are disabled and down")
 

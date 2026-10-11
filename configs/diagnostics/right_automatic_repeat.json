@@ -1,0 +1,61 @@
+{
+  "kind": "isolated_right_follower_diagnostic_v1",
+  "side": "right",
+  "role": "follower",
+  "active_motor": "joint_7",
+  "amplitude_deg": 1,
+  "transition_seconds": 4,
+  "hold_seconds": 5,
+  "cycles": 2,
+  "hold_test_seconds": 5,
+  "maximum_amplitude_deg": 2,
+  "maximum_reference_speed_deg_s": 1,
+  "maximum_reference_acceleration_deg_s2": 0.8,
+  "maximum_observed_speed_deg_s": [
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15
+  ],
+  "maximum_tracking_error_deg": [
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    0.8,
+    2
+  ],
+  "tracking_persistence_seconds": 0.1,
+  "maximum_motor_torque_nm": [
+    12,
+    12,
+    8,
+    8,
+    3,
+    3,
+    3,
+    3
+  ],
+  "maximum_temperature_c": 70,
+  "maximum_relative_excursion_deg": [
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3
+  ],
+  "enabled_raw_status": 1,
+  "disabled_raw_status": 0,
+  "raw_log_capacity": 600000,
+  "shutdown_confirmation_seconds": 2,
+  "description": "Second-stage repeated J7 diagnostic after successful 0.5-degree commissioning. Two +/-1-degree cycles with unchanged speed/effort/tracking/excursion guards; all physical values still come from system configuration."
+}

@@ -29,6 +29,46 @@ window passed. This does not affect the independent policy-command blockers.
 Synthetic sources exist only for pure integration tests and cannot enable the
 Runtime.
 
+## Operator-authorized automatic diagnostic (2026-10-11)
+
+The operator explicitly waived the complete-controller-source prerequisite for
+a bounded experimental right-Follower owner and authorized the corresponding
+AGENTS.md exception. `automatic-right` is this separate live diagnostic; it
+does not implement production policy transport or change `command_ready`.
+It uses the public motor CAN SDK with an exclusive lifecycle lock and no
+teleoperation owner running. Only the configured right Follower is opened.
+Physical identities, motor types, gains, firmware ranges, joint bounds and
+system timeouts come from system configuration. The additional experimental
+envelope is tracked in `configs/diagnostics/right_automatic_motion.json`.
+
+The launcher requires stopped, correctly mapped interfaces, zero CAN errors,
+and every motor in every motion-free preflight round. It never recovers a bus
+or retries enable automatically. The native owner holds a fresh measured pose,
+then optionally performs a bounded J7 sweep with the other joints and gripper
+fixed. It checks feedback age/status, bounds, relative excursion, measured
+speed, torque, temperature and persistent tracking error. Its tracking action
+is stop, separate from the unchanged teleoperation warning exception.
+The parent supervises heartbeat/CAN health; the child handles parent death.
+Shutdown sends disable and requires fresh disabled replies from all eight
+motors before claiming success. If the child exits without confirmation, only
+one sequential disable-only cleanup owner may run after it has been reaped;
+no enable or target command is allowed in that cleanup mode. The link is then
+lowered, and any unconfirmed disable is reported as requiring intervention.
+
+Initial commissioning is a five-second current-position hold, followed only
+on success by a small wrist sweep. This PD controller has no model gravity or
+friction feedforward; its captures are a different controller context from
+the earlier opaque teleoperation controller. Raw-motor coordinates and these
+experimental guard limits are not calibrated FT or collision avoidance.
+
+`trajectory.WristSweep` and `TrajectoryRehearsal` are pure offline planning and
+fault models. They contain no SDK/transport/lifecycle adapter and do not clear
+command readiness. Their explicit experimental speed, acceleration and tracking
+budgets are not commissioned motor limits. Rehearsal `RELEASE_REQUIRED` means
+no further simulated targets; its caller-supplied disable/release acknowledgement
+does not operate or observe physical motors. Real watchdog scheduling, exclusive
+command ownership and verified disable/release remain implementation gates.
+
 ## Live-work rules
 
 - Never run zeroing, calibration, gravity compensation, MIT motion, or torque
@@ -75,6 +115,11 @@ Runtime.
   teleoperation lifecycle, require fresh selected state after startup
   alignment, and then disable the selected pair(s). They do not authorize
   policy commands.
+- The lifecycle child owns disable/down cleanup. Managed shutdown checks its
+  exit status and passively verifies both owned links are DOWN; it does not
+  invoke a second legacy controller or disable script. A cleanup failure or
+  forced process termination is a failed shutdown, not proof of motor disable,
+  and must not be followed by automatic restart.
 - A command timeout must disable command resources; retaining a stale publisher
   while accepting a new lease is process-fatal.
 - Preview, logging, policy inference, and camera encoding must never block the
@@ -87,6 +132,18 @@ Runtime.
   while the marked owner is active.
 - State publication runs outside the SDK callback. Missing consumers are
   tolerated; malformed, non-finite, wrong-DOF, or stale callback data is fatal.
+- Optional passive Follower logging runs inside the SDK-owning sidecar and
+  never sends CAN frames. It requires explicit output/capacity arguments;
+  default launches leave it disabled. Raw samples are buffered with kernel
+  receive timestamps and socket overflow counts, then written after SDK handle
+  release. Capture faults stop that diagnostic run. Full retention (default)
+  fails when capacity is exhausted. Explicit `--feedback-retention latest`
+  instead retains the most recent bounded window and records the number of
+  evicted older frames; this is intentional history eviction, never permission
+  to ignore socket overflow, stale/missing feedback or CAN faults. It permits
+  operator-ended observation without a diagnostic duration limit. A raw capture, observed
+  status nibble, or same-pose offline tare is not validated FT or permission for
+  force control. Do not run the standalone querying capture beside a sidecar.
 - The native sidecar also applies the tracked side-specific seven-joint bounds
   to both leader and follower feedback. Any bound violation is immediately
   fatal. Per the operator's explicit decision, a leader/follower error that

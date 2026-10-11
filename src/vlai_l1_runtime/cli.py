@@ -96,6 +96,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_collection_selection(reset)
 
+    automatic = subparsers.add_parser(
+        "automatic-right",
+        help="MOVES HARDWARE: isolated right Follower hold, wrist sweep, or verified sequence",
+    )
+    automatic.add_argument("--config", type=Path, required=True)
+    automatic.add_argument("--policy", type=Path, required=True)
+    automatic.add_argument("--output", type=Path, required=True)
+    automatic.add_argument("--mode", choices=("hold", "sweep", "sequence"), required=True)
+
+    review = subparsers.add_parser(
+        "review-automatic", help="Hardware-free automatic capture review"
+    )
+    review.add_argument("--config", type=Path, required=True)
+    review.add_argument("--source", type=Path, required=True)
+    review.add_argument("--output", type=Path, required=True)
+
     for command in ("validate-config", "describe", "verify-xair"):
         child = subparsers.add_parser(command)
         child.add_argument("--config", type=Path, required=True)
@@ -110,9 +126,36 @@ def build_parser() -> argparse.ArgumentParser:
     observe_xair.add_argument("--side", choices=("left", "right", "bimanual"), required=True)
     observe_xair.add_argument("--samples", type=int, required=True)
     observe_xair.add_argument("--timeout", type=float, default=1.0)
+    feedback = subparsers.add_parser(
+        "capture-follower-feedback",
+        help="LIVE CAN QUERIES: bounded Follower position/velocity/torque capture without enable",
+    )
+    feedback.add_argument("--config", type=Path, required=True)
+    feedback.add_argument("--side", choices=("left", "right", "bimanual"), required=True)
+    feedback.add_argument("--output", type=Path, required=True)
+    feedback.add_argument(
+        "--read-parameters-for",
+        choices=MOTOR_NAMES,
+        help="LIVE: after state probe, read eight identity/version/range registers of one motor",
+    )
+    redecode = subparsers.add_parser(
+        "redecode-follower-feedback",
+        help="OFFLINE: compare saved raw feedback decoded with tracked ranges against SDK values",
+    )
+    redecode.add_argument("--config", type=Path, required=True)
+    redecode.add_argument("--source", type=Path, required=True)
+    redecode.add_argument("--output", type=Path, required=True)
     run_xair = subparsers.add_parser("run-xair")
     run_xair.add_argument("--config", type=Path, required=True)
     run_xair.add_argument("--side", choices=("left", "right"), required=True)
+    run_xair.add_argument("--feedback-log", type=Path, help="optional passive Follower raw log")
+    run_xair.add_argument("--feedback-max-frames", type=int, help="explicit bounded log capacity")
+    run_xair.add_argument(
+        "--feedback-retention",
+        choices=("full", "latest"),
+        default="full",
+        help="full: fail at capacity; latest: retain a bounded recent window",
+    )
     run_xair.add_argument(
         "--managed-startup-gate",
         action="store_true",
@@ -156,6 +199,41 @@ def _add_collection_selection(parser: argparse.ArgumentParser) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "automatic-right":
+            from .teleoperation.automatic import run_automatic, run_automatic_sequence
+
+            config = load_system_config(args.config)
+            if args.mode == "sequence":
+                report = run_automatic_sequence(config, args.policy, args.output)
+            else:
+                report = run_automatic(config, args.policy, args.output, mode=args.mode)
+            return 0 if report["status"] == "passed" else 1
+        if args.command == "review-automatic":
+            from .automatic_review import review_automatic
+
+            result = review_automatic(load_system_config(args.config), args.source)
+            with args.output.open("x") as stream:
+                json.dump(result, stream, indent=2)
+                stream.write("\n")
+            return 0
+        if args.command == "redecode-follower-feedback":
+            from .feedback_decode import redecode_capture
+
+            report = redecode_capture(load_system_config(args.config), args.source, args.output)
+            console.success(f"Offline feedback comparison saved: {report}")
+            return 0
+        if args.command == "capture-follower-feedback":
+            from .teleoperation.feedback_capture import capture_follower_feedback
+
+            sides = ("left", "right") if args.side == "bimanual" else (args.side,)
+            report = capture_follower_feedback(
+                load_system_config(args.config),
+                sides=sides,
+                output=args.output,
+                parameter_motor=args.read_parameters_for,
+            )
+            console.success(f"Follower feedback saved: {report}")
+            return 0
         if args.command == "observe-xair":
             return _run_xair_observer(args)
         if args.command == "run-xair":
@@ -164,6 +242,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.side,
                 managed_startup_gate=args.managed_startup_gate,
                 isolated_side=args.isolated_side,
+                feedback_log=args.feedback_log,
+                feedback_max_frames=args.feedback_max_frames,
+                feedback_retention=args.feedback_retention,
             )
         if args.command == "camera-check":
             return _run_camera_check(args)

@@ -186,6 +186,36 @@ LeRobot collection, doctor, and export processes require Python 3.12.
 
 ## Development
 
+The operator-authorized automatic right-Follower diagnostic now provides a
+single bounded hold / wrist sweep / saved-data review sequence. This **moves
+hardware**; keep the workspace clear and all other controllers stopped:
+
+```bash
+sudo -n env -u PYTHONPATH .venv/bin/vlai-l1 automatic-right \
+  --config configs/system/vlai_l1.toml \
+  --policy configs/diagnostics/right_automatic_motion.json \
+  --output data/temporary/NEW_SESSION_NAME --mode sequence
+```
+
+The output directory must be new. `--mode hold` and `--mode sweep` select
+individual stages. The first policy uses +/-0.5 degrees; the separately tracked
+`right_automatic_repeat.json` uses two +/-1-degree cycles. Each stage records
+positions, targets, torque and raw feedback, verifies motor disable before
+closing CAN, and writes `report.json` plus `analysis.json`. `sequence.json`
+summarizes the automatic gates. `Ctrl+C` requests guarded shutdown. A failed
+stage stops the sequence without an automatic enable retry or CAN recovery.
+Only J7's target varies; this does not lift/home the arm. Captures use a direct
+PD controller and are not calibrated FT. See [Safety](docs/SAFETY.md) for scope.
+
+For bounded Follower torque feedback capture and the hardware-free endpoint
+wrench solver, see [Force estimation](docs/FORCE_ESTIMATION.md). The new capture
+command requires a separately approved hardware test; it never enables motors.
+
+For temporary two-wrist-camera plus all-motor position recording without
+AgentView, see [Temporary recording](docs/TEMPORARY_RECORDING.md). That standalone
+CSV/MJPEG recorder consumes already-running teleoperation and never enables or
+resets arms. It does not replace the canonical LeRobot collection workflow.
+
 ```bash
 uv sync --dev
 uv run pytest

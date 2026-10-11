@@ -53,8 +53,9 @@ entries.
 5. Test the left pair first (`can1` leader to `can3` follower). Keep both arms
    mechanically aligned before creation and stop on unexpected alignment,
    direction, force, sound, vibration, stale state, or CAN errors.
-6. Stop, run the deployed disable hook, bring both links down, and inspect bus
-   counters before advancing.
+6. Stop through the guarded lifecycle, require its disable/down cleanup and
+   managed shutdown verification to succeed, and inspect bus counters before
+   advancing. Do not invoke the old `/opt/xarm_teleop` disable script.
 7. Repeat for the right pair (`can0` leader to `can2` follower). This stage must
    specifically close the previous `can2` stability concern.
 8. Only after both isolated stages pass, run both sidecars together and require

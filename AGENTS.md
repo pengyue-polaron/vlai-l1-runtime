@@ -10,6 +10,16 @@ or camera code. On the onboard deployment, the host-level
 - Treat all CAN publishers and motor handles as live hardware.
 - Until tracked readiness gates are resolved, do not add a live command adapter,
   enable path, calibration path, reset path, or systemd integration.
+  Operator-approved exception (2026-10-11): implement and commission a bounded,
+  isolated right-Follower automatic diagnostic using the public motor CAN SDK,
+  under one exclusive lifecycle owner. The operator explicitly waived the
+  complete-controller-source prerequisite for this experimental path and
+  authorized editing this guide. This does not declare the production policy
+  command transport ready. Preserve physical identity, motor preflight, hard
+  bounds, CAN/state health, fresh-position startup, bounded trajectories,
+  independent supervision, disable verification and no automatic fault retry.
+  Keep experimental settings tracked and distinguish this raw-motor-coordinate
+  diagnostic from calibrated model coordinates or validated FT control.
 - Static description, validation, and tests must never initialize ROS, CAN,
   cameras, systemd, or `/dev` resources.
 - One process will ultimately own each CAN endpoint and each camera. LeRobot

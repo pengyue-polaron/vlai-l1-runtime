@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import subprocess
 import threading
 from collections import deque
 from pathlib import Path
@@ -48,6 +49,9 @@ def _stub_persistent_camera_service(monkeypatch) -> None:
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed.remove_orphaned_xair_control_socket",
         lambda _config, _side: None,
+    )
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed._read_link_is_up", lambda _interface: False
     )
     monkeypatch.setattr(
         "vlai_l1_runtime.collection.managed.LeRobotBackendFactory.verify_dependency",
@@ -188,7 +192,7 @@ def test_episode_start_fails_if_one_runtime_exits_while_waiting() -> None:
         )
 
 
-def test_managed_runtimes_stop_both_sides_and_run_disable_fallback(monkeypatch) -> None:
+def test_managed_runtimes_stop_both_sides_without_legacy_disable_owner(monkeypatch) -> None:
     processes: list[_Process] = []
     signals: list[tuple[int, str]] = []
     commands: list[tuple[str, ...]] = []
@@ -224,7 +228,7 @@ def test_managed_runtimes_stop_both_sides_and_run_disable_fallback(monkeypatch) 
 
     assert len(processes) == 2
     assert signals == [(processes[0].pid, "INT"), (processes[1].pid, "INT")]
-    assert [command[1] for command in commands] == ["left_arm", "right_arm"]
+    assert commands == []
     assert cleaned_sides == ["left", "right"]
 
 
@@ -267,7 +271,7 @@ def test_right_only_runtime_uses_isolation_and_never_disables_left(monkeypatch) 
     assert launches[0][launches[0].index("--side") + 1] == "right"
     assert "--isolated-side" in launches[0]
     assert "--managed-startup-gate" not in launches[0]
-    assert [command[1] for command in disable_commands] == ["right_arm"]
+    assert disable_commands == []
     assert cleaned_sides == ["right"]
 
 
@@ -303,7 +307,59 @@ def test_partial_runtime_start_failure_stops_started_side(monkeypatch) -> None:
         ManagedXAirRuntimes(CONFIG).__enter__()
 
     assert signals == [(process.pid, "INT")]
-    assert [command[1] for command in commands] == ["left_arm", "right_arm"]
+    assert commands == []
+
+
+@pytest.mark.parametrize("fault", ["exit", "up", "unreadable", "timeout"])
+def test_shutdown_fault_never_reports_success_and_releases_bookkeeping(monkeypatch, fault):
+    manager = ManagedXAirRuntimes(RIGHT_CONFIG)
+    process = _Process("right")
+    checked = []
+    cleaned = []
+    successes = []
+    signals = []
+    calls = 0
+
+    def wait(timeout=None):
+        nonlocal calls
+        calls += 1
+        if fault == "timeout" and calls == 1:
+            raise subprocess.TimeoutExpired("fake runtime", timeout)
+        process.returncode = 2 if fault == "exit" else 0
+        return process.returncode
+
+    def link_up(interface):
+        checked.append(interface)
+        if fault == "unreadable" and interface == "can0":
+            raise OSError("cannot inspect link")
+        return fault == "up" and interface == "can0"
+
+    process.wait = wait
+    manager._runtimes = [
+        SimpleNamespace(
+            side="right",
+            process=process,
+            pump=SimpleNamespace(ident=None),
+            output=deque(["FAIL synthetic cleanup failure"]),
+        )
+    ]
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed._signal_runtime",
+        lambda _sudo, _pid, signal_name: signals.append(signal_name),
+    )
+    monkeypatch.setattr("vlai_l1_runtime.collection.managed._read_link_is_up", link_up)
+    monkeypatch.setattr(
+        "vlai_l1_runtime.collection.managed.remove_orphaned_xair_control_socket",
+        lambda _config, side: cleaned.append(side),
+    )
+    monkeypatch.setattr("vlai_l1_runtime.collection.managed.console.success", successes.append)
+    with pytest.raises(RuntimeError, match="shutdown could not be verified"):
+        manager._stop_all()
+    assert checked == ["can0", "can2"]
+    assert cleaned == ["right"]
+    assert manager._runtimes == []
+    assert successes == []
+    assert signals == (["INT", "KILL"] if fault == "timeout" else ["INT"])
 
 
 def test_runtime_output_hides_vendor_chatter_but_preserves_it_for_failures(

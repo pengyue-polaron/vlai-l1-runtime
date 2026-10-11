@@ -49,6 +49,15 @@ class _StartupCanFault(RuntimeError):
         super().__init__("; ".join(health.detail() for health in unhealthy))
 
 
+def _ros_library_paths(architecture: str) -> tuple[str, ...]:
+    """Return ROS library paths for the host architecture."""
+
+    return (
+        f"/opt/ros/humble/lib/{architecture}-linux-gnu",
+        "/opt/ros/humble/lib",
+    )
+
+
 def _sidecar_command(
     config: SystemConfig,
     side: str,
@@ -58,12 +67,18 @@ def _sidecar_command(
     launch: dict[str, Any],
     owner_uid: int,
     owner_gid: int,
+    feedback_log: Path | None = None,
+    feedback_max_frames: int | None = None,
+    feedback_retention: str = "full",
 ) -> tuple[str, ...]:
     joint_safety = config.teleoperation.joint_safety.for_side(side)
 
     def vector(values: tuple[float, ...]) -> str:
         return ",".join(f"{value:g}" for value in values)
 
+    diagnostic = validate_feedback_log_options(
+        config, side, feedback_log, feedback_max_frames, feedback_retention
+    )
     return (
         "chrt",
         "-f",
@@ -107,6 +122,45 @@ def _sidecar_command(
         str(owner_uid),
         "--control-owner-gid",
         str(owner_gid),
+        *diagnostic,
+    )
+
+
+def validate_feedback_log_options(
+    config: SystemConfig,
+    side: str,
+    path: Path | None,
+    capacity: int | None,
+    retention: str = "full",
+) -> tuple[str, ...]:
+    """Validate optional raw logging without opening hardware or the output file."""
+
+    if retention not in ("full", "latest"):
+        raise ValueError("invalid feedback retention mode")
+    if path is None and capacity is None and retention == "full":
+        return ()
+    if path is None or type(capacity) is not int or not 8 <= capacity <= 2_000_000:
+        raise ValueError("feedback logging requires a path and explicit capacity of 8..2000000")
+    if config.follower_feedback is None:
+        raise ValueError("feedback logging requires tracked Follower decoding profiles")
+    config.follower_feedback.for_side(side)
+    path = Path(path).absolute()
+    if path.exists() or path.is_symlink():
+        raise FileExistsError(f"feedback output already exists: {path}")
+    if (
+        not path.parent.is_dir()
+        or path.parent.is_symlink()
+        or path.resolve().is_relative_to("/dev")
+    ):
+        raise ValueError("feedback output requires an existing non-device directory")
+    return (
+        "--feedback-log",
+        str(path),
+        "--feedback-max-frames",
+        str(capacity),
+        "--feedback-response-ids",
+        ",".join(str(m.receive_id) for m in config.motors),
+        *(("--feedback-retention", "latest") if retention == "latest" else ()),
     )
 
 
@@ -116,6 +170,9 @@ def run_xair_side(
     *,
     managed_startup_gate: bool = False,
     isolated_side: bool = False,
+    feedback_log: Path | None = None,
+    feedback_max_frames: int | None = None,
+    feedback_retention: str = "full",
 ) -> int:
     """Run one side until interrupted, then disable it and close both CAN links."""
 
@@ -123,6 +180,9 @@ def run_xair_side(
         raise RuntimeError("x_air live launch requires root")
     if managed_startup_gate and isolated_side:
         raise RuntimeError("managed bimanual startup and isolated-side mode are mutually exclusive")
+    validate_feedback_log_options(
+        config, side, feedback_log, feedback_max_frames, feedback_retention
+    )
     dependency = verify_xair_dependency(config)
     launch = describe_xair_side(config, side)
     owner_uid, owner_gid = _invoking_identity()
@@ -170,8 +230,7 @@ def run_xair_side(
                 / architecture
             ),
             str(config.teleoperation.source_root / "publish/xarm_can/package/lib" / architecture),
-            "/opt/ros/humble/lib/x86_64-linux-gnu",
-            "/opt/ros/humble/lib",
+            *_ros_library_paths(architecture),
         )
         current = environment.get("LD_LIBRARY_PATH")
         environment["LD_LIBRARY_PATH"] = ":".join(
@@ -243,6 +302,9 @@ def run_xair_side(
                 launch=launch,
                 owner_uid=owner_uid,
                 owner_gid=owner_gid,
+                feedback_log=feedback_log,
+                feedback_max_frames=feedback_max_frames,
+                feedback_retention=feedback_retention,
             )
             child = subprocess.Popen(
                 command,
@@ -288,13 +350,17 @@ def run_xair_side(
                         f"{config.teleoperation.startup_timeout_s:.1f}s"
                     )
             if stop_requested:
-                _stop_sidecar(
+                shutdown_status = _stop_sidecar(
                     child,
                     output_pump,
                     timeout_s=config.teleoperation.shutdown_timeout_s,
                 )
                 child = None
                 output_pump = None
+                if shutdown_status != 0:
+                    raise RuntimeError(
+                        f"{side} sidecar shutdown failed with status {shutdown_status}"
+                    )
                 return 0
             if not ready.is_set():
                 unhealthy = tuple(
@@ -320,16 +386,18 @@ def run_xair_side(
                 output_pump,
                 timeout_s=config.teleoperation.shutdown_timeout_s,
             )
-        if links_open:
-            _disable_and_close(config, interfaces)
         try:
-            remove_orphaned_xair_control_socket(config, side)
+            if links_open:
+                _disable_and_close(config, interfaces)
         finally:
             try:
-                for signum, handler in previous_handlers.items():
-                    signal.signal(signum, handler)
+                remove_orphaned_xair_control_socket(config, side)
             finally:
-                lifecycle_lock.close()
+                try:
+                    for signum, handler in previous_handlers.items():
+                        signal.signal(signum, handler)
+                finally:
+                    lifecycle_lock.close()
 
 
 def _require_startup_can_health(
@@ -658,18 +726,33 @@ def _qdisc_drops(interface: str) -> int:
 
 
 def _disable_and_close(config: SystemConfig, interfaces: tuple[str, str]) -> None:
+    failures = []
     for interface in interfaces:
-        subprocess.run(("ip", "link", "set", interface, "up"), check=False)
-        for motor in config.motors:
-            frame = f"{motor.send_id:03X}##1FFFFFFFFFFFFFFFD"
-            subprocess.run(
-                ("cansend", interface, frame),
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            time.sleep(0.03)
-        subprocess.run(("ip", "link", "set", interface, "down"), check=False)
+        try:
+            subprocess.run(("ip", "link", "set", interface, "up"), check=True)
+            for motor in config.motors:
+                frame = f"{motor.send_id:03X}##1FFFFFFFFFFFFFFFD"
+                try:
+                    subprocess.run(
+                        ("cansend", interface, frame),
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                except (OSError, subprocess.SubprocessError) as exc:
+                    failures.append(f"{interface} {motor.name} disable failed: {exc}")
+                time.sleep(0.03)
+        except (OSError, subprocess.SubprocessError) as exc:
+            failures.append(f"{interface} cleanup link setup failed: {exc}")
+        finally:
+            try:
+                subprocess.run(("ip", "link", "set", interface, "down"), check=True)
+                if _read_link_is_up(interface):
+                    raise RuntimeError(f"{interface} remains UP")
+            except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                failures.append(f"{interface} link shutdown failed: {exc}")
+    if failures:
+        raise RuntimeError("x_air disable/down failed: " + "; ".join(failures))
 
 
 def _require_exclusive_control(interfaces: tuple[str, str]) -> None:
@@ -686,7 +769,7 @@ def _find_competing_control(
         if not arguments:
             continue
         executable = Path(arguments[0]).name
-        if executable == "unilateral_control":
+        if executable in ("unilateral_control", "vlai_l1_automatic_follower"):
             return " ".join(arguments)
         if executable != "vlai_l1_xair_sidecar":
             continue

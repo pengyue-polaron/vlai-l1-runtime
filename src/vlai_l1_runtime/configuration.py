@@ -120,6 +120,32 @@ class MotorConfig:
 
 
 @dataclass(frozen=True)
+class FeedbackRangeConfig:
+    """Reported motor registers; evidence for decoding, not FT calibration."""
+
+    name: str
+    position_max_rad: float
+    velocity_max_rad_s: float
+    torque_max_nm: float
+    hardware_version: int
+    firmware_version: int
+    sub_version: int
+    parameter_sha256: str
+
+
+@dataclass(frozen=True)
+class FollowerFeedbackConfig:
+    source_config_sha256: str
+    left: tuple[FeedbackRangeConfig, ...]
+    right: tuple[FeedbackRangeConfig, ...]
+
+    def for_side(self, side: str) -> tuple[FeedbackRangeConfig, ...]:
+        if side not in SIDES:
+            raise ConfigError("feedback side must be left or right")
+        return getattr(self, side)
+
+
+@dataclass(frozen=True)
 class ControlProfile:
     kp: tuple[float, ...]
     kd: tuple[float, ...]
@@ -348,6 +374,7 @@ class SystemConfig:
     operator_panel: OperatorPanelConfig
     camera_preview: CameraPreviewConfig
     lifecycle: LifecycleConfig
+    follower_feedback: FollowerFeedbackConfig | None = None
     _validation_token: object | None = field(default=None, repr=False, compare=False)
     _validation_fingerprint: str = field(default="", repr=False, compare=False)
 
@@ -369,7 +396,7 @@ def load_system_config(path: Path) -> SystemConfig:
         raise ConfigError(f"cannot load system config {resolved}: {exc}") from exc
 
     root = _mapping(raw, "root")
-    _exact_keys(
+    _allowed_keys(
         root,
         {
             "schema_version",
@@ -387,6 +414,7 @@ def load_system_config(path: Path) -> SystemConfig:
             "camera_preview",
             "lifecycle",
         },
+        {"follower_feedback"},
         "root",
     )
 
@@ -437,15 +465,24 @@ def load_system_config(path: Path) -> SystemConfig:
         operator_panel=operator_panel,
         camera_preview=camera_preview,
         lifecycle=lifecycle,
+        follower_feedback=(
+            _parse_follower_feedback(root["follower_feedback"])
+            if "follower_feedback" in root
+            else None
+        ),
     )
     object.__setattr__(config, "_validation_token", _LOADER_VALIDATION_TOKEN)
     object.__setattr__(config, "_validation_fingerprint", _system_config_fingerprint(config))
     return config
 
 
-def _read_local_regular_file(path: Path, *, label: str = "system config") -> bytes:
+def _read_local_regular_file(
+    path: Path, *, label: str = "system config", max_bytes: int = _MAX_CONFIG_BYTES
+) -> bytes:
     """Read one bounded local file while refusing every symbolic-link component."""
 
+    if not path.is_absolute() or type(max_bytes) is not int or max_bytes <= 0:
+        raise ConfigError("local file requires an absolute path and positive byte limit")
     directory_fd = os.open("/", os.O_PATH | os.O_DIRECTORY | os.O_CLOEXEC)
     path_fd: int | None = None
     try:
@@ -475,18 +512,18 @@ def _read_local_regular_file(path: Path, *, label: str = "system config") -> byt
             raise ConfigError(f"{label} path contains a symbolic link: {path}")
         if not stat.S_ISREG(before.st_mode):
             raise ConfigError(f"{label} is not a regular file: {path}")
-        if before.st_size > _MAX_CONFIG_BYTES:
-            raise ConfigError(f"{label} exceeds {_MAX_CONFIG_BYTES} bytes: {path}")
+        if before.st_size > max_bytes:
+            raise ConfigError(f"{label} exceeds {max_bytes} bytes: {path}")
         filesystem_type = _filesystem_type(path_fd)
         if filesystem_type not in _LOCAL_CONFIG_FILESYSTEM_TYPES:
             raise ConfigError(f"{label} is not on a trusted local filesystem: {path}")
 
         read_fd = os.open(f"/proc/self/fd/{path_fd}", os.O_RDONLY | os.O_CLOEXEC)
         with os.fdopen(read_fd, "rb") as handle:
-            content = handle.read(_MAX_CONFIG_BYTES + 1)
+            content = handle.read(max_bytes + 1)
             after = os.fstat(handle.fileno())
-        if len(content) > _MAX_CONFIG_BYTES:
-            raise ConfigError(f"{label} exceeds {_MAX_CONFIG_BYTES} bytes: {path}")
+        if len(content) > max_bytes:
+            raise ConfigError(f"{label} exceeds {max_bytes} bytes: {path}")
         identity_before = (
             before.st_dev,
             before.st_ino,
@@ -646,6 +683,53 @@ def _parse_motors(value: Any) -> tuple[MotorConfig, ...]:
     if {motor.send_id for motor in motors} & {motor.receive_id for motor in motors}:
         raise ConfigError("motor send and receive id spaces must not overlap")
     return tuple(motors)
+
+
+def _sha256(value: Any, label: str) -> str:
+    result = _text(value, label)
+    if len(result) != 64 or any(c not in "0123456789abcdef" for c in result):
+        raise ConfigError(f"{label} must be a lowercase SHA256 digest")
+    return result
+
+
+def _parse_follower_feedback(value: Any) -> FollowerFeedbackConfig:
+    raw = _mapping(value, "follower_feedback")
+    _exact_keys(raw, {"source_config_sha256", *SIDES}, "follower_feedback")
+    sides = {}
+    for side in SIDES:
+        records = []
+        for item in _list(raw[side], f"follower_feedback.{side}"):
+            label = f"follower_feedback.{side}[{len(records)}]"
+            record = _mapping(item, label)
+            _exact_keys(record, set(FeedbackRangeConfig.__dataclass_fields__), label)
+            ranges = {
+                key: _positive_number(record[key], f"{label}.{key}")
+                for key in ("position_max_rad", "velocity_max_rad_s", "torque_max_nm")
+            }
+            # Native telemetry stores float32; reject overflow and underflow.
+            if any(not 2**-149 <= number <= (2 - 2**-23) * 2**127 for number in ranges.values()):
+                raise ConfigError(f"{label} ranges must be representable as positive float32")
+            versions = {
+                key: _integer(record[key], f"{label}.{key}", minimum=0, maximum=0xFFFFFFFF)
+                for key in ("hardware_version", "firmware_version", "sub_version")
+            }
+            records.append(
+                FeedbackRangeConfig(
+                    name=_text(record["name"], f"{label}.name"),
+                    **ranges,
+                    **versions,
+                    parameter_sha256=_sha256(
+                        record["parameter_sha256"], f"{label}.parameter_sha256"
+                    ),
+                )
+            )
+        if tuple(record.name for record in records) != MOTOR_NAMES:
+            raise ConfigError(f"follower_feedback.{side} requires exact eight-motor order")
+        sides[side] = tuple(records)
+    return FollowerFeedbackConfig(
+        source_config_sha256=_sha256(raw["source_config_sha256"], "feedback source config"),
+        **sides,
+    )
 
 
 def _parse_control(value: Any, motor_count: int) -> Mapping[str, ControlProfile]:
@@ -1077,6 +1161,7 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
         config.robot_id,
         config.topology_id,
         config.position_unit,
+        config.follower_feedback,
         (
             config.safety.command_ready,
             config.safety.production_source_available,

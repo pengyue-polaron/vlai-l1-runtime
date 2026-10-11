@@ -41,6 +41,8 @@ _REQUIRED_CAN_PROBE_SYMBOLS = (
     "xarm_sdk_create",
     "xarm_sdk_destroy",
     "xarm_sdk_get_last_error",
+    "xarm_sdk_get_arm_joint_states",
+    "xarm_sdk_get_gripper_state",
     "xarm_sdk_init_arm_motors",
     "xarm_sdk_init_gripper_motor",
     "xarm_sdk_recv_all",

@@ -22,28 +22,28 @@ tx_queue_length = 1000
 [[can.endpoints]]
 id = "leader_right"
 interface = "can0"
-parentdev = "1-3.1:1.0"
+parentdev = "1-3.1.4:1.0"
 side = "right"
 role = "leader"
 
 [[can.endpoints]]
 id = "leader_left"
 interface = "can1"
-parentdev = "1-3.2:1.0"
+parentdev = "1-3.1.1:1.0"
 side = "left"
 role = "leader"
 
 [[can.endpoints]]
 id = "follower_right"
 interface = "can2"
-parentdev = "1-3.3:1.0"
+parentdev = "1-3.1.2:1.0"
 side = "right"
 role = "follower"
 
 [[can.endpoints]]
 id = "follower_left"
 interface = "can3"
-parentdev = "1-3.4:1.0"
+parentdev = "1-3.1.3:1.0"
 side = "left"
 role = "follower"
 
@@ -211,3 +211,168 @@ can_setup_service = "xarm-can-rename.service"
 cpu_performance_service = "xarm-cpu-performance.service"
 left_teleop_service = "xarm-teleop-left.service"
 right_teleop_service = "xarm-teleop-right.service"
+
+# Motor-reported ranges from the 2026-10-09 motion-free survey.
+# Diagnostic decoding only; not torque calibration or online FT readiness.
+[follower_feedback]
+source_config_sha256 = "0ae3c91d81a7926db58e3a0b9517c6daccfa2e4f579908c119fad3bfb7b0b12d"
+
+[[follower_feedback.left]]
+name = "joint_1"
+position_max_rad = 12.5
+velocity_max_rad_s = 45.0
+torque_max_nm = 54.0
+hardware_version = 0
+firmware_version = 925971510
+sub_version = 52
+parameter_sha256 = "a7e4f16ea1934f99e66fb2bd18eaf7793422132df5c637f6b0253f3c167ba3c4"
+
+[[follower_feedback.left]]
+name = "joint_2"
+position_max_rad = 12.5
+velocity_max_rad_s = 45.0
+torque_max_nm = 54.0
+hardware_version = 0
+firmware_version = 925971510
+sub_version = 52
+parameter_sha256 = "741b2cdb4b47dc48d5adeb02081c0134ddfca55ab1f3b85e3c2e621863542434"
+
+[[follower_feedback.left]]
+name = "joint_3"
+position_max_rad = 12.5
+velocity_max_rad_s = 10.0
+torque_max_nm = 28.0
+hardware_version = 0
+firmware_version = 925970741
+sub_version = 53
+parameter_sha256 = "e7e0ad9cf31b3ffd18ea1b70c2d19978279b67b06d4cafaa6150bb6cedb0ad79"
+
+[[follower_feedback.left]]
+name = "joint_4"
+position_max_rad = 12.5
+velocity_max_rad_s = 10.0
+torque_max_nm = 28.0
+hardware_version = 0
+firmware_version = 959525173
+sub_version = 53
+parameter_sha256 = "39f2a984f682b26528d4414007875883c6aded22ca3f1666307b066cc702c90f"
+
+[[follower_feedback.left]]
+name = "joint_5"
+position_max_rad = 12.5
+velocity_max_rad_s = 30.0
+torque_max_nm = 10.0
+hardware_version = 0
+firmware_version = 925970485
+sub_version = 52
+parameter_sha256 = "aab8cc470597cc1e751c0404d1a4b9e65d2d6789e12dc51718b7d2fc3e243dff"
+
+[[follower_feedback.left]]
+name = "joint_6"
+position_max_rad = 12.5
+velocity_max_rad_s = 30.0
+torque_max_nm = 10.0
+hardware_version = 0
+firmware_version = 925970485
+sub_version = 52
+parameter_sha256 = "13fffe86ed24c4871878b248ae5eab44e86cc61b8ac6b96d0949e0fc2566806c"
+
+[[follower_feedback.left]]
+name = "joint_7"
+position_max_rad = 12.5
+velocity_max_rad_s = 30.0
+torque_max_nm = 10.0
+hardware_version = 0
+firmware_version = 925970485
+sub_version = 52
+parameter_sha256 = "660abedfcd0b8553b3b6062643b2d4a1e4ea405262ca19dfcf9bcc3993c44b2b"
+
+[[follower_feedback.left]]
+name = "gripper"
+position_max_rad = 12.5
+velocity_max_rad_s = 30.0
+torque_max_nm = 10.0
+hardware_version = 0
+firmware_version = 925970485
+sub_version = 52
+parameter_sha256 = "c9510debd8353a75d892b2b6b1a0c59d2e5486f5c6b083522d9e4cff1f5c6cfd"
+
+[[follower_feedback.right]]
+name = "joint_1"
+position_max_rad = 12.5
+velocity_max_rad_s = 45.0
+torque_max_nm = 54.0
+hardware_version = 0
+firmware_version = 925971510
+sub_version = 52
+parameter_sha256 = "af277b288ad213743d7e03a1331450142deaeb277a91b927eaa5467671d44d39"
+
+[[follower_feedback.right]]
+name = "joint_2"
+position_max_rad = 12.5
+velocity_max_rad_s = 45.0
+torque_max_nm = 54.0
+hardware_version = 0
+firmware_version = 925971510
+sub_version = 52
+parameter_sha256 = "245b15eb230f24bde4c205e15521216ae19b4886e5625ca96bbacbfd31699cc8"
+
+[[follower_feedback.right]]
+name = "joint_3"
+position_max_rad = 12.5
+velocity_max_rad_s = 10.0
+torque_max_nm = 28.0
+hardware_version = 0
+firmware_version = 925970741
+sub_version = 53
+parameter_sha256 = "61bdfb488bd7c9d7320d9b4c1dc9ef839d863b29ab68feb8d8c67ec204de9390"
+
+[[follower_feedback.right]]
+name = "joint_4"
+position_max_rad = 12.5
+velocity_max_rad_s = 10.0
+torque_max_nm = 28.0
+hardware_version = 0
+firmware_version = 959525173
+sub_version = 53
+parameter_sha256 = "0bd907bd4bd8c356afa0b6c335412a577a262555962ad20f90c1a2b863c1936d"
+
+[[follower_feedback.right]]
+name = "joint_5"
+position_max_rad = 12.5
+velocity_max_rad_s = 30.0
+torque_max_nm = 10.0
+hardware_version = 0
+firmware_version = 925970485
+sub_version = 52
+parameter_sha256 = "dd53fbcb81c74e1b152cbf46149e923d40032b39d77491a45636f7cf7a0e4ecb"
+
+[[follower_feedback.right]]
+name = "joint_6"
+position_max_rad = 12.5
+velocity_max_rad_s = 30.0
+torque_max_nm = 10.0
+hardware_version = 0
+firmware_version = 925970485
+sub_version = 52
+parameter_sha256 = "fcd138cb2accd9c5ee672747ab60cea338e8fb2475efbf88f45c3dda586eb447"
+
+[[follower_feedback.right]]
+name = "joint_7"
+position_max_rad = 12.5
+velocity_max_rad_s = 30.0
+torque_max_nm = 10.0
+hardware_version = 0
+firmware_version = 925970485
+sub_version = 52
+parameter_sha256 = "9b6e02bf7407d8cdce9ea836676e1325528d0affe533f50db4a41287fc2ebeab"
+
+[[follower_feedback.right]]
+name = "gripper"
+position_max_rad = 12.5
+velocity_max_rad_s = 30.0
+torque_max_nm = 10.0
+hardware_version = 0
+firmware_version = 925970485
+sub_version = 52
+parameter_sha256 = "9ce726e35167d5cd3c699d503cff0e48448cdb7b262e4e84ad71c2aaee5cb703"

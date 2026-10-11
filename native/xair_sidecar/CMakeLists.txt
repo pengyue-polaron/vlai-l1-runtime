@@ -7,12 +7,28 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(VLAI_L1_SAFETY_ONLY "Build only the hardware-free runtime safety tests" OFF)
 
+add_library(vlai_l1_motor_feedback STATIC motor_feedback.cpp feedback_wire.cpp feedback_log_buffer.cpp)
+target_compile_options(vlai_l1_motor_feedback PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
 add_library(vlai_l1_runtime_safety STATIC runtime_safety.cpp)
 target_compile_options(vlai_l1_runtime_safety PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_link_libraries(vlai_l1_runtime_safety PUBLIC dl pthread)
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(vlai_l1_automatic_core_test automatic_core_test.cpp)
+  target_compile_options(vlai_l1_automatic_core_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME vlai_l1_automatic_core COMMAND vlai_l1_automatic_core_test)
+  add_executable(vlai_l1_feedback_log_buffer_test feedback_log_buffer_test.cpp)
+  target_compile_options(vlai_l1_feedback_log_buffer_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  target_link_libraries(vlai_l1_feedback_log_buffer_test PRIVATE vlai_l1_motor_feedback)
+  add_test(NAME vlai_l1_feedback_log_buffer COMMAND vlai_l1_feedback_log_buffer_test)
+
+  add_executable(vlai_l1_motor_feedback_test motor_feedback_test.cpp)
+  target_compile_options(vlai_l1_motor_feedback_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  target_link_libraries(vlai_l1_motor_feedback_test PRIVATE vlai_l1_motor_feedback)
+  add_test(NAME vlai_l1_motor_feedback COMMAND vlai_l1_motor_feedback_test)
+
   add_executable(vlai_l1_runtime_safety_test runtime_safety_test.cpp)
   target_compile_options(vlai_l1_runtime_safety_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
   target_link_libraries(vlai_l1_runtime_safety_test PRIVATE vlai_l1_runtime_safety)
@@ -48,6 +64,13 @@ set_target_properties(xair_teleop PROPERTIES IMPORTED_LOCATION "${XAIR_TELEOP_LI
 add_library(xair_can SHARED IMPORTED)
 set_target_properties(xair_can PROPERTIES IMPORTED_LOCATION "${XAIR_CAN_LIB}")
 
+add_executable(vlai_l1_automatic_follower automatic_main.cpp passive_feedback_log.cpp)
+target_compile_options(vlai_l1_automatic_follower PRIVATE -Wall -Wextra -Wpedantic -Werror)
+target_include_directories(vlai_l1_automatic_follower PRIVATE "${XAIR_CAN_ROOT}/include")
+target_link_libraries(vlai_l1_automatic_follower PRIVATE vlai_l1_runtime_safety vlai_l1_motor_feedback xair_can)
+set_target_properties(vlai_l1_automatic_follower PROPERTIES
+  BUILD_RPATH "${CMAKE_CURRENT_BINARY_DIR};${XAIR_CAN_ROOT}/lib/${CMAKE_SYSTEM_PROCESSOR}")
+
 # The published library declares SONAME libxarm_can_sdk.so.1 but its
 # architecture directory contains only libxarm_can_sdk.so. Keep the pinned
 # checkout immutable and satisfy the loader from this disposable build tree.
@@ -60,11 +83,11 @@ if(NOT XAIR_CAN_LINK_RESULT EQUAL 0)
   message(FATAL_ERROR "Could not stage libxarm_can_sdk.so.1 in the build tree")
 endif()
 
-add_executable(vlai_l1_xair_sidecar main.cpp)
+add_executable(vlai_l1_xair_sidecar main.cpp passive_feedback_log.cpp)
 target_compile_options(vlai_l1_xair_sidecar PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_include_directories(vlai_l1_xair_sidecar PRIVATE "${XAIR_TELEOP_ROOT}/include")
 target_link_options(vlai_l1_xair_sidecar PRIVATE -Wl,--no-as-needed)
-target_link_libraries(vlai_l1_xair_sidecar PRIVATE vlai_l1_runtime_safety xair_teleop xair_can)
+target_link_libraries(vlai_l1_xair_sidecar PRIVATE vlai_l1_runtime_safety vlai_l1_motor_feedback xair_teleop xair_can)
 set_target_properties(vlai_l1_xair_sidecar PROPERTIES
   ENABLE_EXPORTS ON
   BUILD_RPATH "${CMAKE_CURRENT_BINARY_DIR};${XAIR_TELEOP_ROOT}/prebuilt/xarm_teleop/lib/${CMAKE_SYSTEM_PROCESSOR};${XAIR_CAN_ROOT}/lib/${CMAKE_SYSTEM_PROCESSOR}"

@@ -171,7 +171,19 @@ def test_hardware_cli_selects_the_right_only_contract(monkeypatch) -> None:
 def test_right_only_cli_selects_the_existing_side_with_isolation(monkeypatch) -> None:
     called = []
 
-    def run(config, side, *, managed_startup_gate, isolated_side):
+    def run(
+        config,
+        side,
+        *,
+        managed_startup_gate,
+        isolated_side,
+        feedback_log,
+        feedback_max_frames,
+        feedback_retention,
+    ):
+        assert feedback_log is None
+        assert feedback_max_frames is None
+        assert feedback_retention == "full"
         called.append((config.path, side, managed_startup_gate, isolated_side))
         return 0
 

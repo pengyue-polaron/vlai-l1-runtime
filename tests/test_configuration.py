@@ -22,10 +22,10 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         "can3",
     ]
     assert [endpoint.parentdev for endpoint in config.can.endpoints] == [
-        "1-3.1:1.0",
-        "1-3.2:1.0",
-        "1-3.3:1.0",
-        "1-3.4:1.0",
+        "1-3.1.4:1.0",
+        "1-3.1.1:1.0",
+        "1-3.1.2:1.0",
+        "1-3.1.3:1.0",
     ]
     assert config.can.tx_queue_length == 1000
     assert tuple(motor.name for motor in config.motors) == MOTOR_NAMES
@@ -221,7 +221,7 @@ def test_system_config_rejects_special_files_before_opening(tmp_path: Path) -> N
 
 
 def test_tracked_config_is_the_physical_identity_authority(tmp_path: Path) -> None:
-    content = SYSTEM_CONFIG.read_text().replace("1-3.1:1.0", "1-3.9:1.0", 1)
+    content = SYSTEM_CONFIG.read_text().replace("1-3.1.4:1.0", "1-3.9:1.0", 1)
     candidate = tmp_path / "system.toml"
     candidate.write_text(content)
 

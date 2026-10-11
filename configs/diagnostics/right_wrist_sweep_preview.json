@@ -1,0 +1,27 @@
+{
+  "kind": "offline_only_wrist_sweep_preview",
+  "side": "right",
+  "active_motor": "joint_7",
+  "amplitude_deg": 2.0,
+  "transition_seconds": 4.0,
+  "hold_seconds": 5.0,
+  "cycles": 2,
+  "preview_sample_period_seconds": 0.01,
+  "maximum_speed_deg_s": 1.0,
+  "maximum_acceleration_deg_s2": 0.8,
+  "rehearsal_tracking_error_deg": {
+    "right_joint_1.pos": 0.5,
+    "right_joint_2.pos": 0.5,
+    "right_joint_3.pos": 0.5,
+    "right_joint_4.pos": 0.5,
+    "right_joint_5.pos": 0.5,
+    "right_joint_6.pos": 0.5,
+    "right_joint_7.pos": 0.5,
+    "right_gripper.pos": 0.5
+  },
+  "rehearsal_tracking_persistence_seconds": 0.1,
+  "reference_recording": "right_unloaded_wrist_loop_20261011",
+  "reference_source": "running_check.json latest follower_deg",
+  "reference_is_live_feedback": false,
+  "description": "Candidate only: reference, positive excursion, reference, negative excursion, reference. Smooth quintic transitions; other joints and gripper fixed. Not motor operating limits, calibration, collision clearance, or authorization to execute."
+}

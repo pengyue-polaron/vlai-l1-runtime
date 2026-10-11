@@ -9,15 +9,17 @@ import socket
 import struct
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import TracebackType
 from typing import Any
 
 from ..configuration import MOTOR_TYPE_CODES, MotorConfig, SystemConfig
+from ..feedback import MotorFeedback, RawMotorFrame
 
 _CAN_EFF_FLAG = 0x80000000
 _CAN_RTR_FLAG = 0x40000000
+_CAN_ERR_FLAG = 0x20000000
 _CAN_SFF_MASK = 0x000007FF
 _CAN_FILTER = struct.Struct("=II")
 _CAN_ID = struct.Struct("=I")
@@ -38,6 +40,10 @@ class MotorFeedbackProbeError(RuntimeError):
     """A CAN endpoint did not prove complete motion-free motor feedback."""
 
 
+class _JointState(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_float) for name in ("pos", "vel", "torque")]
+
+
 class _CanSdkSession:
     def __init__(
         self,
@@ -48,6 +54,7 @@ class _CanSdkSession:
         motors: tuple[MotorConfig, ...],
     ) -> None:
         self._library = ctypes.CDLL(str(library_path))
+        self._motor_names = tuple(motor.name for motor in motors)
         self._configure_abi()
         self._handle = ctypes.c_void_p()
         self._check(
@@ -136,6 +143,42 @@ class _CanSdkSession:
             "receive",
         )
 
+    def read_feedback(self) -> MotorFeedback:
+        """Read this owner's existing handle; never refresh or enable motors here."""
+
+        library = self._library
+        library.xarm_sdk_get_arm_joint_states.argtypes = (
+            ctypes.c_void_p,
+            ctypes.POINTER(_JointState),
+            ctypes.c_int,
+        )
+        library.xarm_sdk_get_arm_joint_states.restype = ctypes.c_int
+        library.xarm_sdk_get_gripper_state.argtypes = (
+            ctypes.c_void_p,
+            ctypes.POINTER(_JointState),
+        )
+        library.xarm_sdk_get_gripper_state.restype = ctypes.c_int
+        # Responses can arrive after refresh()'s first receive; drain without TX.
+        self._check(library.xarm_sdk_recv_all(self._handle, _RECEIVE_TIMEOUT_US), "receive")
+        arm = (_JointState * (len(self._motor_names) - 1))()
+        gripper = _JointState()
+        self._check(
+            library.xarm_sdk_get_arm_joint_states(self._handle, arm, len(arm)),
+            "read arm feedback",
+        )
+        self._check(
+            library.xarm_sdk_get_gripper_state(self._handle, ctypes.byref(gripper)),
+            "read gripper feedback",
+        )
+        states = (*arm, gripper)
+        return MotorFeedback(
+            self._motor_names,
+            time.monotonic_ns(),
+            tuple(state.pos for state in states),
+            tuple(state.vel for state in states),
+            tuple(state.torque for state in states),
+        )
+
     def close(self) -> None:
         if not self._handle:
             return
@@ -170,6 +213,10 @@ class _SocketCanProbeBackend:
         motors: tuple[MotorConfig, ...],
     ) -> None:
         self._expected = frozenset(motor.receive_id for motor in motors)
+        self._motors = motors
+        self._raw_frames: dict[int, RawMotorFrame] = {}
+        self._raw_counts: dict[int, int] = {}
+        self._names_by_id = {motor.receive_id: motor.name for motor in motors}
         self._socket = socket.socket(socket.AF_CAN, socket.SOCK_RAW, socket.CAN_RAW)
         try:
             self._socket.setsockopt(socket.SOL_CAN_RAW, socket.CAN_RAW_FD_FRAMES, 1)
@@ -195,6 +242,8 @@ class _SocketCanProbeBackend:
 
     def sample_round(self, period_s: float) -> frozenset[int]:
         self._drain()
+        self._raw_frames.clear()
+        self._raw_counts.clear()
         self._session.refresh()
         deadline = time.monotonic() + period_s
         observed: set[int] = set()
@@ -222,10 +271,22 @@ class _SocketCanProbeBackend:
                     f"x_air CAN probe received a malformed {len(payload)}-byte frame"
                 )
             can_id = _CAN_ID.unpack_from(payload)[0]
-            if can_id & (_CAN_EFF_FLAG | _CAN_RTR_FLAG):
+            if can_id & (_CAN_EFF_FLAG | _CAN_RTR_FLAG | _CAN_ERR_FLAG):
                 continue
             response_id = can_id & _CAN_SFF_MASK
             if response_id in self._expected:
+                if payload[4] != 8:
+                    raise MotorFeedbackProbeError(
+                        f"motor 0x{response_id:03X} feedback must have eight data bytes"
+                    )
+                self._raw_frames[response_id] = RawMotorFrame(
+                    self._names_by_id[response_id],
+                    response_id,
+                    time.monotonic_ns(),
+                    payload[8:16].hex(),
+                    len(payload) == _CAN_FD_MTU,
+                )
+                self._raw_counts[response_id] = self._raw_counts.get(response_id, 0) + 1
                 observed.add(response_id)
         return observed
 
@@ -234,6 +295,16 @@ class _SocketCanProbeBackend:
             self._session.close()
         finally:
             self._socket.close()
+
+    def read_feedback(self) -> MotorFeedback:
+        if set(self._raw_frames) != self._expected:
+            raise MotorFeedbackProbeError("raw feedback round is incomplete")
+        if any(count != 1 for count in self._raw_counts.values()):
+            raise MotorFeedbackProbeError("raw/SDK pairing is ambiguous: duplicate motor responses")
+        return replace(
+            self._session.read_feedback(),
+            raw_frames=tuple(self._raw_frames[motor.receive_id] for motor in self._motors),
+        )
 
     def __enter__(self) -> _SocketCanProbeBackend:
         return self
@@ -256,6 +327,8 @@ def probe_motor_feedback(
     interface: str,
     can_library: Path,
     *,
+    on_feedback: Callable[[int, MotorFeedback], None] | None = None,
+    check_health: Callable[[], None] | None = None,
     _backend_factory: Callable[..., Any] | None = None,
 ) -> MotorFeedbackProbeResult:
     """Require repeated feedback from every configured motor without enabling it."""
@@ -275,8 +348,14 @@ def probe_motor_feedback(
         can_fd=config.can.fd,
         motors=config.motors,
     ) as backend:
+        previous_timestamp = 0
+        previous_raw_timestamps: dict[str, int] = {}
         for round_index in range(1, rounds + 1):
+            if check_health is not None:
+                check_health()
             observed = backend.sample_round(period_s)
+            if check_health is not None:
+                check_health()
             missing = expected - observed
             unexpected = observed - expected
             if unexpected:
@@ -290,4 +369,20 @@ def probe_motor_feedback(
                     f"{interface} motor probe round {round_index}/{rounds} "
                     f"missed response ids: {rendered}"
                 )
+            if on_feedback is not None:
+                feedback = backend.read_feedback()
+                if not isinstance(feedback, MotorFeedback):
+                    raise MotorFeedbackProbeError("probe backend returned invalid feedback")
+                if feedback.monotonic_ns <= previous_timestamp:
+                    raise MotorFeedbackProbeError("feedback host timestamp did not increase")
+                previous_timestamp = feedback.monotonic_ns
+                for frame in feedback.raw_frames or ():
+                    if frame.host_receive_monotonic_ns <= previous_raw_timestamps.get(
+                        frame.name, 0
+                    ):
+                        raise MotorFeedbackProbeError(
+                            "raw feedback host timestamp did not increase"
+                        )
+                    previous_raw_timestamps[frame.name] = frame.host_receive_monotonic_ns
+                on_feedback(round_index, feedback)
     return MotorFeedbackProbeResult(interface, rounds, tuple(sorted(expected)))

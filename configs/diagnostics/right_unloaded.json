@@ -1,0 +1,88 @@
+{
+  "fit_seconds": [
+    2,
+    4
+  ],
+  "validation_seconds": [
+    6,
+    10
+  ],
+  "minimum_fit_samples": 100,
+  "minimum_validation_samples": 100,
+  "maximum_pose_difference_rad": 0.002,
+  "static": {
+    "minimum_stationary_ns": 500000000,
+    "maximum_sample_gap_ns": 200000000,
+    "maximum_motor_skew_ns": 5000000,
+    "maximum_velocity_rad_s": [
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05
+    ],
+    "maximum_position_span_rad": [
+      0.002,
+      0.002,
+      0.002,
+      0.002,
+      0.002,
+      0.002,
+      0.002,
+      0.002
+    ],
+    "allowed_raw_statuses": [
+      [
+        1
+      ],
+      [
+        1
+      ],
+      [
+        1
+      ],
+      [
+        1
+      ],
+      [
+        1
+      ],
+      [
+        1
+      ],
+      [
+        1
+      ],
+      [
+        1
+      ]
+    ],
+    "characteristic_length_m": 0.2,
+    "damping_m": 0,
+    "minimum_singular_value_m": 0.000001,
+    "maximum_condition_number": 100,
+    "maximum_residual_nm": 0.1,
+    "unmodeled_torque_bound_nm": [
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1,
+      0.1
+    ],
+    "maximum_force_error_n": [
+      5,
+      5,
+      5
+    ],
+    "maximum_moment_error_nm": [
+      0.5,
+      0.5,
+      0.5
+    ]
+  }
+}

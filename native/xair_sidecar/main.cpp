@@ -1,6 +1,7 @@
 #include <xarm_teleop_sdk.h>
 
 #include "runtime_safety.hpp"
+#include "passive_feedback_log.hpp"
 
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -22,6 +23,8 @@
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <memory>
+#include <sstream>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -63,6 +66,10 @@ struct Options {
     int control_owner_uid = 0;
     int control_owner_gid = 0;
     vlai_l1::JointSafetyLimits joint_safety;
+    std::filesystem::path feedback_log;
+    std::array<std::uint32_t, 8> feedback_response_ids{};
+    std::size_t feedback_max_frames = 0;
+    bool feedback_retain_latest = false;
 };
 
 struct StateSnapshot {
@@ -414,7 +421,7 @@ std::string usage(const char* program) {
 }
 
 Options parse_options(int argc, char** argv) {
-    if (argc != 39) {
+    if (argc != 39 && argc != 45 && argc != 47) {
         throw std::invalid_argument(usage(argv[0]));
     }
     std::unordered_map<std::string, std::string> values;
@@ -465,6 +472,38 @@ Options parse_options(int argc, char** argv) {
     options.can_health_poll_ms = integer("--can-health-poll-ms");
     options.control_owner_uid = integer("--control-owner-uid");
     options.control_owner_gid = integer("--control-owner-gid");
+    if (argc == 45 || argc == 47) {
+        for (const char* key : {"--feedback-log", "--feedback-response-ids", "--feedback-max-frames"}) {
+            if (values.find(key) == values.end() || values.at(key).empty()) {
+                throw std::invalid_argument("incomplete passive feedback options");
+            }
+        }
+        options.feedback_log = values.at("--feedback-log");
+        const int capacity = integer("--feedback-max-frames");
+        if (capacity < 8 || capacity > 2'000'000) throw std::invalid_argument("invalid feedback capacity");
+        options.feedback_max_frames = static_cast<std::size_t>(capacity);
+        const auto& payload = values.at("--feedback-response-ids");
+        if (payload.back() == ',') throw std::invalid_argument("invalid feedback response ids");
+        std::istringstream input(payload);
+        std::string item;
+        std::size_t index = 0;
+        while (std::getline(input, item, ',')) {
+            std::size_t consumed = 0;
+            const auto id = std::stoul(item, &consumed);
+            if (index >= 8 || consumed != item.size() || id == 0 || id > 0x7ff) {
+                throw std::invalid_argument("invalid feedback response ids");
+            }
+            options.feedback_response_ids[index++] = static_cast<std::uint32_t>(id);
+        }
+        if (index != 8) throw std::invalid_argument("feedback requires eight response ids");
+        if (argc == 47) {
+            if (values.find("--feedback-retention") == values.end() ||
+                values.at("--feedback-retention") != "latest") {
+                throw std::invalid_argument("invalid feedback retention mode");
+            }
+            options.feedback_retain_latest = true;
+        }
+    }
     const auto vector = [&values](const char* key) {
         std::array<double, vlai_l1::kArmJointCount> result{};
         const auto& payload = values.at(key);
@@ -542,7 +581,7 @@ Options parse_options(int argc, char** argv) {
     return options;
 }
 
-int run(const Options& options) {
+int run(const Options& options, vlai_l1::PassiveFeedbackLog* feedback_log) {
     vlai_l1::configure_fifo_priority_cap(options.rt_priority);
     vlai_l1::set_and_require_all_threads_fifo(options.rt_priority, 1);
     DatagramPublisher publisher(options.state_socket, options.side, options.publish_hz);
@@ -571,6 +610,7 @@ int run(const Options& options) {
         std::cerr << "FAIL x_air callback: " << xarm_teleop_get_last_error() << '\n';
         return 1;
     }
+    if (feedback_log != nullptr) feedback_log->start(options.follower_can);
     if (xarm_teleop_start(handle.get()) != XARM_TELEOP_OK) {
         std::cerr << "FAIL x_air start: " << xarm_teleop_get_last_error() << '\n';
         return 1;
@@ -588,6 +628,11 @@ int run(const Options& options) {
     const auto can_health_period = std::chrono::milliseconds(options.can_health_poll_ms);
     auto next_runtime_health_check = started_at;
     while (!g_stop_requested.load(std::memory_order_relaxed)) {
+        if (feedback_log != nullptr && feedback_log->faulted()) {
+            std::cerr << "FAIL passive Follower feedback capture\n";
+            result = 1;
+            break;
+        }
         const auto fault = slot.fault();
         if (fault != CallbackFault::kNone) {
             std::cerr << "FAIL x_air state callback fault: " << static_cast<int>(fault) << '\n';
@@ -686,6 +731,7 @@ int run(const Options& options) {
         }
         std::this_thread::sleep_for(kHealthPoll);
     }
+    if (feedback_log != nullptr) feedback_log->stop_capture();
     if (xarm_teleop_stop(handle.get()) != XARM_TELEOP_OK) {
         std::cerr << "FAIL x_air stop: " << xarm_teleop_get_last_error() << '\n';
         result = 1;
@@ -703,7 +749,27 @@ int main(int argc, char** argv) {
     std::signal(SIGINT, on_signal);
     std::signal(SIGTERM, on_signal);
     try {
-        return run(parse_options(argc, argv));
+        const auto options = parse_options(argc, argv);
+        std::unique_ptr<vlai_l1::PassiveFeedbackLog> feedback_log;
+        if (!options.feedback_log.empty()) {
+            feedback_log = std::make_unique<vlai_l1::PassiveFeedbackLog>(
+                options.feedback_log, options.feedback_response_ids, options.feedback_max_frames,
+                static_cast<std::uint64_t>(options.state_timeout_ms)*1'000'000,
+                options.can_health_poll_ms, options.control_owner_uid, options.control_owner_gid,
+                options.feedback_retain_latest);
+        }
+        int result;
+        try {
+            result = run(options, feedback_log.get());
+        } catch (...) {
+            if (feedback_log != nullptr) {
+                try { feedback_log->finish(false); } catch (...) {}
+            }
+            throw;
+        }
+        // run() has released the motor handles before diagnostic filesystem I/O.
+        if (feedback_log != nullptr) feedback_log->finish(result == 0);
+        return result;
     } catch (const std::exception& error) {
         std::cerr << "FAIL " << error.what() << '\n';
         return 2;

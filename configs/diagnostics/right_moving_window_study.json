@@ -1,0 +1,12 @@
+{
+  "window_seconds": 1.0,
+  "minimum_window_samples": 80,
+  "minimum_displacement_deg": 0.05,
+  "maximum_total_variation_ratio": 2.0,
+  "maximum_other_joint_span_deg": 0.05,
+  "minimum_training_windows": 6,
+  "minimum_windows_per_direction": 2,
+  "maximum_feature_condition": 100.0,
+  "position_support_margin_deg": 0.05,
+  "maximum_other_joint_delta_deg": 0.1
+}

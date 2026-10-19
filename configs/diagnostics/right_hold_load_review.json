@@ -1,0 +1,5 @@
+{
+  "minimum_samples": 400,
+  "minimum_seconds": 5.0,
+  "maximum_window_span_deg": 0.1
+}

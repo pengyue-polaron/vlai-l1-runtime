@@ -1,0 +1,213 @@
+{
+  "kind": "isolated_right_follower_waypoints_v1",
+  "side": "right",
+  "role": "follower",
+  "active_motor": "arm",
+  "amplitude_deg": 16.0,
+  "transition_seconds": 40.0,
+  "hold_seconds": 5.0,
+  "cycles": 1,
+  "hold_test_seconds": 5.0,
+  "maximum_amplitude_deg": 16.0,
+  "maximum_reference_speed_deg_s": 1.0,
+  "maximum_reference_acceleration_deg_s2": 0.8,
+  "maximum_observed_speed_deg_s": [
+    45,
+    45,
+    45,
+    45,
+    45,
+    45,
+    45,
+    15
+  ],
+  "maximum_tracking_error_deg": [
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2
+  ],
+  "tracking_persistence_seconds": 0.1,
+  "maximum_motor_torque_nm": [
+    12,
+    12,
+    8,
+    8,
+    3,
+    3,
+    3,
+    3
+  ],
+  "maximum_temperature_c": 70,
+  "maximum_relative_excursion_deg": [
+    3,
+    12,
+    12,
+    18,
+    12,
+    12,
+    12,
+    3
+  ],
+  "enabled_raw_status": 1,
+  "disabled_raw_status": 0,
+  "raw_log_capacity": 600000,
+  "shutdown_confirmation_seconds": 2.0,
+  "description": "Unloaded right-Follower balanced forward/reverse training acquisition. Concatenate the two commissioned paths under one fresh reference without disable at the middle zero waypoint. 635-second path with identical transitions, holds, gains, guards and offset envelope; fixed J1 and gripper. Five-second hold must pass first. Raw motor coordinates, not calibrated FT. This capture is training data; future frozen evaluation must use untouched data. Stop on first fault; no automatic retry.",
+  "waypoints_deg": [
+    {
+      "joint_1": 0,
+      "joint_2": 0,
+      "joint_3": 0,
+      "joint_4": 0,
+      "joint_5": 0,
+      "joint_6": 0,
+      "joint_7": 0,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 10,
+      "joint_3": -10,
+      "joint_4": 16,
+      "joint_5": -10,
+      "joint_6": 10,
+      "joint_7": 10,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 10,
+      "joint_3": -10,
+      "joint_4": 0,
+      "joint_5": 10,
+      "joint_6": -10,
+      "joint_7": -10,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 0,
+      "joint_3": -10,
+      "joint_4": 0,
+      "joint_5": -10,
+      "joint_6": 10,
+      "joint_7": -10,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 10,
+      "joint_3": 10,
+      "joint_4": 0,
+      "joint_5": -10,
+      "joint_6": -10,
+      "joint_7": -10,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 0,
+      "joint_3": -10,
+      "joint_4": 16,
+      "joint_5": -10,
+      "joint_6": -10,
+      "joint_7": -10,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 0,
+      "joint_3": 10,
+      "joint_4": 16,
+      "joint_5": 10,
+      "joint_6": 10,
+      "joint_7": -10,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 0,
+      "joint_3": 0,
+      "joint_4": 0,
+      "joint_5": 0,
+      "joint_6": 0,
+      "joint_7": 0,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 0,
+      "joint_3": 10,
+      "joint_4": 16,
+      "joint_5": 10,
+      "joint_6": 10,
+      "joint_7": -10,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 0,
+      "joint_3": -10,
+      "joint_4": 16,
+      "joint_5": -10,
+      "joint_6": -10,
+      "joint_7": -10,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 10,
+      "joint_3": 10,
+      "joint_4": 0,
+      "joint_5": -10,
+      "joint_6": -10,
+      "joint_7": -10,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 0,
+      "joint_3": -10,
+      "joint_4": 0,
+      "joint_5": -10,
+      "joint_6": 10,
+      "joint_7": -10,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 10,
+      "joint_3": -10,
+      "joint_4": 0,
+      "joint_5": 10,
+      "joint_6": -10,
+      "joint_7": -10,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 10,
+      "joint_3": -10,
+      "joint_4": 16,
+      "joint_5": -10,
+      "joint_6": 10,
+      "joint_7": 10,
+      "gripper": 0
+    },
+    {
+      "joint_1": 0,
+      "joint_2": 0,
+      "joint_3": 0,
+      "joint_4": 0,
+      "joint_5": 0,
+      "joint_6": 0,
+      "joint_7": 0,
+      "gripper": 0
+    }
+  ]
+}

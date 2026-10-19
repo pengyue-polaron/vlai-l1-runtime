@@ -1,0 +1,69 @@
+{
+  "kind": "isolated_right_follower_diagnostic_v1",
+  "side": "right",
+  "role": "follower",
+  "active_motor": "joint_4",
+  "amplitude_deg": 0.5,
+  "transition_seconds": 8.0,
+  "hold_seconds": 5.0,
+  "cycles": 2,
+  "hold_test_seconds": 600,
+  "manual_handling": {
+    "hard_speed_deg_s": [15, 15, 15, 15, 45, 45, 45, 15],
+    "speed_persistence_seconds": 0.1,
+    "settle_seconds": 2.0,
+    "settle_timeout_seconds": 20.0,
+    "settle_speed_deg_s": 5.0,
+    "settle_span_deg": 0.05
+  },
+  "maximum_amplitude_deg": 2.0,
+  "maximum_reference_speed_deg_s": 1.0,
+  "maximum_reference_acceleration_deg_s2": 0.8,
+  "maximum_observed_speed_deg_s": [
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15
+  ],
+  "maximum_tracking_error_deg": [
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    0.8,
+    2
+  ],
+  "tracking_persistence_seconds": 0.1,
+  "maximum_motor_torque_nm": [
+    12,
+    12,
+    8,
+    8,
+    3,
+    3,
+    3,
+    3
+  ],
+  "maximum_temperature_c": 70,
+  "maximum_relative_excursion_deg": [
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3
+  ],
+  "enabled_raw_status": 1,
+  "disabled_raw_status": 0,
+  "raw_log_capacity": 600000,
+  "shutdown_confirmation_seconds": 2.0,
+  "description": "Paired J4 +/-0.5-degree sweeps under one owner and reference; explicit manual wrist transient-speed envelope only in stationary waiting/settling. Hands-clear acknowledgement starts measured settling before each subsequent sweep. Two cycles per sweep, 600-second global cap, full raw retention. Bounds, excursion, effort, temperature, tracking, health and automatic-motion speed guards unchanged. New handling settings require live commissioning. Load labels require truthful operator context."
+}

@@ -16,10 +16,17 @@
 #include <thread>
 #include <vector>
 #include <cstring>
+#include <optional>
+#include <atomic>
 
 namespace {
 volatile std::sig_atomic_t stopped=0;
+volatile std::sig_atomic_t finish_requested=0;
+static_assert(std::atomic<bool>::is_always_lock_free);
+std::atomic<bool> advance_requested{false};
 void stop_handler(int) { stopped=1; }
+void finish_handler(int) { finish_requested=1; }
+void advance_handler(int) { advance_requested.store(true); }
 std::uint64_t now_ns() {
     timespec t{}; if (clock_gettime(CLOCK_MONOTONIC,&t)) throw std::runtime_error("clock failed");
     return static_cast<std::uint64_t>(t.tv_sec)*1'000'000'000+t.tv_nsec;
@@ -34,12 +41,13 @@ struct Input { std::string interface; vlai_l1::AutoSpec spec; };
 Input read_input(const char* path) {
     std::ifstream f(path); Input input; std::string magic; auto& s=input.spec;
     f>>magic>>input.interface;
-    if (magic!="VLAI_RIGHT_FOLLOWER_DIAGNOSTIC_V1" || input.interface.size()>=IFNAMSIZ)
+    const bool multi=magic=="VLAI_RIGHT_FOLLOWER_DIAGNOSTIC_V4";
+    if ((!multi && magic!="VLAI_RIGHT_FOLLOWER_DIAGNOSTIC_V3") || input.interface.size()>=IFNAMSIZ)
         throw std::runtime_error("invalid diagnostic input");
     f>>s.amplitude_deg>>s.transition_s>>s.hold_s>>s.hold_test_s>>s.maximum_amplitude_deg
       >>s.maximum_reference_speed>>s.maximum_reference_acceleration>>s.cycles>>s.rate_hz>>s.capacity
       >>s.enabled_status>>s.disabled_status>>s.temperature>>s.state_timeout_ns>>s.tracking_timeout_ns
-      >>s.shutdown_timeout_ns>>s.health_poll_ms>>s.priority;
+      >>s.shutdown_timeout_ns>>s.health_poll_ms>>s.priority>>s.active_motor;
     for (auto& m:s.motors) {
         unsigned slave=0;
         f>>m.feedback.name>>m.send_id>>m.feedback.response_id>>slave>>m.motor_type
@@ -47,6 +55,21 @@ Input read_input(const char* path) {
          >>m.kp>>m.kd>>m.min_deg>>m.max_deg>>m.tracking_deg>>m.speed_deg_s>>m.torque_nm>>m.excursion_deg;
         if (slave>15) throw std::runtime_error("invalid slave nibble");
         m.feedback.slave_id=static_cast<std::uint8_t>(slave);
+    }
+    unsigned handling=0;
+    f>>handling;
+    if(handling>1) throw std::runtime_error("invalid handling flag");
+    if(handling) {
+        s.handling.emplace(); auto& h=*s.handling;
+        f>>h.speed_persistence_ns>>h.settle_ns>>h.settle_timeout_ns>>h.settle_speed_deg_s>>h.settle_span_deg;
+        for(auto& speed:h.hard_speed_deg_s) f>>speed;
+    }
+    if(multi) {
+        unsigned count=0; f>>count;
+        if(!f || count<3 || count>64 || s.active_motor!=8)
+            throw std::runtime_error("invalid waypoint count/selection");
+        s.waypoints.resize(count);
+        for(auto& point:s.waypoints) for(auto& value:point) f>>value;
     }
     std::string extra;
     if (!f || (f>>extra)) throw std::runtime_error("truncated/trailing diagnostic input");
@@ -90,10 +113,12 @@ std::array<vlai_l1::DecodedFeedback,8> decode(vlai_l1::PassiveFeedbackLog& log,c
     }
     return values;
 }
-void output(const char* state, std::uint64_t stamp, double elapsed, const std::array<double,8>& q) {
+void output(const char* state, std::uint64_t stamp, double elapsed, const std::array<double,8>& q, const char* phase=nullptr) {
     std::cout<<"{\"state\":\""<<state<<"\",\"monotonic_ns\":"<<stamp<<",\"elapsed_seconds\":"<<elapsed<<",\"q_deg\":[";
     for (std::size_t i=0;i<8;++i) std::cout<<(i?",":"")<<std::setprecision(10)<<q[i];
-    std::cout<<"]}"<<std::endl;
+    std::cout<<"]";
+    if(phase) std::cout<<",\"phase\":\""<<phase<<"\"";
+    std::cout<<"}"<<std::endl;
 }
 void orphan_link_down(const std::string& interface) {
     if (getppid()!=1) return;
@@ -106,16 +131,25 @@ void orphan_link_down(const std::string& interface) {
 }
 int main(int argc,char** argv) {
     // Paths/mode are supplied by the exclusive guarded Python supervisor.
-    if(argc!=6) { std::cerr<<"usage: automatic <spec> <hold|sweep|disable> <raw.csv> <samples.csv> <owner-pid>\n"; return 2; }
+    if(argc!=6) { std::cerr<<"usage: automatic <spec> <hold|sweep|paired|disable> <raw.csv> <samples.csv> <owner-pid>\n"; return 2; }
     try {
         if(geteuid()!=0) throw std::runtime_error("root required");
         const std::string mode=argv[2];
-        if(mode!="hold" && mode!="sweep" && mode!="disable") throw std::runtime_error("invalid mode");
+        if(mode!="hold" && mode!="sweep" && mode!="paired" && mode!="disable") throw std::runtime_error("invalid mode");
         const auto owner=std::stoi(argv[5]);
         std::signal(SIGINT,stop_handler); std::signal(SIGTERM,stop_handler);
         std::signal(SIGHUP,stop_handler); std::signal(SIGPIPE,SIG_IGN);
+        std::signal(SIGUSR1,finish_handler);
+        std::signal(SIGUSR2,advance_handler);
         if(prctl(PR_SET_PDEATHSIG,SIGTERM)!=0 || getppid()!=owner) throw std::runtime_error("supervisor disappeared");
         const auto input=read_input(argv[1]); const auto& spec=input.spec;
+        std::optional<vlai_l1::PairedSweep> paired;
+        std::optional<vlai_l1::SettlingGate> settling;
+        if(spec.handling) {
+            if(mode!="paired" && mode!="disable") throw std::runtime_error("handling requires paired mode");
+            settling.emplace(*spec.handling);
+        }
+        if(mode=="paired") paired.emplace(spec);
         vlai_l1::configure_fifo_priority_cap(spec.priority);
         vlai_l1::CanHealthMonitor health({input.interface});
         Handle sdk; sdk.open(input);
@@ -124,9 +158,11 @@ int main(int argc,char** argv) {
             static_cast<int>(1000/spec.rate_hz),getuid(),getgid());
         log.start(input.interface);
         bool may_be_enabled=false, confirmed_disabled=false, success=false;
+        bool requested_completion=false;
+        double completion_elapsed=0;
         std::string error;
         std::vector<std::array<double,26>> samples;
-        samples.reserve(static_cast<std::size_t>(spec.duration(mode=="hold")*spec.rate_hz)+2);
+        samples.reserve(static_cast<std::size_t>(spec.duration(mode=="hold" || paired.has_value())*spec.rate_hz)+2);
         std::array<double,8> reference{};
         try {
             if(mode!="disable") {
@@ -158,14 +194,31 @@ int main(int argc,char** argv) {
                 const auto start=now_ns(); auto deadline=start; auto last_health=start; auto last_output=start;
                 const auto period=1'000'000'000ULL/spec.rate_hz;
                 output("running",start,0,reference);
+                if(paired) output("phase",start,0,reference,paired->name());
                 while(!stopped) {
                     const auto now=now_ns();
                     if(now>deadline+spec.state_timeout_ns) throw std::runtime_error("control deadline missed");
                     const double elapsed=static_cast<double>(now-start)/1e9;
-                    if(elapsed>=spec.duration(mode=="hold")) { success=true; break; }
-                    auto target=reference; target[6]+=spec.offset(elapsed,mode=="hold");
                     feedback=decode(log,spec);
-                    guard.check(now_ns(),feedback,target,true);
+                    if(paired) {
+                        const std::string old_phase=paired->name();
+                        const bool advance=advance_requested.exchange(false);
+                        const bool stable=paired->settling() && settling && settling->update(now,feedback);
+                        paired->step(elapsed,advance,stable);
+                        if(paired->name()!=old_phase) {
+                            if(settling) settling->reset();
+                            output("phase",now,elapsed,reference,paired->name());
+                        }
+                        if(paired->complete()) { success=true; completion_elapsed=elapsed; break; }
+                    } else if(elapsed>=spec.duration(mode=="hold") ||
+                       (mode=="hold" && finish_requested && elapsed>=spec.hold_s)) {
+                        success=true; completion_elapsed=elapsed;
+                        requested_completion=mode=="hold" && finish_requested && elapsed<spec.hold_test_s;
+                        break;
+                    }
+                    const auto target=spec.target(reference,paired ? paired->local(elapsed) : elapsed,
+                        paired ? paired->waiting() : mode=="hold");
+                    guard.check(now_ns(),feedback,target,true,paired && spec.handling && paired->waiting());
                     if(now-last_health>=spec.health_poll_ms*1'000'000ULL) { health.check(); last_health=now; }
                     sdk.send(spec,target);
                     std::array<double,26> row{}; row[0]=static_cast<double>(now); row[1]=elapsed;
@@ -175,7 +228,7 @@ int main(int argc,char** argv) {
                         row[2+i]=q[i]; row[10+i]=target[i]; row[18+i]=feedback[i].torque_nm;
                     }
                     samples.push_back(row);
-                    if(now-last_output>=spec.health_poll_ms*1'000'000ULL) { output("running",now,elapsed,q); last_output=now; }
+                    if(now-last_output>=spec.health_poll_ms*1'000'000ULL) { output("running",now,elapsed,q,paired ? paired->name() : nullptr); last_output=now; }
                     deadline+=period;
                     timespec next{static_cast<time_t>(deadline/1'000'000'000ULL),static_cast<long>(deadline%1'000'000'000ULL)};
                     clock_nanosleep(CLOCK_MONOTONIC,TIMER_ABSTIME,&next,nullptr);
@@ -215,6 +268,11 @@ int main(int argc,char** argv) {
         try { log.finish(confirmed_disabled && error.empty() && success); } catch(const std::exception& e) { success=false; error+="; log:"+std::string(e.what()); }
         orphan_link_down(input.interface);
         if(!success || !confirmed_disabled || !error.empty()) { std::cerr<<"FAIL "<<error<<std::endl; return 1; }
-        std::cout<<"{\"state\":\"completed\",\"disabled_verified\":true}"<<std::endl; return 0;
+        std::cout<<"{\"state\":\"completed\",\"disabled_verified\":true";
+        if(requested_completion) std::cout<<",\"completion_kind\":\"requested_hold\",\"elapsed_seconds\":"
+                                        <<std::setprecision(17)<<completion_elapsed;
+        if(paired) std::cout<<",\"completion_kind\":\"paired_sweep\",\"elapsed_seconds\":"
+                           <<std::setprecision(17)<<completion_elapsed;
+        std::cout<<"}"<<std::endl; return 0;
     } catch(const std::exception& e) { std::cerr<<"FAIL automatic startup:"<<e.what()<<std::endl; return 1; }
 }

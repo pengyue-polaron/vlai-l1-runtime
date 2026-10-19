@@ -10,7 +10,14 @@ import json
 import math
 from pathlib import Path
 
-from ..configuration import MOTOR_TYPE_CODES, SystemConfig, _is_loader_validated
+from ..automatic_trajectory import (
+    WAYPOINT_KIND,
+    is_waypoint_policy,
+    path_offsets,
+    sweep_duration,
+    validate_path,
+)
+from ..configuration import MOTOR_NAMES, MOTOR_TYPE_CODES, SystemConfig, _is_loader_validated
 from ..trajectory import SweepSpec
 
 
@@ -42,15 +49,21 @@ def validate_policy(config: SystemConfig, policy: dict) -> None:
         "shutdown_confirmation_seconds",
         "description",
     }
-    if type(policy) is not dict or set(policy) != expected:
+    multi = is_waypoint_policy(policy)
+    allowed = (
+        (expected | {"waypoints_deg"},) if multi else (expected, expected | {"manual_handling"})
+    )
+    if type(policy) is not dict or set(policy) not in allowed:
         raise ValueError("exact automatic policy fields required")
-    if (policy["kind"], policy["side"], policy["role"], policy["active_motor"]) != (
-        "isolated_right_follower_diagnostic_v1",
+    if (policy["kind"], policy["side"], policy["role"]) != (
+        WAYPOINT_KIND if multi else "isolated_right_follower_diagnostic_v1",
         "right",
         "follower",
-        "joint_7",
-    ):
-        raise ValueError("automatic experiment is right Follower J7 only")
+    ) or policy["active_motor"] not in (("arm",) if multi else ("joint_4", "joint_6", "joint_7")):
+        raise ValueError(
+            "right Follower only: legacy J4/J6/J7 or explicit multi-joint waypoint path"
+        )
+    active = None if multi else MOTOR_NAMES.index(policy["active_motor"])
     for name in (
         "amplitude_deg",
         "transition_seconds",
@@ -94,7 +107,10 @@ def validate_policy(config: SystemConfig, policy: dict) -> None:
     ):
         raise ValueError("invalid log capacity")
     if policy["amplitude_deg"] > min(
-        policy["maximum_amplitude_deg"], policy["maximum_relative_excursion_deg"][6]
+        policy["maximum_amplitude_deg"],
+        policy["maximum_amplitude_deg"]
+        if multi
+        else policy["maximum_relative_excursion_deg"][active],
     ):
         raise ValueError("amplitude exceeds experimental envelope")
     SweepSpec(
@@ -105,11 +121,9 @@ def validate_policy(config: SystemConfig, policy: dict) -> None:
         policy["maximum_reference_speed_deg_s"],
         policy["maximum_reference_acceleration_deg_s2"],
     )
-    duration = max(
-        policy["hold_test_seconds"],
-        policy["hold_seconds"]
-        + 4 * policy["cycles"] * (policy["transition_seconds"] + policy["hold_seconds"]),
-    )
+    if multi:
+        validate_path(policy)
+    duration = max(policy["hold_test_seconds"], sweep_duration(policy))
     if (duration + 10) * config.teleoperation.publish_hz * 8 > policy["raw_log_capacity"]:
         raise ValueError("insufficient raw log capacity")
     if config.follower_feedback is None or not config.can.fd:
@@ -119,6 +133,46 @@ def validate_policy(config: SystemConfig, policy: dict) -> None:
     ):
         if limit > motor.torque_max_nm:
             raise ValueError("torque budget exceeds firmware range")
+    if "manual_handling" in policy:
+        h = policy["manual_handling"]
+        fields = {
+            "hard_speed_deg_s",
+            "speed_persistence_seconds",
+            "settle_seconds",
+            "settle_timeout_seconds",
+            "settle_speed_deg_s",
+            "settle_span_deg",
+        }
+        if type(h) is not dict or set(h) != fields:
+            raise ValueError("exact manual handling fields required")
+        for name in fields - {"hard_speed_deg_s"}:
+            if type(h[name]) not in (int, float) or not math.isfinite(h[name]) or h[name] <= 0:
+                raise ValueError("positive finite manual handling values required")
+        hard = h["hard_speed_deg_s"]
+        if (
+            type(hard) is not list
+            or len(hard) != 8
+            or any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in hard)
+        ):
+            raise ValueError("eight finite manual hard speeds required")
+        if not (
+            h["speed_persistence_seconds"] <= policy["tracking_persistence_seconds"]
+            and config.teleoperation.state_timeout_s
+            < h["settle_seconds"]
+            < h["settle_timeout_seconds"]
+        ):
+            raise ValueError("invalid manual handling timing")
+        for i, profile in enumerate(config.follower_feedback.right):
+            if not (
+                policy["maximum_observed_speed_deg_s"][i]
+                <= hard[i]
+                <= math.degrees(profile.velocity_max_rad_s)
+                and h["settle_speed_deg_s"] < policy["maximum_observed_speed_deg_s"][i]
+                and math.degrees(4 * profile.position_max_rad / 65535)
+                < h["settle_span_deg"]
+                < policy["maximum_tracking_error_deg"][i]
+            ):
+                raise ValueError("invalid manual handling envelope")
 
 
 def render_native_spec(config: SystemConfig, policy: dict) -> str:
@@ -144,8 +198,14 @@ def render_native_spec(config: SystemConfig, policy: dict) -> str:
         round(policy["shutdown_confirmation_seconds"] * 1e9),
         round(config.teleoperation.can_health_poll_s * 1000),
         config.teleoperation.rt_priority,
+        8 if is_waypoint_policy(policy) else MOTOR_NAMES.index(policy["active_motor"]),
     ]
-    lines = ["VLAI_RIGHT_FOLLOWER_DIAGNOSTIC_V1", endpoint.interface, " ".join(map(str, values))]
+    version = 4 if is_waypoint_policy(policy) else 3
+    lines = [
+        f"VLAI_RIGHT_FOLLOWER_DIAGNOSTIC_V{version}",
+        endpoint.interface,
+        " ".join(map(str, values)),
+    ]
     bounds = config.teleoperation.joint_safety.for_side("right")
     gains = config.control["follower"]
     for i, (motor, profile) in enumerate(
@@ -181,6 +241,29 @@ def render_native_spec(config: SystemConfig, policy: dict) -> str:
                 )
             )
         )
+    h = policy.get("manual_handling")
+    lines.append(
+        " ".join(
+            map(
+                str,
+                [
+                    1,
+                    round(h["speed_persistence_seconds"] * 1e9),
+                    round(h["settle_seconds"] * 1e9),
+                    round(h["settle_timeout_seconds"] * 1e9),
+                    h["settle_speed_deg_s"],
+                    h["settle_span_deg"],
+                    *h["hard_speed_deg_s"],
+                ],
+            )
+        )
+        if h
+        else "0"
+    )
+    if is_waypoint_policy(policy):
+        points = path_offsets(policy)
+        lines.append(str(len(points)))
+        lines.extend(" ".join(map(str, point)) for point in points)
     return "\n".join(lines) + "\n"
 
 
@@ -205,8 +288,17 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
     policy_bytes = read_artifact(policy_path)
     policy = json.loads(policy_bytes)
     rendered = render_native_spec(config, policy)
-    if mode not in ("hold", "sweep"):
-        raise ValueError("select hold or sweep")
+    if mode not in ("hold", "sweep", "paired"):
+        raise ValueError("select hold, sweep or paired")
+    if "manual_handling" in policy and mode != "paired":
+        raise ValueError("manual handling policy requires paired mode")
+    if is_waypoint_policy(policy) and mode == "paired":
+        raise ValueError("waypoint path commissioning excludes paired load handling")
+    if mode == "paired" and policy["hold_test_seconds"] <= 3 * (
+        policy["hold_seconds"]
+        + 4 * policy["cycles"] * (policy["transition_seconds"] + policy["hold_seconds"])
+    ) + 2 * policy.get("manual_handling", {}).get("settle_timeout_seconds", 0):
+        raise ValueError("paired duration budget too short")
     if os.geteuid() != 0:
         raise RuntimeError("automatic experiment requires root")
     endpoint = next(e for e in config.can.endpoints if e.side == "right" and e.role == "follower")
@@ -266,9 +358,13 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
         startup = True
         termination_at = None
         disabled = False
+        disabled_at = None
         failure = None
         buffer = b""
         next_health = time.monotonic()
+        finish_sent = False
+        phase = None
+        paired_sent = set()
         try:
             with (
                 selectors.DefaultSelector() as selector,
@@ -284,8 +380,45 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
                     )
                     if which != "disable" and stop and termination_at is None:
                         failure = "operator_stop"
-                    if now - last_line > timeout and termination_at is None:
-                        failure = "native_heartbeat_timeout"
+                    if which == "paired" and not disabled and failure is None and not stop:
+                        for name, expected_phase, body in (
+                            ("attach.ready", "awaiting_attach", b"attached\n"),
+                            ("remove.ready", "awaiting_remove", b"removed\n"),
+                        ):
+                            request = output / name
+                            if name not in paired_sent and request.exists():
+                                if phase != expected_phase or read_artifact(request) != body:
+                                    raise ValueError("invalid or premature paired acknowledgement")
+                                child.send_signal(signal.SIGUSR2)
+                                paired_sent.add(name)
+                                report.setdefault("paired_acknowledgements", []).append(name)
+                    # A reviewed, explicit end request can complete only a
+                    # stationary hold. Fault/stop paths retain priority.
+                    finish_path = output / "finish.request"
+                    if (
+                        which == "hold"
+                        and not startup
+                        and not disabled
+                        and not finish_sent
+                        and failure is None
+                        and not stop
+                        and finish_path.exists()
+                    ):
+                        if read_artifact(finish_path) != b"finish\n":
+                            raise ValueError("invalid hold finish request")
+                        child.send_signal(signal.SIGUSR1)
+                        finish_sent = True
+                        report["operator_finish_requested"] = True
+                    if termination_at is None and failure is None:
+                        if disabled_at is not None:
+                            # Native releases its SDK before this marker, then
+                            # writes buffered samples/raw frames. Bound that
+                            # work without applying the live-motion heartbeat.
+                            # Later output must not renew the finalization budget.
+                            if now - disabled_at > config.teleoperation.shutdown_timeout_s:
+                                failure = "native_finalization_timeout"
+                        elif now - last_line > timeout:
+                            failure = "native_heartbeat_timeout"
                     if now >= next_health and failure is None:
                         try:
                             _require_healthy(endpoint.interface, health_baseline)
@@ -324,8 +457,12 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
                                 continue
                             last_line = time.monotonic()
                             startup = False
+                            if which == "paired" and "phase" in event:
+                                phase = event["phase"]
                             if event["state"] == "disabled":
                                 disabled = True
+                                if disabled_at is None:
+                                    disabled_at = last_line
                             report["events"].append(event)
                             temporary = output / "status.tmp"
                             temporary.write_text(json.dumps(event))
@@ -346,7 +483,16 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
                         report["events"].append(event)
                         if event["state"] == "disabled":
                             disabled = True
-            return child.wait(), disabled, failure
+            code = child.wait()
+            if code != 0:
+                # Native faults are plain-text lines, including after the final
+                # disable event. Preserve them after reaping instead of reporting
+                # an opaque exit code with reason=None. This never retries motion.
+                for line in read_artifact(output / f"{which}_console.log").splitlines():
+                    if line.startswith(b"FAIL "):
+                        detail = line[5:4096].decode("utf-8", errors="replace")
+                        failure = f"{failure};native:{detail}" if failure else f"native:{detail}"
+            return code, disabled, failure
         finally:
             if child.poll() is None:
                 child.terminate()
@@ -401,6 +547,30 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
                 raise RuntimeError(
                     f"native diagnostic failed: exit={code}, disabled={disabled}, reason={failure}"
                 )
+            if mode == "paired":
+                completed = [
+                    e for e in report["events"] if e.get("completion_kind") == "paired_sweep"
+                ]
+                if (
+                    len(completed) != 1
+                    or completed[0].get("state") != "completed"
+                    or completed[0].get("disabled_verified") is not True
+                ):
+                    raise RuntimeError("missing paired completion evidence")
+                report["completed_paired_seconds"] = completed[0]["elapsed_seconds"]
+            completions = [
+                e for e in report["events"] if e.get("completion_kind") == "requested_hold"
+            ]
+            if completions:
+                if (
+                    mode != "hold"
+                    or report.get("operator_finish_requested") is not True
+                    or len(completions) != 1
+                    or completions[0].get("state") != "completed"
+                ):
+                    raise RuntimeError("unrequested or invalid hold completion")
+                report["completion_kind"] = "requested_hold"
+                report["completed_hold_seconds"] = completions[0]["elapsed_seconds"]
             _require_healthy(endpoint.interface, baseline)
             if stop:
                 raise InterruptedError("stopped at stage completion")

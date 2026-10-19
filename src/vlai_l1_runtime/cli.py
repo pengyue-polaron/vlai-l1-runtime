@@ -98,12 +98,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     automatic = subparsers.add_parser(
         "automatic-right",
-        help="MOVES HARDWARE: isolated right Follower hold, wrist sweep, or verified sequence",
+        help="MOVES HARDWARE: isolated right Follower hold, bounded joint path, or verified sequence",
     )
     automatic.add_argument("--config", type=Path, required=True)
     automatic.add_argument("--policy", type=Path, required=True)
     automatic.add_argument("--output", type=Path, required=True)
-    automatic.add_argument("--mode", choices=("hold", "sweep", "sequence"), required=True)
+    automatic.add_argument("--mode", choices=("hold", "sweep", "sequence", "paired"), required=True)
 
     review = subparsers.add_parser(
         "review-automatic", help="Hardware-free automatic capture review"
@@ -111,6 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--config", type=Path, required=True)
     review.add_argument("--source", type=Path, required=True)
     review.add_argument("--output", type=Path, required=True)
+    review.add_argument("--recheck-offline-failure", action="store_true")
 
     for command in ("validate-config", "describe", "verify-xair"):
         child = subparsers.add_parser(command)
@@ -211,7 +212,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "review-automatic":
             from .automatic_review import review_automatic
 
-            result = review_automatic(load_system_config(args.config), args.source)
+            result = review_automatic(
+                load_system_config(args.config),
+                args.source,
+                recheck_offline_failure=args.recheck_offline_failure,
+            )
             with args.output.open("x") as stream:
                 json.dump(result, stream, indent=2)
                 stream.write("\n")

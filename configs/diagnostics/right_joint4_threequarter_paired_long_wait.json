@@ -1,0 +1,78 @@
+{
+  "kind": "isolated_right_follower_diagnostic_v1",
+  "side": "right",
+  "role": "follower",
+  "active_motor": "joint_4",
+  "amplitude_deg": 0.75,
+  "transition_seconds": 8,
+  "hold_seconds": 5,
+  "cycles": 2,
+  "hold_test_seconds": 1200,
+  "manual_handling": {
+    "hard_speed_deg_s": [
+      15,
+      15,
+      15,
+      15,
+      45,
+      45,
+      45,
+      15
+    ],
+    "speed_persistence_seconds": 0.1,
+    "settle_seconds": 2,
+    "settle_timeout_seconds": 20,
+    "settle_speed_deg_s": 5,
+    "settle_span_deg": 0.05
+  },
+  "maximum_amplitude_deg": 2,
+  "maximum_reference_speed_deg_s": 1,
+  "maximum_reference_acceleration_deg_s2": 0.8,
+  "maximum_observed_speed_deg_s": [
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15
+  ],
+  "maximum_tracking_error_deg": [
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    0.8,
+    2
+  ],
+  "tracking_persistence_seconds": 0.1,
+  "maximum_motor_torque_nm": [
+    12,
+    12,
+    8,
+    8,
+    3,
+    3,
+    3,
+    3
+  ],
+  "maximum_temperature_c": 70,
+  "maximum_relative_excursion_deg": [
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3
+  ],
+  "enabled_raw_status": 1,
+  "disabled_raw_status": 0,
+  "raw_log_capacity": 1000000,
+  "shutdown_confirmation_seconds": 2,
+  "description": "J4 +/-0.75-degree paired experiment with 1200-second total cap for human attachment/removal latency and 1000000-frame full retention. Motion, gains, handling, settling and every health/position/speed/torque guard unchanged from the 600-second policy. Duration/capacity extension is not yet live commissioned; no automatic fault retry."
+}

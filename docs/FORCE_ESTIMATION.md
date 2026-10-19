@@ -18,7 +18,8 @@ mapping, stationarity checks, gravity/friction inputs and wrench reconstruction.
 It always labels numerical candidates as physically unvalidated.
 
 An operator-authorized `automatic-right` diagnostic now also owns bounded
-right-Follower PD holds and J7 trajectories without moving the Leader. Its
+right-Follower PD holds and single-joint J4/J6/J7 trajectories without moving the Leader.
+A separately versioned multi-joint path has completed commissioning as described below. Its
 `sequence` mode checks startup, runs and reviews a hold, then runs and reviews
 the sweep only if every preceding gate passed. `automatic_review.py` checks
 saved hashes, exact named vectors, timing, raw identity/overflow/status and
@@ -35,6 +36,451 @@ This diagnostic commissions automatic data acquisition, not a general policy
 transport, gravity compensation, zero calibration, or six-axis force control.
 See the README for the single-command entry and SAFETY.md for the scoped
 operator authorization and stop behavior.
+
+On 2026-10-12 the operator requested larger multi-joint excitation. The new
+`configs/diagnostics/right_multijoint_unloaded_single.json` was prepared as a
+320-second closed path and subsequently commissioned: six different coordinated
+J2–J7 postures and return, J1/gripper fixed. Planned spans are 10, 20, 16, 20,
+20, 20 degrees respectively, with 40-second quintic transitions and five-second
+holds. It samples posture combinations rather than one proportional joint
+direction. The six nonzero offset vectors have rank six; this is geometric
+coverage only, not dynamics-parameter identifiability or an optimal wrench
+experiment. Native V4 and offline review independently enforce the complete
+path; existing V3 captures and policies preserve their original semantics.
+
+The earlier 1.31-degree measured J4 span was useful for commissioning and
+local history diagnostics, but inadequate for a broadly applicable unloaded
+model. The loaded J2 context rejection is evidence of insufficient training
+coverage, not proof that a 0.12-degree change makes force estimation impossible.
+Larger varied unloaded postures address coverage; they do not by themselves
+remove gravity-model error, friction, hysteresis or dynamic torque. The old
+single-joint fit cannot be applied to coordinated captures. A future model
+must use the measured joint-state vector and motion/history, hold out complete
+trajectories, and validate load residuals independently. This prepared one-cycle
+commissioning path is not a fitted model, held-out accuracy result or six-axis
+FT validation. Motor/model-coordinate and Cartesian-clearance limitations remain.
+
+First multi-joint attempt (2026-10-12) passed its five-second hold but stopped
+at ~15.36 s on a J5 raw speed frame of 15.5307 deg/s against the 15 deg/s guard.
+Position feedback also moved 0.17486 deg in ~10.14 ms, consistent with a brief
+physical catch-up rather than speed noise alone. Operator reported no visible
+anomaly or contact. This was early in the first segment (J5 reference offset
+only -1.13 deg), before any planned posture was reached. Verified disable and
+clean CAN shutdown passed. The saved incomplete run is diagnostic evidence,
+not a commissioned path or multi-posture training dataset; no threshold was
+relaxed and the run was not retried.
+
+After the operator explicitly requested a 45 deg/s arm speed cap and a new
+experiment, the next run passed its hold but stopped at ~22.65 s on J7's
+unchanged 0.8-degree/0.1-second tracking guard. Last saved error 0.844 deg;
+other joints' maximum error <0.61 deg. Enabled speeds stayed below the revised
+caps (largest 23.9257 deg/s on J5). Actual moving-joint spans reached about
+3.1–5.9 degrees, before the first scheduled posture. This provides additional
+slow-tracking evidence but still no complete multi-posture capture or validated
+unloaded model. All motors were verified disabled and CAN shutdown was clean.
+
+The subsequent operator-requested run with J7 tracking tolerance 2 deg completed
+the full 320-second path on 2026-10-12 at 08:50:54 UTC. Source:
+`data/temporary/right_multijoint_unloaded_45dps_2deg_20261012/sweep`. Both sequence
+stages passed, with verified disable and zero CAN errors/drops. Operator
+confirmed no contact or abnormality throughout, saved as a hash-bound context.
+32,000 control samples and 256,048 raw frames cover measured J2–J7 spans
+9.46/19.85/15.45/19.23/19.02/19.17 deg; max tracking error 1.399 deg and enabled
+speed 22.247 deg/s. Eight scheduled hold tails each contain 250 samples with
+position spans no larger than one encoder code (~0.02186 deg).
+
+This was the first complete multi-posture unloaded acquisition. At the same final reference, J7's measured
+position differs by -0.785 deg and raw torque by +0.337 Nm versus the initial
+hold; J1 raw torque differs by +0.629 Nm with position -0.142 deg. State and
+history effects remain mixed. A model should use measured joint states and
+history, then be tested on independent trajectories; random adjacent-sample
+splits or the old single-joint baseline are not independent validation here.
+
+The offline `multijoint_torque_study` now provides a deliberately simple baseline
+comparison for this larger path. It predicts one-second mean raw J1-J7 motor
+torque, using measured J2-J7 positions, window mean velocities and causal
+last-direction history (0.1-deg reversal threshold). J1 and gripper positions
+are context/support checks, not independently excited inputs. It compares a
+constant, pose, pose+velocity and pose+velocity+history model, with fixed ridge
+penalty 0.01 and train-only normalization. It never uses commanded positions,
+tracking errors or motor torque as predictors. No gravity coordinate mapping,
+instantaneous force bandwidth, physical parameter identification or FT accuracy
+is established by this raw-motor study.
+
+Forward recording: 296 one-second windows, comprising 280 transition windows
+and the final two seconds of each of eight holds; no rejected windows. Leave
+out each complete transition plus its following hold (initial hold separately),
+not random neighboring samples. Pose-only versus pose+velocity+history grouped
+RMSE is J2 0.5645 -> 0.3400 Nm, J4 0.7741 -> 0.3346 Nm, J7 0.1052 -> 0.0737 Nm;
+J1 worsens 0.2319 -> 0.2491 Nm. These scores include extrapolation. 206/296
+held-out windows satisfy a train-derived geometric proximity gate; this gate
+does not establish velocity/history support. Training errors are saved separately
+and are not quoted as independent accuracy. The ridge coefficients are not
+interpreted as physical dynamics parameters.
+
+Reproduce the frozen forward study (choose a new output filename):
+
+```bash
+.venv/bin/python -m vlai_l1_runtime.multijoint_torque_study \
+  --config configs/system/vlai_l1.toml \
+  --source data/temporary/right_multijoint_unloaded_45dps_2deg_20261012/sweep \
+  --context data/temporary/right_multijoint_unloaded_45dps_2deg_20261012/sweep/operator_context.json \
+  --policy configs/diagnostics/right_multijoint_torque_study.json \
+  --output /tmp/multijoint_study.json
+```
+
+The CLI rechecks the passed capture and both source hashes, requires a hash-bound
+unloaded/contact-free operator context, and writes a new artifact exclusively.
+`--frozen-study PATH` evaluates a different unloaded recording without fitting;
+config/native/SDK/tool context must match. Loaded validation is intentionally
+not supported by this study. The separate tracked reverse motion policy visits
+the same offset-space segments in reverse order, with identical guards/timing.
+It starts from fresh feedback, so actual absolute-pose coverage must be measured.
+All four forward models were frozen before the reverse experiment; its results
+must not be used to retune this held-out comparison. The source/plan hashes and
+latest experiment state are in HANDOFF.md.
+
+The reverse sequence completed at 2026-10-12 11:13:55 UTC with verified disable
+and zero CAN errors/drops. The operator subsequently replied “没有异常，你继续”
+to the unloaded/contact-free scene question. The exact answer and contextual
+interpretation are saved in a hash-bound context; `independent_validation.json`
+now records the frozen comparison. Original provisional artifacts are retained.
+Without refitting any forward model, full reverse-recording RMSE for pose-only
+versus pose+velocity+history is J2 0.5517 -> 0.2926 Nm, J3 0.6172 -> 0.2024 Nm,
+J4 0.6268 -> 0.3206 Nm, J5 0.1619 -> 0.0690 Nm, J6 0.1880 -> 0.1091 Nm.
+J1 worsens 0.3222 -> 0.4995 Nm, while J7 history RMSE 0.0863 Nm is worse than
+velocity-only 0.0792 Nm. Thus history is useful on several outputs, not a
+universally sufficient model. Only 98/296 windows meet the frozen position
+support gate: most exclusions are from the ~1.33-deg J7 start shift after
+disable. No measured-angle recentering or post-hoc support relaxation was used.
+These are one-second mean raw-torque errors, include extrapolation when stated
+as full-recording scores, and cannot be converted to mass/FT accuracy without
+the remaining coordinate, dynamic and independent load validation work.
+
+The next tracked acquisition, `right_multijoint_unloaded_balanced.json`, joins
+the commissioned forward and reverse lists under one owner/reference, with an
+ordinary hold at the middle zero waypoint. Duration 635 seconds; all gains,
+segment timing, guards, offset limits and logging capacity unchanged. This
+reduces restart-induced reference shifts but cannot guarantee identical measured
+positions or remove hysteresis. Its data are explicitly training/development;
+the fixed four-model comparison and grouped scores do not replace a later
+untouched validation recording. No model is fed back into the motor controller.
+
+For a path containing repeated geometric segments, the offline fitter also
+reports a second exploratory partition: both directions and all repeats of
+each endpoint-pair segment are held out together. Target geometry defines only
+the partition, never a predictor. This makes the check stricter than leaving
+out one temporal traversal while training on its reverse. Neighboring segments
+still share endpoint neighborhoods; neither score is an independent experiment.
+The fitted models, ridge penalty and support thresholds remain unchanged.
+
+Both the 635-second balanced acquisition and a subsequent independent 75%-scale
+320-second forward path passed on 2026-10-12 (final stop 11:38:48 UTC). Both
+use the continuing operator-declared unloaded scene, with no reported change;
+their context explicitly distinguishes this from a fresh post-run observation.
+All motors verified disabled and CAN shutdown clean. The balanced model was
+frozen before validation. One unsettled hold window was rejected; 295 accepted
+windows remain, of which 287 satisfy the fixed geometric-support gate.
+
+Comparing the old forward-trained and new balanced-trained history models on
+the SAME independent 75% capture gives full-window one-second-mean torque RMSE:
+
+| Joint | Old forward model (Nm) | New balanced model (Nm) |
+| --- | ---: | ---: |
+| J1 | 0.1895 | 0.1245 |
+| J2 | 0.2343 | 0.2061 |
+| J3 | 0.3164 | 0.2671 |
+| J4 | 0.2292 | 0.2310 |
+| J5 | 0.0857 | 0.0913 |
+| J6 | 0.0729 | 0.0868 |
+| J7 | 0.0532 | 0.0638 |
+
+Thus J1-J3 improved, J4 stayed similar, and J5-J7 worsened. More training and
+direction coverage did not universally improve this fixed linear model. All
+four baseline candidates remain in `comparison_summary.json`; no candidate was
+selected or refitted on validation. The old model also has high pose coverage
+on this smaller path (291/295), so increased coverage versus the previous
+reverse test is not evidence that balancing alone solved coverage. These full
+scores include the few windows outside support. J3/J4 supported absolute errors
+still reach 0.83 Nm. No force/mass precision or instantaneous bandwidth follows
+from the averages. Any further model tuning needs a subsequent untouched test.
+
+For legacy single-joint paths, the selected motor is tracked in each policy, explicitly rendered
+in native input version 3 and checked independently by the native guard and
+offline reviewer. J4/J6 single and repeated policies keep the existing slow
+8-second transitions and all gains/guards; amplitudes are +/-0.25 degrees for
+J4 and +/-0.5 degrees for J6. The other seven targets stay fixed. Version-1/2
+native inputs are rejected instead of guessing a joint or handling policy.
+Historical captures retain their native hashes; a new executable is a new
+model provenance context. The existing wrist-baseline fitter remains J7-only
+and rejects other active joints.
+
+`python -m vlai_l1_runtime.joint_repeatability --config CONFIG --source SWEEP
+--context CONTEXT --policy configs/diagnostics/right_joint_repeatability_review.json
+--output NEW.json` performs an unloaded-only, hardware-free review. It requires
+passed raw integrity/disable, explicit operator context and settled scheduled
+holds. It separates corresponding path stages across cycles from different
+path stages at nearby measured positions. The tracked nearby thresholds are
+0.05 degrees on the selected joint and 0.1 on other joints; these do not make
+two poses physically identical. Pairs retain all-eight angle and torque
+differences. Scheduled path stage is not a measured friction-direction label.
+No compensation coefficients, force estimates or calibrated uncertainty bounds
+are generated; this checks what a later history-dependent model must explain.
+
+J4/J6 commissioning and repeat recordings on 2026-10-11 all passed with the
+remote removed. In the repeated J6 sweep, corresponding-cycle torque means
+differed by at most 0.003575 Nm, while different-path means within the tracked
+pose tolerances differed by up to 0.25932 Nm. In repeated J4 data, the analogous
+numbers were 0.001094 and 1.028704 Nm. J4 negative/return holds shared the same
+measured angle (11.07053965 deg) but torque means were approximately -0.49039
+and +0.53831 Nm, at targets differing by 0.25 degrees. Thus static internal
+loading depends on path/controller history even at the same encoder angle.
+The tests do not distinguish all possible physical mechanisms. A fitted
+position/torque curve with low repeat error cannot establish external-force
+accuracy: J4's unloaded history spread exceeds the preceding remote response.
+Preserve this ambiguity in future validation; neither a larger pose tolerance
+nor subtraction of the PD control response resolves it. Captures and exact
+hashes are listed at the top of HANDOFF.md.
+
+### Moving-window study
+
+`python -m vlai_l1_runtime.moving_window_study --config CONFIG --source SWEEP
+--context CONTEXT --policy configs/diagnostics/right_moving_window_study.json
+--output NEW.json` evaluates an explicitly unloaded, passed two-cycle capture.
+The first cycle trains constant, angle, and angle/measured-direction models;
+the second cycle is temporal holdout. Each accepted one-second window has equal
+weight. Static holds are always excluded, as are transition windows with less
+than 0.05 degrees net measured movement (greater than two encoder codes), too
+few samples, excessive path reversal/oscillation or other-joint movement.
+The feature matrix never includes torque feedback, commanded angle or tracking
+error. Motor torque is the target, not calibrated external torque.
+
+Use `--frozen-study ORIGINAL.json` for a distinct recording with matching joint,
+policy, configuration, native binary, SDK and tool context. Coefficients remain
+unchanged. Position support is checked per measured direction and other-joint
+pose. RMSE is reported only for supported moving windows; preserve counts of
+rejected and unsupported windows. These scores do not represent static-state
+accuracy or whole-trajectory coverage. Insufficient bidirectional excitation
+produces an explicit rejected-study artifact, not a fitted model.
+
+`--loaded-validation` additionally requires a frozen study and explicit secure
+payload context. It reports measured-minus-predicted motor torque residuals,
+separates unsupported results, and never treats the payload response as error
+against zero. Loaded fitting is forbidden. All outputs remain offline,
+`ft_validated=false`, `runtime_eligible=false`, and static states unsupported.
+Acceleration, velocity-dependent friction, tool gravity, coordinates and force
+scale still require validation; one-second means are not an online filter.
+
+Tracked J4 half-degree single/repeat policies extend the passed quarter-degree
+test to +/-0.5 degrees with unchanged 8-second transitions, gains and guards.
+Single-cycle commissioning precedes repeats. That amplitude extension used the
+same native binary; the later paired mode below has a new binary hash.
+
+### Single-owner paired moving study
+
+`automatic-right --mode paired --policy
+configs/diagnostics/right_joint4_paired.json` keeps one owner and one reference
+through baseline sweep, stationary attach wait, middle sweep, stationary remove
+wait and final sweep. Each sweep lasts 109 seconds; the whole session including
+manual waits is capped at 600 seconds. Only create `attach.ready` containing
+`attached` plus newline after `awaiting_attach` and actual hands-clear
+confirmation; similarly `remove.ready` containing `removed` plus newline in
+`awaiting_remove`. Premature requests fail closed. There is no fault retry.
+All-unloaded commissioning can advance both waits without human handling, but
+must explicitly label the middle stage unloaded. Phase names are not load labels.
+
+The paired policy's new `manual_handling` settings apply only while stationary
+awaiting/settling. Short J5/J6/J7 speed excursions above 15 deg/s are tolerated
+up to an immediate 45 deg/s ceiling and a 0.1-second sustained-speed stop.
+Other motors retain 15 deg/s, and all automatic motion keeps the original
+immediate speed protection. Bounds/effort/temperature/tracking/CAN protection
+remain active. These candidate limits require live commissioning. After actual
+hands-clear acknowledgement, `settling_loaded` / `settling_empty_after` must
+observe two continuous seconds with all-eight position span <=0.05 deg and
+reported speed <=5 deg/s. Motion resets settling; a 20-second timeout stops.
+The 600-second overall cap includes settling and manual waits. Waiting and
+settling samples never contribute to fits or load evaluation. Older captures
+without this policy still use their original strict six-phase protocol.
+
+Offline command: `python -m vlai_l1_runtime.paired_moving_study --config CONFIG
+--source CAPTURE --context CONTEXT --policy
+configs/diagnostics/right_moving_window_study.json --output NEW.json`.
+Context requires `source_raw_sha256`, `initial_unloaded=true`,
+`final_unloaded=true`, explicit `middle_stage_loaded`, and nonempty
+`operator_statements` for `initial`, `middle`, `final`. `middle_context` uses
+the existing sweep load-context schema, including confirmed payload details
+for a loaded middle. Commissioning statements must distinguish the actual
+operator's initial removal confirmation from scripted stage advancement.
+
+The first baseline cycle alone trains the model; its second cycle and both
+later sweeps are evaluated without refitting. The same moving-window and pose
+support limits apply. Waiting/handling data never train the model. All data
+are acquired before analysis, so `frozen_before_loaded_acquisition=false`;
+this is not a prospectively frozen independent trial. Holding a fixed target
+does not guarantee fixed measured posture, static friction compensation or FT
+accuracy. `ft_validated`, `runtime_eligible`, `static_supported` stay false.
+
+## Local wrist baseline and loaded response study
+
+Two later slow repeated recordings improved the local result: training on
+first-cycle holds of `right_slow_repeat_unloaded_20261011_01` gave a second-cycle
+angle/direction RMSE of 0.002626 Nm. Its frozen model evaluated all eight
+supported holds of independent recording `_02` at 0.003535 Nm RMSE (maximum
+0.006657 Nm), versus 0.08770 Nm for constant bias. Both bounded runs passed,
+with enabled J7 speed peaks 5.45674 and 4.61724 deg/s. These remain local raw
+torque predictions; they do not establish loaded response or six-axis accuracy.
+
+To avoid disabling/restarting between load states, stationary `automatic-right
+--mode hold` now supports explicit successful completion. With
+`right_automatic_operator_hold.json`, keep the same fresh measured reference
+and gripper opening, request physical changes only after a running stationary
+hold is confirmed, and record empty-before/loaded/empty-after settled windows.
+The hold is capped at 600 seconds for bounded full raw retention. Creating
+`finish.request` containing exactly `finish` and a newline requests normal
+completion after the tracked minimum hold time; all motors must confirm
+disabled before success. Stop/fault paths remain failures and cannot be
+overridden by this request. A 10.14-second live requested-finish commissioning
+passed; its native binary hash differs from the earlier frozen model and must
+not be silently mixed into that model's context.
+
+`python -m vlai_l1_runtime.hold_load_review` takes `--config`, `--source` (passed
+stationary hold), `--windows`, `--policy` and a fresh `--output`. The windows
+JSON binds `source_raw_sha256` to the capture and includes an ordered `windows`
+list labelled `empty_before`, `loaded`, `empty_after`. Each window has integer
+`start_monotonic_ns`/`end_monotonic_ns`, an exact boolean `external_load_present`
+(false/true/false) and the actual `operator_statement`. Use
+`right_hold_load_protocol.json` for settling/measurement durations and
+`right_hold_load_review.json` for offline quality checks. The analysis reports
+the loaded torque minus a time-interpolated empty baseline, actual posture
+differences, empty-return drift and per-window scatter for all eight motors.
+It does not compensate pose or friction, identify a force, or fit loaded data
+into the unloaded model. Manual handling transitions are excluded.
+
+The completed `right_same_session_remote_20261011_02` experiment (11:23:04–
+11:25:45 UTC) contains three confirmed 10-second windows, each with 1000 samples
+and at most 0.02186 degrees within-window position span. The remote was removed
+at the end. Requested completion at 158.3391 seconds, all-eight disable,
+CAN shutdown and offline integrity/stability reviews passed. Raw SHA256:
+`ba39fc46cf3202f85cce378ec26f2184b0b09a0471220b680bfecfd7d137cf00`.
+
+| Motor | Loaded minus initial empty (Nm) | Loaded minus final empty (Nm) | Final minus initial empty (Nm) |
+| --- | ---: | ---: | ---: |
+| J4 | +0.67709 | +0.83866 | -0.16157 |
+| J6 | -0.09749 | +0.08562 | -0.18311 |
+| J7 | -0.00153 | +0.01423 | -0.01576 |
+
+J4 responds clearly to loading. Its loaded posture differs by -0.17486 degrees
+from initial empty. J6 finishes +0.33347 degrees away from initial empty;
+its apparent loading response reverses sign depending on the chosen baseline.
+Time-interpolated empty subtraction gives +0.77241 Nm on J4, but linear temporal
+drift is not established by these three windows: manual handling, changed pose
+and friction history remain confounded. A stable window does not guarantee a
+repeatable unloaded zero. J7 alone has little loading response in this pose.
+This supports all-joint pose/history modelling rather than a constant tare or
+a J7-only payload estimate. Never subtract Kp times tracking error as load
+compensation; that would remove the controller's response to the load itself.
+The operator-stated 300 g mass and unknown moment arm do not establish force
+scale or six-axis accuracy. This run remains a motor-torque response experiment.
+
+`python -m vlai_l1_runtime.wrist_baseline_study` is pure offline analysis of
+saved automatic sweeps. Required arguments are `--config`, `--source` (sweep
+directory), `--context` (separate operator context JSON), `--policy`
+(`configs/diagnostics/right_wrist_baseline_study.json`), and a new `--output`.
+Without `--frozen-study`, it fits four first-cycle settled hold means and
+validates on subsequent cycles. With `--frozen-study`, it evaluates a distinct
+recording with matching configuration, SDK, native binary and installed tool
+context, without refitting. Actual J7 angle and measured approach history are
+features; targets are raw motor torque, not gravity-corrected external torque.
+Every hold has equal weight. Other joint/gripper motion, unsettled windows,
+unknown direction and insufficient samples are rejected; unsupported postures
+are reported separately. No runtime model or FT calibration is exported.
+
+On 2026-10-11, unloaded capture `right_automatic_unloaded_20261011_02` produced
+constant/angle/angle-plus-direction next-cycle RMSE 0.09288/0.08080/0.01604 Nm.
+Independent capture `right_automatic_unloaded_20261011_03`, using the frozen
+model, yielded 0.07695/0.05068/0.02629 Nm on four supported holds (two distinct
+postures repeated twice). Its other four holds were outside support. This
+supports a local direction-aware baseline, not general force accuracy.
+
+`--loaded-validation` requires `--frozen-study` and an explicit loaded context.
+That context needs `side: "right"`, `external_load_present: true`,
+`follower_contact: false` (no hand/table/support contact),
+`tool_context: "original_gripper_and_camera"`, `applies_to_stages: ["sweep"]`,
+an `operator_statement`, and `payload` containing positive `mass_g`,
+`mass_source` (`operator_weighed` or `operator_nominal`),
+`attachment_description`, and confirmed `securely_attached: true`.
+Do not prefill an operator confirmation before it arrives.
+Loaded observations cannot train the baseline. Their result is raw motor
+torque minus the frozen unloaded prediction, preserving possible load response
+alongside model error; it is not scored as error against zero. Unsupported
+residuals remain separate and ground-truth joint torque is null. All eight
+motor torque means are retained, but only J7 has a fitted baseline.
+
+The operator's proposed R3-1 remote has nominal mass 300 g; it has not been
+independently weighed in this experiment. Mass alone does not determine J7
+torque: mounting geometry and gravity projection onto the joint axis matter.
+Unknown geometry permits a qualitative load-response experiment, not force
+gain/accuracy acceptance. The offline study never changes live trajectories,
+controller gains, bounds, lifecycle or safety gates.
+
+The first nominal-300-g capture, `right_automatic_loaded_remote_20261011_01`,
+passed the unchanged automatic sequence at 09:35:49–09:37:17 UTC on 2026-10-11.
+Its J7 repeat-pair torque means differ by at most 0.00538 Nm. However, none of
+its eight settled holds lie within the frozen unloaded study's support:
+J4/J6/J7 mean posture shifted approximately -2.24/+5.48/-7.01 degrees between
+recordings, with additional other-joint/gripper changes. All model residuals
+are therefore diagnostic extrapolations, not external-force measurements.
+The next collection needs unloaded coverage near the current posture; exact
+manual pose reproduction is not the intended application. Preserve the first
+frozen model and loaded recording, fit any replacement only on unloaded data,
+and use a fresh loaded recording for independent validation of a model
+developed after this result.
+
+The subsequent unloaded attempt `right_automatic_unloaded_20261011_04` failed
+at about 26.38 seconds: J7 reported -18.049 deg/s against a 15 deg/s guard,
+accompanied by a rapid raw-position change. All eight motors were confirmed
+disabled; CAN remained healthy. The operator reported no contact or visible
+interference. Its partial sweep is excluded from fitting. Offline comparison
+shows earlier unloaded/loaded J7 peaks of 13.01–14.69 deg/s despite reference
+speed at most 0.469 deg/s. This requires direct-controller low-speed-response
+investigation before further motion, rather than weakening limits or treating
+the peak as force evidence. Friction release is a hypothesis, not an established
+cause. Reproducible evidence is in that capture's `sweep/fault_review.json` and
+adjacent script; original reports remain intact. The supervisor error summary
+now preserves native fault text emitted after the final disabled event.
+
+After the operator explicitly requested further investigation, motion-free
+readings at 09:49 UTC found stationary J7 variation of one position code
+(0.02186 degrees) and reported speeds within +/-1.25925 deg/s. At the failed
+frame, seven position codes changed over 9.843872 ms of kernel-arrival time
+(0.153 degrees, -15.54252 deg/s), consistent in magnitude with the -18.04922
+deg/s velocity field. The small displacement can be difficult to see. Timing
+did not show queueing at that event. Both fields share the motor encoder;
+this is not independent proof of physical motion or identification of friction.
+Fresh read-only J7 parameters confirmed P_MAX=12.5, V_MAX=30 and T_MAX=10,
+matching the configured decoder. No writes or gain changes occurred.
+
+Two subsequent bounded comparisons passed without changing any protection:
+
+| J7 reference amplitude | Transition time | Maximum reference speed | Enabled feedback peak |
+| --- | --- | --- | --- |
+| +/-0.5 degrees | 4 seconds | 0.23438 deg/s | 9.65423 deg/s |
+| +/-0.5 degrees | 8 seconds | 0.11719 deg/s | 5.45674 deg/s |
+
+Both used one cycle and ended with verified motor disable and clean CAN.
+The new slow policy is `configs/diagnostics/right_automatic_slow_halfdegree.json`.
+Different initial J7 postures (about 0.22 degrees apart) and one run per
+condition prevent attributing the difference solely to transition time.
+This narrows the investigation toward intermittent low-speed response, but
+does not establish a root cause, eliminate encoder artifacts, or validate FT.
+The source/C-ABI/SDK packer audit found no parameter-order or radians/degrees
+mistake on this path; actual outgoing command frames were not recorded.
+Evidence and a reproducible script are under
+`data/temporary/right_speed_investigation_20261011/`.
+
+`automatic_review` now reports per-motor raw enabled and disabled speed peaks
+separately, plus enabled over-limit frame counts. This adds diagnostics;
+live protection thresholds and integrity-review acceptance remain unchanged.
 
 ## What is implemented
 

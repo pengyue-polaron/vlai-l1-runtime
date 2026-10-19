@@ -1,0 +1,143 @@
+{
+  "kind": "isolated_right_follower_waypoints_v1",
+  "side": "right",
+  "role": "follower",
+  "active_motor": "arm",
+  "amplitude_deg": 16.0,
+  "transition_seconds": 40.0,
+  "hold_seconds": 5.0,
+  "cycles": 1,
+  "hold_test_seconds": 5.0,
+  "maximum_amplitude_deg": 16.0,
+  "maximum_reference_speed_deg_s": 1.0,
+  "maximum_reference_acceleration_deg_s2": 0.8,
+  "maximum_observed_speed_deg_s": [
+    45,
+    45,
+    45,
+    45,
+    45,
+    45,
+    45,
+    15
+  ],
+  "maximum_tracking_error_deg": [
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2
+  ],
+  "tracking_persistence_seconds": 0.1,
+  "maximum_motor_torque_nm": [
+    12,
+    12,
+    8,
+    8,
+    3,
+    3,
+    3,
+    3
+  ],
+  "maximum_temperature_c": 70,
+  "maximum_relative_excursion_deg": [
+    3,
+    12,
+    12,
+    18,
+    12,
+    12,
+    12,
+    3
+  ],
+  "enabled_raw_status": 1,
+  "disabled_raw_status": 0,
+  "raw_log_capacity": 600000,
+  "shutdown_confirmation_seconds": 2.0,
+  "description": "Independent unloaded validation at 75 percent of the commissioned forward offsets. Retains coordinated six-joint motion, 320-second timing and every guard/gain. Actual J2-J7 reference spans 7.5,15,12,15,15,15 degrees. Chosen before fitting the balanced capture. Freeze all balanced models before this capture; do not refit or select on validation. Fresh-reference whole-path bounds and preflight/hold required. Raw coordinates, no FT claim. Stop on first fault; no automatic retry.",
+  "waypoints_deg": [
+    {
+      "joint_1": 0.0,
+      "joint_2": 0.0,
+      "joint_3": 0.0,
+      "joint_4": 0.0,
+      "joint_5": 0.0,
+      "joint_6": 0.0,
+      "joint_7": 0.0,
+      "gripper": 0.0
+    },
+    {
+      "joint_1": 0.0,
+      "joint_2": 7.5,
+      "joint_3": -7.5,
+      "joint_4": 12.0,
+      "joint_5": -7.5,
+      "joint_6": 7.5,
+      "joint_7": 7.5,
+      "gripper": 0.0
+    },
+    {
+      "joint_1": 0.0,
+      "joint_2": 7.5,
+      "joint_3": -7.5,
+      "joint_4": 0.0,
+      "joint_5": 7.5,
+      "joint_6": -7.5,
+      "joint_7": -7.5,
+      "gripper": 0.0
+    },
+    {
+      "joint_1": 0.0,
+      "joint_2": 0.0,
+      "joint_3": -7.5,
+      "joint_4": 0.0,
+      "joint_5": -7.5,
+      "joint_6": 7.5,
+      "joint_7": -7.5,
+      "gripper": 0.0
+    },
+    {
+      "joint_1": 0.0,
+      "joint_2": 7.5,
+      "joint_3": 7.5,
+      "joint_4": 0.0,
+      "joint_5": -7.5,
+      "joint_6": -7.5,
+      "joint_7": -7.5,
+      "gripper": 0.0
+    },
+    {
+      "joint_1": 0.0,
+      "joint_2": 0.0,
+      "joint_3": -7.5,
+      "joint_4": 12.0,
+      "joint_5": -7.5,
+      "joint_6": -7.5,
+      "joint_7": -7.5,
+      "gripper": 0.0
+    },
+    {
+      "joint_1": 0.0,
+      "joint_2": 0.0,
+      "joint_3": 7.5,
+      "joint_4": 12.0,
+      "joint_5": 7.5,
+      "joint_6": 7.5,
+      "joint_7": -7.5,
+      "gripper": 0.0
+    },
+    {
+      "joint_1": 0.0,
+      "joint_2": 0.0,
+      "joint_3": 0.0,
+      "joint_4": 0.0,
+      "joint_5": 0.0,
+      "joint_6": 0.0,
+      "joint_7": 0.0,
+      "gripper": 0.0
+    }
+  ]
+}

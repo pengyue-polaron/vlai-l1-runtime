@@ -44,8 +44,8 @@ envelope is tracked in `configs/diagnostics/right_automatic_motion.json`.
 The launcher requires stopped, correctly mapped interfaces, zero CAN errors,
 and every motor in every motion-free preflight round. It never recovers a bus
 or retries enable automatically. The native owner holds a fresh measured pose,
-then optionally performs a bounded J7 sweep with the other joints and gripper
-fixed. It checks feedback age/status, bounds, relative excursion, measured
+then optionally performs a bounded single-joint sweep or explicit closed
+multi-joint waypoint path, always with the gripper reference fixed. It checks feedback age/status, bounds, relative excursion, measured
 speed, torque, temperature and persistent tracking error. Its tracking action
 is stop, separate from the unchanged teleoperation warning exception.
 The parent supervises heartbeat/CAN health; the child handles parent death.
@@ -55,11 +55,215 @@ one sequential disable-only cleanup owner may run after it has been reaped;
 no enable or target command is allowed in that cleanup mode. The link is then
 lowered, and any unconfirmed disable is reported as requiring intervention.
 
+For legacy single-joint policies, the selected joint is explicit in version-3 native input.
+Only J4, J6 or J7 can be selected; gripper and other joints cannot be selected.
+Native and offline checks use that same selected index for trajectory bounds
+and fixed-other-target checks. New J4/J6 commissioning policies use +/-0.25 and
++/-0.5 degrees respectively with 8-second transitions, unchanged PD gains and
+guards. Run the single-cycle policy before its repeated counterpart; a failed
+stage stops the sequence without retry. J7-only baseline studies reject J4/J6
+captures. Selecting a joint does not establish model-coordinate calibration.
+
+Following the operator's 2026-10-12 request for larger coordinated unloaded
+motion, `isolated_right_follower_waypoints_v1` uses `active_motor = "arm"`,
+exact named eight-motor `waypoints_deg` offsets, and native V4 input. V3 retains
+its existing single-joint restriction. V4 has 3..64 points, first and last all
+zero, at least two moving arm joints, and zero gripper offset everywhere.
+`amplitude_deg` is the absolute per-axis offset cap for this policy kind.
+Each offset also obeys its motor's explicit excursion budget. Every segment
+uses a synchronized monotonic quintic blend with zero endpoint velocity and
+acceleration. Python and native validation check EACH inter-point displacement
+against analytic peak speed/acceleration, including direction reversals.
+Native startup checks every waypoint relative to the fresh measured reference
+before enable; monotonic interpolation then stays inside those joint bounds.
+The reviewer verifies each saved target against the entire scheduled path,
+checks measured bounds/excursions and labels holds/repeated cycles by waypoint.
+V4 rejects paired/manual handling in both launcher and native core. Existing
+single-joint model analyses do not accept this multi-joint controller trajectory.
+
+`right_multijoint_unloaded_single.json` defines the experimental path:
+six coordinated postures plus return, 40-second transitions, 5-second holds,
+320-second path following the passed five-second hold in `sequence` mode.
+Offset ranges J2 [0,10], J3 [-10,10], J4 [0,16], J5/J6/J7 [-10,10] degrees;
+J1 and gripper stay fixed. Reference peak speed <=0.9375 deg/s and acceleration
+<=0.07217 deg/s^2. The new path cap is 16 degrees; measured excursion budgets
+are [3,12,12,18,12,12,12,3] degrees. Gains, tracking, torque,
+temperature, CAN/freshness, supervision and disable checks are unchanged.
+Joint-bounded motion does NOT establish Cartesian/table/cable clearance or
+calibrated model coordinates. Require current unloaded/clear-space context
+before commissioning; a fault stops the sequence without retry. No new
+hardware motion has been executed by the software extension itself.
+
+First live attempt on 2026-10-12: the hold passed, but the coordinated sweep
+stopped about 15.36 seconds into its first segment at J5 reported speed
+15.5307 deg/s against the unchanged 15 deg/s hard guard. Adjacent position
+feedback changed 0.17486 deg in 10.138 ms; this cannot be dismissed as speed-field
+noise alone. Operator reported no visible abnormality/contact. All eight
+disabled replies were verified, links lowered with zero CAN errors, no retry.
+The path remains NOT commissioned. Only one enabled exceedance was recorded
+before disable, which does not establish its duration under continued control.
+The paired manual-handling exception does not authorize transient overspeed
+during this automatic path. Detailed hashes/diagnosis are in HANDOFF.md.
+
+After that failure, the operator explicitly requested 45 deg/s instead of the
+15 deg/s stop threshold. The current multi-joint unloaded policy therefore sets
+`maximum_observed_speed_deg_s = [45,45,45,45,45,45,45,15]`: the seven arm joints
+use an immediate 45 deg/s hard stop; the fixed gripper retains 15 deg/s. This is
+a new experimental automatic-motion setting, NOT the paired manual-handling
+exception and not a validated manufacturer safety rating. No persistence filter
+was added. Reference speed remains <=0.9375 deg/s with identical waypoints and
+timing; all other guards/gains are unchanged. Legacy single-joint and paired
+policies are unchanged. The historical failed capture retains its embedded
+15 deg/s policy and FAILED status. The changed threshold has not been live
+commissioned; the configuration edit itself does not restart hardware.
+
+The operator then explicitly started a new run with the 45 deg/s setting.
+On 2026-10-12 at 08:25:51 UTC it ended FAILED: hold passed, but the sweep
+triggered persistent J7 tracking error at ~22.65 seconds (0.8 deg for 0.1 s;
+last saved error 0.844 deg). No revised speed threshold was exceeded; enabled
+speed peak was 23.9257 deg/s on J5. All eight disabled replies and clean CAN
+shutdown were verified, no automatic retry. This leaves the full path
+uncommissioned; it is not authorization to relax tracking. See HANDOFF.md for
+source hashes and the separately labelled offline failure diagnosis.
+
+After the J7 tracking stop the operator explicitly requested raising that
+threshold. The current multi-joint policy sets J7 tracking tolerance to 2 deg,
+matching the other motors, with the same 0.1-second persistence. This replaces
+the experimental 0.8-deg J7 setting only for future runs of this policy.
+Speed caps remain [45,45,45,45,45,45,45,15] deg/s; trajectory, gains, bounds,
+excursion, effort, temperature, communication and disable checks are unchanged.
+Native tracking still latches a failure on sustained error above 2 deg.
+The setting was software-verified before the full run recorded below. The earlier
+failed recording keeps its original 0.8-deg policy and FAILED status.
+
+On explicit operator instruction the 45 deg/s / 2-deg version completed its
+first full sequence at 2026-10-12 08:50:54 UTC. Hold and all 320 seconds of the
+path passed preflight, live guards, all-eight verified disable and offline
+review. Operator confirmed the entire run had no contact or abnormality.
+Maximum tracking error 1.39855 deg; maximum enabled speed 22.24671 deg/s.
+All CAN links returned DOWN with zero errors or qdisc drops. This commissions
+that bounded acquisition from the recorded reference and scene; it does not
+establish arbitrary-start collision clearance, manufacturer safety ratings,
+production command readiness, or FT accuracy. Native startup must still check
+fresh reference/whole-path bounds and all preflight gates on every later run.
+The earlier failed runs retain their original outcomes and thresholds.
+
+`right_multijoint_unloaded_reverse.json` reverses only the commissioned path's
+waypoint order for independent unloaded model validation. All timing, amplitude,
+gains and guards are identical. It traverses the same offset-space segments in
+reverse, starting from fresh feedback; absolute posture may differ after disable.
+The usual whole-path bounds, current clear/unloaded scene, motion-free preflight,
+five-second hold, independent supervision and verified disable still apply.
+Freeze the forward model before collection; evaluate coverage using actual
+measured positions, never assume reversal guarantees matching absolute poses.
+
+`right_multijoint_unloaded_balanced.json` concatenates the commissioned forward
+and reverse paths into 15 waypoints / 635 seconds under one fresh reference.
+The middle zero waypoint is an ordinary five-second hold, with no disable or
+re-enable between directions. All per-segment timing, gains, thresholds, offset
+envelope and raw capacity (600,000 frames) stay unchanged. The 508,000 nominal
+feedback frames plus the ten-second reserve fit that capacity. The usual
+five-second commissioning hold and preflight precede this bounded sweep.
+This is training acquisition, not an independently validated torque model.
+
+`right_multijoint_unloaded_validation75.json` uses 75% of the commissioned
+forward offsets with the same 320-second schedule and unchanged guards/gains.
+It was chosen before fitting the balanced data. Six-joint reference spans are
+7.5/15/12/15/15/15 degrees, peak reference speed 0.703125 deg/s. It is still a
+fresh-reference, whole-path-bound-checked acquisition, not a Cartesian clearance
+certificate. Freeze the balanced models before starting this independent run;
+evaluate measured coverage without re-centering angles or widening support.
+
 Initial commissioning is a five-second current-position hold, followed only
 on success by a small wrist sweep. This PD controller has no model gravity or
 friction feedforward; its captures are a different controller context from
 the earlier opaque teleoperation controller. Raw-motor coordinates and these
 experimental guard limits are not calibrated FT or collision avoidance.
+
+The experimental `--mode hold` owner also supports an explicit normal finish:
+create `finish.request` in that capture's output directory containing exactly
+`finish` followed by one newline. Only after the native owner reports running
+does the supervisor send its hold-completion signal. Completion waits until
+the tracked `hold_seconds` minimum, preserves all guards, and verifies disable
+before marking success. SIGINT/SIGTERM, faults and failed cleanup remain failed
+runs; a finish request cannot reclassify them as successful. Sweeps ignore this
+request. The dedicated `right_automatic_operator_hold.json` bounds a stationary
+experiment to 600 seconds with full raw retention; it is not indefinite holding.
+Use it with `--mode hold`, not `sequence`. A request ends the session and never
+causes a new movement or enable. A requested shorter hold must carry matching
+request/completion/duration evidence to pass offline review.
+
+After the native owner closes its SDK and emits verified `disabled`, the parent
+allows buffered file output within the tracked teleoperation shutdown timeout,
+measured once from the first disabled marker. Subsequent output cannot extend
+that deadline. Before verified disable, the normal live heartbeat applies.
+Finalization timeout, nonzero native exit, operator stop or health failure still
+fail the run; the child is reaped before link-down or any sequential cleanup.
+
+For a same-session load experiment, establish a stationary running hold before
+requesting manual attachment. Label attachment/removal transitions separately;
+accept measurement windows only after the operator confirms hands clear and
+the measurements have settled. Keep gripper opening and reference fixed. Do
+not infer force from an unlabelled window, fit load response into an unloaded
+baseline, or claim that holding a fixed reference guarantees an identical pose.
+
+The experimental `--mode paired` runs three sweeps with one owner and one fresh
+reference: baseline, stationary attach wait, middle sweep, stationary remove
+wait, final sweep. `right_joint4_paired.json` caps the ENTIRE session at 600
+seconds, including both waits and settling. Each sweep has two +/-0.5-degree J4
+cycles. Explicit `attach.ready` (`attached\n`) and `remove.ready`
+(`removed\n`) files advance only their corresponding waiting phase; premature
+or malformed files fail closed. There must be enough time remaining for every
+remaining sweep. No phase auto-retries or releases/re-enables the motors.
+
+Following the operator's request after the manual-attachment J5 stop, the
+paired policy now has explicit `manual_handling` settings. These are software
+validated experimental candidates, NOT commissioned hardware limits. Only
+stationary awaiting/settling phases use this policy. J5/J6/J7 have an immediate
+45 deg/s ceiling; the other five motors retain 15 deg/s. Above the ordinary
+15 deg/s limit, a continuous 0.1-second excursion still stops. Automatic sweeps,
+including their scheduled holds, retain immediate 15 deg/s protection. No
+position bound, relative excursion, torque, temperature, tracking, freshness,
+CAN health, controller gain or disable requirement changes. Target must equal
+the initial eight-motor reference whenever manual handling is active.
+
+Acknowledgement enters `settling_loaded` or `settling_empty_after`, never
+immediate motion. All eight positions must remain within a 0.05-degree span
+and reported speeds within 5 deg/s for two continuous seconds AFTER that
+acknowledgement. Renewed motion resets the dwell; 20 seconds without settling
+fails and disables. Global cap remains 600 seconds and sufficient time for
+remaining sweeps plus worst-case settling must remain at each acknowledgement.
+Settling data are excluded from training/load evaluation. Native V3 explicitly
+encodes presence/absence and every handling value; V1/V2 input is rejected.
+Policies without handling preserve the old strict behavior and phase sequence;
+handling policies are rejected for non-paired motion modes. Raw speed-exceedance
+counts in offline review still use the ordinary 15 deg/s threshold, including
+manual periods, and are not silently erased by this exception. Never relabel
+the earlier failed experiment as successful using the new policy.
+An all-unloaded commissioning run may explicitly advance both waits without
+manual actions, but must record `middle_stage_loaded=false`; phase names and
+advance tokens alone are never evidence that an object was attached. Paired
+analysis requires hash-bound stage context, fits only initial unloaded data,
+and evaluates subsequent stages without refitting. It does not claim a model
+was frozen before acquisition, calibrated FT, or runtime eligibility.
+
+The separate `right_joint4_threequarter_paired_long_wait.json` retains the
++/-0.75-degree trajectory and all handling/motion guards but gives manual
+attachment/removal a 1200-second total session cap and 1,000,000-frame raw
+capacity. It is a prepared duration extension, not yet live commissioned.
+Acknowledgements still require enough time for remaining sweeps and worst-case
+settling; there is no indefinite hold or automatic restart. Existing 600-second
+policies and historical capture policies remain unchanged. A stopped partial
+capture may receive a separately labelled exploratory diagnosis, never a passed
+paired review or fabricated missing phase.
+
+`review-automatic --recheck-offline-failure` is a pure data recheck after an
+analysis bug fix. It requires a zero native exit, verified disable, no cleanup
+error, and an original failure explicitly originating in offline review. Every
+integrity check still runs. It preserves the original failed report and writes
+a separate result bound to that report's hash. It cannot reclassify a live
+guard/stop/cleanup failure or trigger hardware operations. Paired analysis has
+the same explicit option and records the recheck in its output.
 
 `trajectory.WristSweep` and `TrajectoryRehearsal` are pure offline planning and
 fault models. They contain no SDK/transport/lifecycle adapter and do not clear

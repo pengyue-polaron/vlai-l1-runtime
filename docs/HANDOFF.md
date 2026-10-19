@@ -8,6 +8,1201 @@ silently choosing one.
 
 ## Start here
 
+**CURRENT STOPPED — 2026-10-12 11:38:48 UTC, VALIDATION75 PASSED:**
+`data/temporary/right_multijoint_unloaded_validation75_20261012`, exec **54281 REAPED**.
+Hold and sweep each passed 40/40 all-motor preflight, guards, all-eight verified
+disable and offline review. All five CAN links DOWN/STOPPED, zero live/interface
+errors, can2 qdisc drops zero, no controller process. No retry or guard changes.
+320-second sweep: 32,000 samples, 256,048 raw frames, maximum tick 10.287353 ms,
+motor gap 17.102941 ms. Tracking max J7 1.25036 deg; enabled speed peak 23.08621
+deg/s (J5/J7). J2-J7 spans 7.169/14.819/11.453/15.081/14.579/14.010 deg.
+Raw SHA a0eb2caff9b3b0538693e7e6826864003c56d535571f71706f7200447e713d00;
+samples SHA 780cdd094d60a7afc41bdea0e13119fbceb44e6eb5a92da190d519ad21522a9b.
+
+This turn completed BOTH the 635-second balanced training and 320-second
+independent 75% path, plus frozen evaluation. Both scene contexts explicitly
+use `pre_run_continuation`: operator-declared unchanged unloaded scene and
+continuation authorization; no subsequent contact/load change reported. No
+fresh post-run visual observation is fabricated or required as another approval.
+If contact is reported later, amend dataset eligibility.
+
+75% sweep artifacts: `independent_validation.json` (frozen balanced model),
+`old_forward_model_comparison.json` (old model on the SAME new windows), and
+`comparison_summary.json`, SHA
+4eca061eeedfe30bbd0b92c290c5f39872d75716681c300f85741b68507ec78f.
+Models and policy match pre-recorded hashes; no refit, angle re-centering,
+support relaxation or candidate selection. 295 accepted one-second windows;
+hold [93,94) s rejected by existing position-stability gate. 287/295 meet the
+new pose-support gate, 291/295 meet the old gate. All accepted windows are
+inside the new training position box; eight exceed nearest-pose radius 0.75.
+Improved coverage versus the earlier reverse test involves a DIFFERENT path;
+do not attribute it solely to training, since the old model covers this path too.
+
+Same-test full-window RMSE in Nm, J1..J7, pose+velocity+history:
+- old forward training: [0.18953,0.23432,0.31644,0.22920,0.08568,0.07287,0.05319]
+- new balanced training: [0.12453,0.20607,0.26711,0.23105,0.09129,0.08677,0.06384]
+J1-J3 improved, J4 nearly unchanged, J5-J7 worsened. More balanced data is NOT
+a universal improvement. Volume, direction coverage and session context all
+changed; no causal isolation of balancing alone. All four candidates reported.
+New pose-only RMSE [0.14206,0.38269,0.45785,0.51822,0.12163,0.16043,0.10008] Nm.
+History generally helps versus this baseline, but velocity-only is slightly
+better on J5. Supported history RMSE:
+[0.12604,0.20431,0.27059,0.23398,0.09010,0.08776,0.06394] Nm. Supported absolute
+error peaks J3 0.83003/J4 0.83476 Nm; averages do not bound every window.
+These are ONE-SECOND MEAN raw motor torques, not instantaneous external torque,
+mass or FT accuracy. Model coordinates and loaded generalization remain open.
+
+Next work: investigate joint-specific residual/history structure on training
+data, freeze a candidate, then collect another untouched validation. The 75%
+capture is now examined; tuning against it would make it development data.
+Preserve old/new results including regressions. No human action pending and
+no further motion active. Hardware-free checks: 714 pytest tests, Ruff
+check/format and diff check passed.
+
+**LIVE VALIDATION75 — 2026-10-12 11:33 UTC, exec 54281:**
+Balanced sequence completed at 11:31:21 UTC; exec **67070 REAPED**, both stages
+passed, all eight disabled, all CAN DOWN/STOPPED with zero errors. 635 seconds,
+63,500 samples, 508,048 raw frames, tick max 10.137583 ms, gap 17.13073 ms.
+Tracking max J7 1.37050 deg; peak enabled speed J7 25.60471 deg/s, no exceedance.
+Raw SHA 31a400192b5d8d19758710a595b33268dea49bd367a3dc0b11fae6cd0807e36f;
+samples SHA 0269477ccc88e521f95b33173725661433e6fc7eb9c03d3876bce3870bec9d6d.
+
+Balanced `sweep/operator_context.json` labels the continuing declared unloaded
+scene with `confirmation_scope=pre_run_continuation`; no new post-run visual
+observation is claimed. Operator instructed continuation, was told to report
+any contact/load change, none reported. Reconsider the labels if later corrected.
+590 one-second windows, none rejected; four models frozen in `multijoint_study.json`,
+SHA 78cad5552d847d34d14131dd4cf3297a14483ddc44e8876f2621bfb43b95ad95.
+Additional geometric-group CV holds out both directions/repeats of a segment
+together; specified before fitting in `right_multijoint_balanced_analysis_supplement_20261012.json`.
+All balanced data remain training/development, no independent accuracy claim.
+Geometric-group history-model RMSE J1..J7:
+[0.41329,0.29744,0.17983,0.21261,0.04839,0.10977,0.06036] Nm; J1 still poor.
+
+Starting `automatic-right --mode sequence`, policy
+`configs/diagnostics/right_multijoint_unloaded_validation75.json`, output
+`data/temporary/right_multijoint_unloaded_validation75_20261012`. Freeze plan:
+`data/temporary/right_multijoint_validation75_plan_20261012.json`. Policy SHA
+531922ba0dc83043b382c243debc4bfe3f2888ee3af6cd8b264fb44d128341a5.
+75% forward offsets were chosen before fitting; 320 seconds, unchanged timing,
+guards, gains and envelope, reference speed <=0.703125 deg/s. All four balanced
+models must be evaluated without retuning, fitting, support relaxation or angle
+re-centering. Preflight/hold must pass first; no automatic fault retry.
+Inspect fresh status before any action; completion not yet claimed.
+Both stages passed 40/40 all-motor preflight; five-second hold passed verified
+disable/review. Sweep running from fresh pose
+[-3.180184529,3.311326296,-19.39803265,13.99936917,13.54037362,-1.169346208,
+-3.114613859,1.95619606] deg. At 21.96 seconds can2 ERROR-ACTIVE, zero errors.
+Hardware-free tests now 714 passed; Ruff check/format and diff check passed.
+
+Balanced same-reference comparisons saved as `sweep/same_reference_holds.json`,
+reproduced by `data/temporary/analyse_balanced_holds_20261012.py`. Six paired
+waypoint hold tails have maximum absolute reverse-minus-forward differences
+J1..J7: position [0.13114,0.26255,0.06557,0.04389,0.17407,0.48042,0.39325] deg,
+torque [0.54931,1.10622,0.25370,0.19195,0.06781,0.25528,0.16699] Nm. Identical
+commands are not identical measured poses; these do not isolate pure friction.
+The script re-runs review against final report/data: launcher's cached analysis
+hashes the report before analysis_status is appended. Cached and fresh reviews
+must match except that report digest; original capture artifacts are unchanged.
+
+**LIVE BALANCED TRAINING — 2026-10-12 11:20 UTC, exec 67070:**
+Operator replied “没有异常，你继续” to the preceding unloaded/contact-free scene
+question. Reverse `sweep/operator_context.json` now preserves this exact answer
+and its contextual interpretation, bound to both capture hashes. Ran the frozen
+study CLI to write `sweep/independent_validation.json`; numerical evaluation is
+exactly equal to the earlier provisional comparison. Original provisional
+artifacts remain historical evidence; reverse validation is now context-labelled.
+
+Starting isolated right-Follower `automatic-right --mode sequence` with
+`configs/diagnostics/right_multijoint_unloaded_balanced.json`, output
+`data/temporary/right_multijoint_unloaded_balanced_20261012`. Current scene
+continues unloaded original gripper/camera. All links checked DOWN/STOPPED,
+zero live/interface errors, configured parent identities match, no owner.
+Inspect fresh process/status before any action. Completion not yet claimed.
+Hold and sweep each passed all 40 preflight rounds. Hold passed verified
+disable/review; sweep is running from fresh reference
+[-3.005329125,3.311326296,-19.2450347,13.99936917,13.56223023,-1.562771081,
+-3.092756827,1.95619606] deg. No gain/guard/native binary change.
+One five-second hold must pass, then 635-second sweep: forward+reverse under
+ONE reference, 15 waypoints, middle zero is a hold without disable/re-enable.
+Only waypoint list/description differ; gains, timing, guards, envelope and
+600,000-frame capacity unchanged. Stop on any fault, no automatic retry.
+
+Plan `data/temporary/right_multijoint_balanced_plan_20261012.json` fixes the
+unchanged four-model analysis and labels ALL new data training/development.
+Grouped scores remain exploratory; a later untouched recording is required
+to evaluate the new fitted model. Preserve old forward/reverse results.
+Policy SHA c15ae5a3c4401e6fbdc7f6a38cc1269f7881b9f2de40146bc302c3375846631c.
+Hardware-free checks passed: 712 pytest tests, Ruff check/format, diff check.
+Pure test checks complete command equivalence to both commissioned paths,
+same guards, one shared middle hold and sufficient raw retention reserve.
+
+**CURRENT STOPPED — 2026-10-12 11:13:55 UTC, reverse sequence PASSED:**
+`data/temporary/right_multijoint_unloaded_reverse_20261012`, exec **21572 REAPED**.
+Hold and sweep each passed 40/40 all-motor preflight, live guards, all-eight
+verified disable and offline review. Full 320-second sweep: 32,000 samples,
+256,048 raw frames; maximum tick 10.891632 ms, motor gap 17.118219 ms.
+All CAN interfaces DOWN/STOPPED, zero live/interface errors, can2 qdisc drops
+zero, no controller owner remains. Maximum tracking error 1.35672 deg (J7);
+largest enabled speed 32.32070 deg/s (J6), within the unchanged 45 deg/s cap.
+J2-J7 spans 9.420/19.802/15.453/19.671/19.234/19.387 deg. No fault or retry.
+Raw SHA 72d27a85d54a33d92dcd890b020773e9f0491b6396991fa4ce0d513d080f5181;
+samples SHA dda9a365348afa1b0e0282edbde63136bd778a98cc2e5e0601459b277cc0c083.
+
+Post-run operator scene confirmation requested asynchronously and PENDING.
+Pre-run authorization carried the previously confirmed unloaded scene forward,
+but do not fabricate a post-run observation. Conditional numerical comparison
+is saved as `sweep/provisional_comparison.json`, reproduced by
+`sweep/analyse_provisional.py`; `external_load_present` and `follower_contact`
+remain null there. No certified unloaded `operator_context.json` has been
+created for this reverse sweep yet. Once the operator replies, record their
+exact context bound to both source hashes, and run the study CLI with
+`--frozen-study` against the original forward artifact. If contact/load is
+reported, do not relabel this as clean unloaded validation or train on it.
+
+All four forward models stayed frozen, with the pre-recorded SHA below checked
+again before comparison. 296 windows, none rejected. Conditional full-recording
+RMSE (Nm), in J1..J7 order:
+- pose: [0.32219,0.55169,0.61719,0.62680,0.16185,0.18798,0.11904]
+- pose+velocity: [0.35060,0.38886,0.40789,0.34381,0.11045,0.12850,0.07925]
+- pose+velocity+history: [0.49948,0.29262,0.20235,0.32059,0.06900,0.10913,0.08632]
+Full scores include extrapolation and summarize ONE-SECOND MEAN motor torque,
+not instantaneous torque/force accuracy. History improves J2-J6 versus these
+baselines but worsens J1 and is worse than velocity-only on J7. J1 was not
+independently excited. No universal best model or FT accuracy claim.
+
+Only 98/296 windows meet the frozen pose-support gate. `coverage_diagnosis.json`
+records why: 185 windows exceed J7's training box (+/-0.5-deg margin), 13 each
+exceed J5/J6 boxes, with overlap; all pass nearest-pose-radius 0.75. Restart
+changed J7 start from -1.7376 to -3.0709 deg; reverse window minima -13.397 vs
+forward -12.098 deg. Do not loosen the gate or recenter measured angles after
+seeing validation data. Supported history-model RMSE:
+[0.24392,0.36507,0.11397,0.32562,0.05392,0.05943,0.05757] Nm; geometric support
+still does not establish velocity/history coverage. Static hold scores are
+recorded separately. Next useful acquisition is balanced forward/reverse
+training from a shared fresh reference, then a THIRD untouched validation path;
+account separately for J1's poorly identified response. Do not fit this reverse
+data into the frozen forward model and continue calling it held-out validation.
+No additional movement is running or scheduled automatically.
+
+**LIVE REVERSE VALIDATION — 2026-10-12 11:08 UTC, exec 21572:**
+Operator explicitly confirmed no issue and authorized continuation. Current
+scene context remains unloaded original gripper/camera, no reported contact or
+scene change. All interfaces checked DOWN/STOPPED with zero live/interface CAN
+errors and exact configured parents, no controller process. Starting isolated
+`automatic-right --mode sequence` with
+`configs/diagnostics/right_multijoint_unloaded_reverse.json`, output
+`data/temporary/right_multijoint_unloaded_reverse_20261012`. Inspect fresh status
+before any operation; completion/disable are not yet claimed. Both stages passed
+40/40 all-motor preflight; the five-second hold passed verified disable/review.
+Sweep running from fresh pose [-2.874187359,3.267612445,-19.09203676,13.99936917,
+13.9337985,-2.087337613,-3.070900008,1.95619606] deg. At 18.28 seconds, can2
+ERROR-ACTIVE, zero live/interface errors or qdisc drops. No automatic fault retry.
+
+New pure `multijoint_torque_study.py` fits one-second mean raw J1-J7 motor torque
+using measured J2-J7 pose, velocity and causal direction history. No targets,
+tracking errors or torque feedback as predictors. Fixed ridge penalty 0.01,
+train-only scaling, whole transition+hold groups left out, geometric support
+reported separately. 296 windows (280 motion, 16 settled hold), none rejected.
+Grouped RMSE pose vs pose/velocity/history: J2 0.56449 -> 0.34001 Nm,
+J4 0.77406 -> 0.33463, J7 0.10524 -> 0.07371; J1 worsens 0.23185 -> 0.24907.
+These are exploratory within-one-recording scores, not independent FT accuracy.
+206/296 held-out windows meet the geometric support gate; this does not certify
+history coverage. All four models are frozen before independent collection.
+
+Frozen forward artifact: previous successful sweep's `multijoint_study.json`,
+SHA e0053525c8e8f95a5e269a65fc8bdf43f3a1fb21d39d4ad1d0d378c1a3268999.
+Pre-recorded plan `data/temporary/right_multijoint_reverse_plan_20261012.json`.
+Reverse policy SHA 7d2c4df0f0c4c947eddfc3ba72668f9cbbce204f85c0d5d2f6ea232930ff854e;
+only waypoint order and description differ from commissioned forward policy.
+Timing, guards, envelope and native binary unchanged. Fresh measured initial
+pose is still required; disable/restart may shift absolute pose, so report
+actual support rather than assume the two trajectories overlap perfectly.
+Hardware-free checks before launch: 711 pytest tests, Ruff check/format and
+`git diff --check` passed. Tests cover causal/no-torque-leakage features, grouped
+splits, synthetic held-out prediction, frozen context rejection and reverse
+path/guard equivalence. No controller or production FT change.
+
+**CURRENT STOPPED — 2026-10-12 08:50:54 UTC, full multi-joint sequence PASSED:**
+`data/temporary/right_multijoint_unloaded_45dps_2deg_20261012`, exec **57774 REAPED**.
+Hold and sweep each passed every motor in all 40 preflight rounds, native
+guards, verified all-eight disable and offline review; sequence PASSED.
+All five CAN links DOWN/STOPPED, zero live/interface CAN errors, can2 qdisc
+drops zero, no controller owner remains. No further run started. User confirmed
+afterwards “全程无接触、无异常”; the original gripper/camera, no added payload,
+contact-free context is saved in `sweep/operator_context.json` and bound to
+the actual raw/sample hashes. This is the first complete larger multi-joint
+acquisition under the 45 deg/s arm speed and 2-degree tracking configuration.
+
+Full 320-second path: 32,000 control samples, 256,048 raw feedback frames;
+last sample 319.990002737 s, max tick 10.066174 ms, max raw motor gap 17.237425 ms.
+Measured J2–J7 spans 9.464/19.846/15.453/19.234/19.016/19.169 degrees. Largest
+tracking error 1.39855 deg (J7), J6 1.21444 deg, all others <=0.89627 deg.
+Largest enabled speed 22.24671 deg/s (J5), J6 21.40721 and J7 19.72822; no
+speed-cap exceedance. Maximum torque J2 3.6 Nm, J4 2.85128 Nm, within budgets.
+J1's reference stayed fixed but measured span was 0.306 deg; gripper 0.02186 deg.
+All six posture visits plus initial/return holds completed. Each reviewed hold
+tail has 250 samples over 2.5 seconds and maximum position span <=0.021858 deg.
+
+Same-command return versus initial hold: J7 position -0.78484 deg, raw torque
++0.33709 Nm; J5 +0.34971 deg/-0.14597 Nm; J6 +0.30512 deg/-0.16461 Nm;
+J1 -0.14172 deg/+0.62885 Nm. These include actual posture and history effects;
+do not identify pure friction or calibrated external torque from these deltas.
+Only one complete path is available: no fitted multi-joint model, independent
+holdout accuracy, mass estimate or six-axis FT validation is claimed.
+
+`sweep/commissioning_summary.json` binds the operator context, report, analysis
+and source hashes; `sweep/hold_summary.csv` exports all eight hold tails.
+Raw SHA 5351fa735665f24133d717ab2205b50b8134195d8f4fafa16e811725047d07e9;
+samples SHA 4b951cf6be2bb27aaab3b118f3ee393c6e4078ca8755ff563066f6ff29808158.
+Policy SHA 4ae913b60f3ae2f70fc8623baf9e786b67c8b93b428a0618d1e421ef21beb845;
+native SHA 9a2cb7cfda4803246a3ba5df05b362a164a536af5be6fe4b4e9d166f525bf751.
+Policy description was authored before commissioning; this recorded success
+supersedes its prior status without altering the capture's embedded policy.
+Next research step: model measured multi-joint state/history and validate on
+independent trajectories before another unloaded/loaded comparison. Old
+single-joint fitters are not compatible with this path. No human action pending.
+
+**LIVE — 2026-10-12, explicitly requested 45 deg/s / 2-degree sequence:**
+Operator said “继续跑啊” after J7 tracking tolerance was raised to 2 degrees.
+Launched `automatic-right --mode sequence` with current multi-joint policy,
+output `data/temporary/right_multijoint_unloaded_45dps_2deg_20261012`, exec
+**57774**. Policy SHA 4ae913b60f3ae2f70fc8623baf9e786b67c8b93b428a0618d1e421ef21beb845;
+native SHA 9a2cb7cfda4803246a3ba5df05b362a164a536af5be6fe4b4e9d166f525bf751.
+Immediately before launch, configured identities unchanged, all CAN links DOWN,
+zero live errors, no controller owner. Previously confirmed unloaded/clear
+scene remains the stated context. Five-second hold must pass before 320-second
+path; inspect live status before any action. No automatic retry or further
+threshold changes. New explicitly requested run; completion not yet known.
+
+**CURRENT STOPPED — 2026-10-12, J7 tracking tolerance raised at operator request:**
+After the 45 deg/s run's J7 tracking stop, the operator explicitly requested
+“这个阈值太小了 调大点”. Updated only this multi-joint policy's J7 tolerance
+from 0.8 to 2 deg, matching the other motors; persistence remains 0.1 seconds.
+Current tracking vector [2,2,2,2,2,2,2,2]; arm speed caps remain 45 deg/s and
+gripper 15 deg/s. Waypoints, timing, reference speed, gains and other guards
+unchanged. Description/authorization docs updated. Historical failed captures
+retain their original embedded policies; they are not reclassified as passed.
+Rendering and pure native tests check the new limit, acceptance of the recorded
+0.844-degree lag and latched stopping above 2 deg after 0.1 seconds. No hardware
+was started by this edit; last verified state remains disabled and links DOWN.
+The new tracking tolerance is not live commissioned. Native guard logic and
+operational binary are unchanged; only rendered configuration differs.
+Policy SHA 4ae913b60f3ae2f70fc8623baf9e786b67c8b93b428a0618d1e421ef21beb845.
+Hardware-free validation passed: 697 pytest tests, four CTests, Ruff check/format
+and `git diff --check`. Comparison to the previous run's embedded policy proves
+only J7 tracking tolerance and description changed.
+
+**CURRENT STOPPED — 2026-10-12 08:25:51 UTC, 45 deg/s run stopped on J7 tracking:**
+`data/temporary/right_multijoint_unloaded_45dps_20261012`, exec **20280 REAPED**.
+This was explicitly started by the operator after the speed-policy change.
+Hold and sweep each passed all 40 preflight rounds. Five-second hold, its
+verified disable and offline review passed. Sweep failed at ~22.65 s with
+`native:tracking error:joint_7`; all eight motors verified disabled. All links
+DOWN/STOPPED, zero live/interface CAN errors, no controller owner remains.
+No automatic retry or further threshold/gain changes. Sequence remains FAILED.
+
+2,265 saved samples ending at 22.640008585 s; maximum tick 10.015934 ms.
+Last J7 measured -1.038205 deg, reference -0.194196 deg, error -0.844009 deg.
+Native tracking gate is 0.8 deg for 0.1 seconds (other motors 2 deg). Recorded
+samples precede the failed tick; raw J7 position stayed near -1.038 deg into
+that tick, before disable. Max sampled J7 torque 0.35409 Nm. Other joints'
+maximum tracking error <0.61 deg. No motor exceeded its revised speed cap;
+enabled peaks J5 23.92571, J6 15.53072, J7 13.01223 deg/s. These are measured
+speeds, not the <=0.9375 deg/s reference speed. Actual J2–J7 position spans
+3.519/3.847/5.901/3.497/3.541/3.082 deg: first transition only, no complete
+scheduled posture or full multi-joint training trajectory acquired.
+
+Pure reproducible investigation in `sweep/analyse_tracking_stop.py` and
+`sweep/tracking_diagnosis.json`; original reports/raw headers remain FAILED.
+Raw SHA 719bc5bffea0bfc4fe1b3e57afd015883bcd1092372c29d4488f0d39a1049093;
+samples SHA 75e1bb6ed5ca0cdcd8dbacbdd2f828b55715bf5f8b67bbc167e05195ba3c2246.
+Policy/native hashes unchanged from live setup below. Operator had confirmed
+unloaded/clear conditions before motion; no additional post-run observation
+has been requested or received for this run. Data establish a persistent
+tracking stop, not its physical cause. No reclassification as passed, no new
+force estimate, no hardware restart. Next work concerns J7 slow tracking and
+its 0.8-degree criterion; the 45-degree speed change does not change tracking.
+
+**LIVE — 2026-10-12, operator-started 45 deg/s multi-joint commissioning:**
+Operator explicitly said “好 那你现在开始试验” after the scoped speed-policy
+change. Current unloaded/clear scene confirmed in the preceding exchange.
+Launched `automatic-right --mode sequence`, policy
+`right_multijoint_unloaded_single.json`, output
+`data/temporary/right_multijoint_unloaded_45dps_20261012`, exec **20280**.
+Policy SHA b90c75453b68e0846aa5d0dd8f2c6c2e0353088417bd54694c44aa91e8317b31;
+native SHA 9a2cb7cfda4803246a3ba5df05b362a164a536af5be6fe4b4e9d166f525bf751.
+Immediately before launch: identities unchanged, all links DOWN/STOPPED with
+zero live errors, no controller owner. Sequence requires a passed five-second
+hold before its 320-second path. New explicitly requested run, not automatic
+fault retry. Observe fresh status; no success/disable claim until verified.
+
+**CURRENT STOPPED — 2026-10-12, operator-requested 45 deg/s limit configured:**
+Operator explicitly said “没关系啊，这个限制改成四十五度每秒”. Updated only the
+multi-joint unloaded policy's measured arm speed limits: J1-J7 now 45 deg/s,
+fixed gripper still 15 deg/s. Description and scope documentation updated.
+Waypoints, 40-second transitions, 320-second duration and <=0.9375 deg/s peak
+reference speed are unchanged. Gains, bounds/excursion, tracking, effort,
+temperature, CAN/state and verified-disable protections unchanged. No filter
+or automatic retry added. Legacy single-joint/paired policies unchanged.
+This explicit instruction supersedes the old 15 deg/s configuration for FUTURE
+multi-joint captures; it does not reclassify the failed recording below.
+Native guard logic/binary unchanged; only its rendered speed parameters differ.
+Tests verify native rendering and acceptance of the recorded 15.53 deg/s value,
+acceptance below 45 and a latched stop above 45. No CAN queries or motion were
+started by this edit. The new threshold remains uncommissioned. Last verified
+hardware state is disabled with all links DOWN from the previous run.
+Current policy SHA b90c75453b68e0846aa5d0dd8f2c6c2e0353088417bd54694c44aa91e8317b31.
+Hardware-free checks passed: 697 pytest tests, four CTests, Ruff check/format
+and `git diff --check`. Comparison with the failed capture's embedded policy
+confirms only measured speed limits and description changed.
+
+**CURRENT STOPPED — 2026-10-12 08:14:49 UTC, first multi-joint run interrupted:**
+`data/temporary/right_multijoint_unloaded_single_20261012`, exec **74975 REAPED**.
+User confirmed unloaded/suspended/clear/hands away before launch, and afterwards
+reported no contact, cable interference, sudden motion or abnormal sound.
+Hold passed (40/40 preflight, native, verified disable, offline review). Sweep
+also passed 40/40 preflight but failed at about 15.36 seconds with
+`native:speed hard guard:joint_5`; all eight motors verified disabled. Sequence
+FAILED, no retry. All CAN links DOWN/STOPPED, live and interface errors zero,
+no controller process remains. No policy, gain or guard was relaxed.
+
+J5 has exactly one enabled raw frame above 15 deg/s: -15.5307249 deg/s at
+15.353056865 s. Position changed -0.1748563 deg (~8 encoder codes) in 10.13828 ms
+between adjacent received frames (position-difference estimate -17.2471 deg/s;
+host receive timing, not motor acquisition timing). Next raw frame is already
+disabled and has -18.0492 deg/s; never count that as enabled operation. The
+shutdown truncates the trace, so one observed enabled exceedance does NOT prove
+the excursion would have self-cleared on the next control tick.
+
+At trigger, J5 target offset only -1.13043 deg and measured target error about
+0.19058 deg. Its preceding maximum sampled tracking error was 0.48314 deg,
+maximum sampled absolute torque 0.21245 Nm. Maximum control tick 10.017701 ms,
+no overflow/CAN fault. Position history is consistent with short breakaway/
+catch-up during slow PD tracking, not speed-field noise alone; cause remains
+unidentified. This occurred early in the first segment, before any of the six
+scheduled postures, not at the planned large-amplitude endpoint. No full-motion
+unloaded model or held-out force result can be derived from this failed capture.
+
+Reproducible pure investigation: `analyse_interruption.py` and
+`interruption_diagnosis.json` in the sequence directory. Original FAILED reports
+and raw header remain unchanged; no offline-success reclassification applies.
+Sweep raw SHA 945396bfac191d72173851d92176965dfd807dc00fc166cccfee8de645f28b5d;
+samples SHA 3ed133d7c82ba2619d306da9830c1e98f2dae590150e9e435b025e1f2b2a1153.
+Native SHA remains 9a2cb7cfda4803246a3ba5df05b362a164a536af5be6fe4b4e9d166f525bf751.
+Next work is offline diagnosis of slow tracking/breakaway and the automatic
+speed-stop criterion. Manual-handling transient exceptions do NOT apply to
+automatic motion. Do not restart this failed trajectory or silently raise the
+speed limit to obtain a complete capture. No human action currently pending.
+
+**LIVE COMMISSIONING STARTED — 2026-10-12, multi-joint unloaded sequence:**
+Operator explicitly replied “确认” to remote removed, right Follower suspended,
+workspace clear and hands away. Started `automatic-right --mode sequence` with
+`right_multijoint_unloaded_single.json`, output
+`data/temporary/right_multijoint_unloaded_single_20261012`, exec session **74975**.
+Native SHA 9a2cb7cfda4803246a3ba5df05b362a164a536af5be6fe4b4e9d166f525bf751
+verified immediately before launch; configured identities and all links DOWN,
+zero live errors, no existing controller process. Five-second hold must pass
+before 320-second multi-joint sweep; launcher owns supervision and verified
+disable. Inspect fresh status/process before any operation. No automatic retry.
+This supersedes the pending scene confirmation below; success is not yet known.
+
+**CURRENT STOPPED — 2026-10-12, larger multi-joint path SOFTWARE PREPARED:**
+Operator rejected another tiny single-joint experiment and requested a larger
+coordinated path. Implemented isolated right-Follower waypoint policy/native V4;
+existing V3 single-joint/paired paths retain their semantics. No hardware query,
+enable or motion ran in this software turn. Current unloaded/clear-space answer
+is still pending from the restart inspection; do not infer it from the request
+to increase amplitude. Last actual hardware operation remains the 07:56:42 UTC
+motion-free right probe below, with all links left DOWN and no owner active.
+
+`configs/diagnostics/right_multijoint_unloaded_single.json`: six coordinated
+J2–J7 postures plus return to the fresh measured start, 40-second transitions,
+5-second holds, 320-second path. J1/gripper fixed; raw offset ranges J2 [0,10],
+J3 [-10,10], J4 [0,16], J5/J6/J7 [-10,10] deg. New explicit amplitude cap 16 deg
+and excursion vector [3,12,12,18,12,12,12,3]; original gains, measured-speed,
+tracking, effort, temperature, CAN/state, supervision and disable guards kept.
+Peak reference speed 0.9375 deg/s, acceleration 0.0721688 deg/s^2. THIS POLICY
+HAS NOT BEEN LIVE COMMISSIONED. Candidate commissioning uses `automatic-right
+--mode sequence` so the five-second hold must pass before the larger path;
+every start uses fresh whole-path bound checks and full motor preflight. Stop
+on any fault; do not retry or weaken thresholds. It is not paired-load enabled.
+
+Exact named waypoint vectors, closed zero endpoints, fixed gripper, finite
+values and per-segment derivative limits checked in Python/native. All future
+waypoints relative to fresh feedback are bound-checked before enable. Offline
+review verifies each emitted target against the full scheduled path and labels
+waypoint holds/repeats correctly. Single-joint fitters reject this trajectory;
+no multi-joint torque model or FT accuracy is claimed. Joint-space bounds do
+not establish Cartesian collision/table/cable clearance, especially with the
+still-unvalidated motor/model-coordinate mapping.
+
+Pure preview in `data/temporary/right_multijoint_plan_20261012`: `preview.json`,
+`reference_preview.csv`, `native_spec.txt`. Uses the earlier probe ONLY for
+offline illustration; fresh live startup must recompute absolute bounds.
+All illustrated endpoints fit the tracked limits. Six posture vectors have
+rank six. Candidates selected offline from 5,000 seeded combinations (seed
+20261012) using normalized affine pose-matrix condition; final condition 5.51823
+is a geometric-diversity heuristic, not dynamics identifiability or optimal FT
+experimental design. Raw capacity 600,000 covers the required 264,000 frames.
+Policy SHA 12b4c8059f77c66d389b92e8d4d2d52da4d60a639cd44e137e9af94df0c6a055.
+New built native SHA 9a2cb7cfda4803246a3ba5df05b362a164a536af5be6fe4b4e9d166f525bf751;
+no historical recording is relabelled with this binary or controller provenance.
+Hardware-free verification: 697 pytest tests, four CTests, native build,
+Ruff check/format and `git diff --check`. No live commissioning evidence yet.
+
+**CURRENT STOPPED — 2026-10-12 07:56:42 UTC, right restart state probe passed:**
+Operator reported restarting/powering the robot and requested inspection and
+larger unloaded excitation. Passive inspection found no controller owner and
+all configured CAN identities unchanged, links DOWN/STOPPED, zero live errors.
+Host uptime was over three days; do not infer a host reboot from this report.
+`data/temporary/right_restart_probe_20261012/report.json` records the existing
+motion-free right-Follower capture: can2 parent `1-3.1.2:1.0`, all eight response
+IDs 0x011–0x018 in all 40 rounds, 320 matching TX/RX frames, no bound violations,
+CAN errors or qdisc drops. Links are again DOWN. No enable, reset, parameter
+write or motor command was sent. Other arms were inspected passively only.
+Last measured raw J4 was 6.58987 deg. Position spans over the probe were at most
+one encoder code (~0.02186 deg); motor-reported speed alone is not a position
+derivative or proof of physical motion.
+
+Prepared `right_joint4_twodegree_single.json`, NOT live commissioned: +/-2 deg,
+22-second transitions, one 113-second sweep after a passed five-second hold.
+Only amplitude, transition time and description differ from the prior +/-0.75
+single policy. Peak analytic reference speed 0.170455 deg/s is below the prior
+0.175781 deg/s; acceleration 0.0238574 deg/s^2. Existing 2-degree amplitude cap,
+3-degree excursion, gains and all feedback guards are unchanged. Pure rendering
+passes; probe-based endpoints 4.58987–8.58987 deg fit tracked J4 bounds, but live
+startup must use fresh feedback and this does not establish Cartesian clearance.
+This is a larger-excursion commissioning step, not broad posture identification:
+it still does not excite J2 or resolve the earlier unsupported loaded context.
+Current unloaded state/clear workspace confirmation was requested and is pending;
+no motion run started this turn. Do not assume yesterday's removal confirmation
+establishes today's endpoint state. Larger amplitudes or other active joints need
+a separately bounded design rather than silently relaxing this policy.
+
+**CURRENT STOPPED — 14:07:50 UTC, incomplete paired remote capture:**
+`data/temporary/right_joint4_handling_remote_20261011`, original 600-second
+`right_joint4_threequarter_paired.json`, exec **33910 REAPED**. All eight motors
+verified disabled; CAN links DOWN/STOPPED with zero live errors. Remote removal
+and hands clear confirmed by the operator's “好了”. No hardware process remains.
+Native SHA b799c49f005c7f8cc56aac19b4d71eb2b1ef7bcc464bd2a4ba0f5a5ef602ecb6.
+Raw SHA cd193fc302ef2f148bd53cd2688a632cc721ce5cfa7e1034e98c50df5e517820;
+samples SHA 3dd887971c9543154219ebe03fd3c3c525a7efbb999a16a877b1b308adff235f.
+
+Baseline completed at 109.0000057 s; actual attachment acknowledgement at
+307.82 s, settling 307.8687027–309.8900042 s, complete loaded sweep to
+418.9000071 s. On removal confirmation, first observed elapsed time was
+544.410003 s; the context write conservatively records 578.8300045 s. Both
+are later than the 471 s latest start for final settling plus sweep. No
+`remove.ready` was sent. Retained stationary post-removal data, then explicitly
+stopped verified parent PID 377252 at about 594.95 s. Original report remains
+FAILED (`operator_stop`, native exit 1), not a speed or CAN fault and not a
+completed paired validation. Offline-failure recheck does NOT apply. No retry.
+
+`analyse_partial.py` and `partial_diagnosis.json` preserve reproducible offline
+investigation, source hashes and explicit incomplete status. 59,495 finite,
+monotonic samples, maximum gap 11.312 ms. Baseline first cycle has 13 accepted
+moving windows; all 14 second-cycle windows supported, angle/direction holdout
+RMSE 0.11764 Nm (raw unloaded motor torque, not external FT). Loaded has 25
+accepted windows, NONE supported: J2 outside training context in all 25, J4
+additionally outside in two. No loaded force estimate is accepted.
+
+End-of-sweep 3-second raw static comparisons: J2 changes -0.22637 -> -0.70365
+Nm, with q2 +0.12138 deg. Conservative post-removal window 583.83–594.74 s
+has J2 -0.19754 Nm and q2 returned near baseline. This is a reversible motor
+response to the nominal 300 g remote, NOT calibrated external torque or mass.
+Final J4 and J7 differ by +0.10509/-0.19667 deg and J4 raw torque by -0.42878 Nm
+versus initial return; friction/history and pose context still matter.
+Nominal mass remains unweighed; moment arm unknown. Do not widen model support
+or train on loaded data to claim success.
+
+Prepared `right_joint4_threequarter_paired_long_wait.json`: total cap 1200 s,
+full raw capacity 1,000,000 frames; only these and description differ from
+the original policy. Leaves 833 s combined manual-wait budget after all sweeps
+and worst-case settling; all motion/handling/health guards unchanged. This
+longer duration/capacity has NOT been live commissioned. Original recordings
+keep their original embedded policy. Next work: broaden the unloaded model's
+measured posture coverage (especially J2) under a separately bounded design,
+then use same-owner loaded/unloaded validation. Merely repeating this J4-only
+trial or extending waiting cannot resolve its unsupported J2 posture.
+No new hardware run started in the offline analysis turn; no human action pending.
+Latest hardware-free checks: 674 pytest, four CTests, Ruff check/format and
+`git diff --check` passed. All source/config/docs changes remain uncommitted.
+These checks were rerun after the partial analysis and longer-wait policy.
+Use `env -u PYTHONPATH PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest`:
+the shell's unrelated ROS pytest entrypoint otherwise imports `launch_testing`
+and fails before collection because `lark` is absent. No ROS/CAN initialization
+or hardware test is part of this validation. Pure policy rendering verifies
+968,000 required frames fit the new capacity and only duration/capacity/description
+differ from the original paired policy.
+
+**STOPPED — 13:57:05 UTC, +/-0.75-degree single commissioning passed:**
+`right_joint4_threequarter_single_20261011` exec 1265 reaped; hold and sweep
+each passed 40/40 preflight, native guards, verified disable and offline review.
+Sweep raw fd48b5bd8b0d453aeace2c63ed60522cd48a4b1459adfcd6de7a792822bd4bd5.
+Enabled J4 speed peak 6.29624 deg/s, max tracking 0.22291 deg, actual span
+1.31142 deg; all other joint spans <=0.04372 deg. `excitation_review.json`
+has 14 accepted first-cycle windows (6 positive, 8 negative), feature condition
+2.84698; 16 rejected for insufficient motion, two for reversal/oscillation.
+This meets unchanged excitation gates but is not a validated FT model.
+
+**EARLIER LIVE — J4 +/-0.75-degree single-cycle commissioning setup:**
+`data/temporary/right_joint4_threequarter_single_20261011`, exec **1265**,
+`automatic-right --mode sequence` with `right_joint4_threequarter_single.json`.
+This runs a five-second hold then one 57-second sweep only on passed hold.
+Remote remains removed per the current operator confirmation; no human action
+has been requested. Both threequarter single/paired policies change ONLY
+amplitude from 0.5 to 0.75 degrees and description versus their source policies.
+No gain, guard, range, timing or analysis threshold relaxed. Native unchanged
+b799c49f005c7f8cc56aac19b4d71eb2b1ef7bcc464bd2a4ba0f5a5ef602ecb6.
+Check status/process before any action. No fault retry. On passed single,
+inspect moving-window excitation before a paired remote run at this amplitude.
+
+**STOPPED — 13:52:40 UTC, new handling flow all-unloaded commissioning passed:**
+`right_joint4_handling_unloaded_20261011` exec 1313 reaped, 40/40 preflight,
+all-eight verified disable, all links DOWN/STOPPED and zero live CAN errors.
+Native/parent/capture review passed; both settling gates took about 2.02 seconds.
+Raw SHA256 098cd0ba704247192ecb2e92c843d386883aa953cc2e19200804e955fd255c55.
+J4 enabled speed peak 7.13574 deg/s, tracking max 0.22293 deg, span 0.76499 deg;
+J7 span 0.17486 deg, every other joint <=0.02186 deg. No enabled speed exceeded
+15 deg/s. This validates no-contact flow and settling, NOT the 45 deg/s manual
+envelope under physical handling.
+
+Moving model rejected: baseline first cycle had only FIVE accepted windows
+(3 positive, 2 negative) versus required six; second cycle had seven. Baseline
+rejections were 47 insufficient-motion and five reversal/oscillation windows.
+Middle/final had 15 accepted windows each. `moving_extraction.json` preserves
+extraction and `paired_study.json` now records explicit rejection. The pure
+paired CLI was updated to preserve fit rejection/evidence instead of leaving
+only a traceback; no loaded/later-stage data are substituted as training.
+The small excitation increase above addresses too little measured motion;
+minimum displacement/sample/bidirectionality requirements remain unchanged.
+
+**EARLIER LIVE — handling/settling all-unloaded commissioning setup:**
+Operator replied “好了” after explicit instructions to remove the remote,
+keep original gripper/camera, endpoint suspended, right Follower powered and
+hands/space clear. This confirms removal and readiness; no further action has
+been requested. Launched `automatic-right --mode paired` with current
+`right_joint4_paired.json`, output
+`data/temporary/right_joint4_handling_unloaded_20261011`, exec **1313**.
+Native b799c49f005c7f8cc56aac19b4d71eb2b1ef7bcc464bd2a4ba0f5a5ef602ecb6.
+Check fresh status/process before any operation. ALL THREE stages are UNLOADED;
+advance each waiting stage by its matching token only after fresh status and
+label the scripted commissioning explicitly (no human attachment/removal).
+Require both measured settling gates, all guards and verified disable; do not
+retry a fault. This tests the no-disturbance flow, not the new manual envelope
+under actual human contact. Do not claim full handling commissioning from it.
+
+**EARLIER SOFTWARE — manual handling / settling implemented, before live run:**
+After the J5 stop the operator said binding may indeed have moved the arm, and
+explicitly requested the proposed phase-aware handling change (“好好，那你去给他改一下”).
+This turn changed software/tests only; hardware remains disabled, all five CAN
+links DOWN/STOPPED and live counters zero. Remote removal has NOT been confirmed;
+do not assume an unloaded endpoint. No pending running process or auto retry.
+
+`right_joint4_paired.json` now contains explicit `manual_handling` parameters:
+in stationary awaiting/settling phases only, J5/J6/J7 immediate speed ceiling
+45 deg/s; other motors retain 15 deg/s. Continuous speed above ordinary
+15 deg/s for 0.1 seconds stops. Automatic phases remain immediate 15 deg/s.
+Targets remain the initial eight-position reference; bounds, excursion, torque,
+temperature, persistent tracking, state/CAN health and verified disable remain.
+No gain, zero, gravity or production transport change. These are candidate
+experimental handling thresholds, not validated manufacturer safety ratings.
+
+Actual hands-clear acknowledgement starts `settling_loaded` or
+`settling_empty_after`: all-eight position span <=0.05 deg, reported speed
+<=5 deg/s for two continuous seconds after acknowledgement. Renewed movement
+resets dwell; 20-second settling timeout stops. Automatic sweep starts only
+after successful settling. 600-second overall cap and remaining-budget checks
+include settling. Old captures without handling retain their original protocol;
+new waiting/settling data are excluded from torque model/load fits.
+
+Native input V3 explicitly carries optional handling settings; V1/V2 rejected.
+New native SHA256 b799c49f005c7f8cc56aac19b4d71eb2b1ef7bcc464bd2a4ba0f5a5ef602ecb6.
+Do not transfer older native/model context silently. Hardware-free validation:
+673 pytest tests and four CTests passed; includes recorded-trigger-sized wrist
+transient vs automatic mode, hard/sustained speed limits, unchanged critical
+faults, fixed-target requirement, settling/reset/timeout/duplicate acknowledgement,
+offline phase and position-span validation. This is not a live replay proving
+the earlier aborted handling would have remained safe; its trace ends at disable.
+Ruff check/format and `git diff --check` passed. Python 3.10 syntax checks
+passed for the modified Python modules. No commit/push done.
+
+Next hardware stage requires establishing current load/clearance, then a new
+guarded commissioning capture with complete preflight. No live test was started
+in this software-only turn. Preserve the original failed run below as failed.
+
+**LATEST STOP — 13:16:06 UTC, formal paired run stopped on J5 speed guard:**
+`right_joint4_paired_remote_20261011` exec 70020 is REAPED, every motor verified
+disabled and every CAN link DOWN/STOPPED with zero live counters. No process
+is holding the arm. The operator subsequently said “好了” to secure attachment
+and hands-clear instructions, but this arrived AFTER the stop; no attach token
+was sent and no loaded sweep began. Never automatically restart this failure.
+The user has been asked to remove the remote and confirm hands clear, and to
+describe whether binding required holding/moving the wrist or involved any
+collision, sudden motion, noise or tethering. Subsequent scene feedback is
+recorded above; removal confirmation remains outstanding.
+
+`fault_diagnosis.json` is a pure failed-capture investigation, not a passed
+review or FT study. At 13:16:05.830670 UTC, elapsed 279.543133669 seconds in
+awaiting_attach, enabled J5 reported 32.32070 deg/s against the unchanged
+15 deg/s guard. Encoder q5 changed 10.67711 -> 11.02683 deg in about 10.05 ms;
+this is corroborating position motion, not just a velocity-field outlier.
+Torque was -0.18803 Nm, MOS/rotor 26/25 C. The next J5 frame was disabled.
+All other enabled speeds stayed below 15 deg/s, CAN counters zero. Cause of
+motion (including possible manual attachment disturbance) remains unconfirmed.
+Original failed report/raw are preserved; offline-recheck recovery is NOT
+applicable to this live guard failure. `attachment_confirmation_after_stop.json`
+records the late confirmation without labelling an unperformed loaded stage.
+
+Continue offline diagnosis while awaiting removal/scene feedback. Do not relax
+speed/bounds or ignore this as noise. If unexpected force/contact is confirmed,
+load removal and the tracked motion-free preflight must precede any later SDK
+startup. Consider preparing an empty carrier/binding while disabled, then
+inserting/removing the remote during holds without manipulating the wrist.
+
+**EARLIER LIVE SETUP — formal paired remote test awaiting attachment:**
+`data/temporary/right_joint4_paired_remote_20261011`, exec session **70020**,
+`automatic-right --mode paired`, policy `right_joint4_paired.json`, native
+unchanged cbedf81a90c51026ea57242f1b7967077372d72c51ae69f93a54432be3b24ed0.
+Initial unloaded 109-second sweep completed; at native monotonic_ns
+249760384070334 entered `awaiting_attach`. User has NOW been asked to bind the
+remote and confirm hands clear via async question. No confirmation yet.
+Initial-only context is `operator_stage_notes.json`; later stages remain null.
+Read fresh `status.json` and confirm process still active before acting.
+Requested binding the nominal 300 g R3-1 in the usual orientation/position while
+preserving gripper opening and avoiding arm displacement. ONLY on actual
+hands-clear secure-attachment confirmation and fresh matching status create
+`attach.ready` bytes `attached\n` (sudo needed until capture finalization).
+Then await `awaiting_remove`, request removal without moving joints, and after
+hands-clear confirmation create `remove.ready` bytes `removed\n`. No scripted
+acknowledgements in this formal run. Cap 600 seconds includes waits; if stopped
+or insufficient remaining budget, do not advance or automatically restart.
+Record actual operator statements and explicit load labels; after verified
+disable, run paired analysis. Static/FT/runtime claims remain false.
+Latest hardware-free checks: **656 pytest, four CTests, Ruff check/format,
+git diff --check passed**. No source/config/docs changes have been committed.
+
+**LATEST STOP — 13:06:19 UTC, all-unloaded paired commissioning complete:**
+`right_joint4_paired_unloaded_20261011` (exec 56253, reaped) completed all three
+sweeps, both scripted all-unloaded phase advances and verified all-eight
+disable. Every CAN link DOWN/STOPPED with zero live errors; no motion guard
+tripped. 40/40 preflight, 376.940002598 seconds to completion. Raw SHA256
+e3f532854069dd4e35c5f4bd1edf370c4bd9944c284b4e3c1450028da57a3c48.
+Native exit 0. Original report remains FAILED due solely to an offline review
+bug: phase telemetry serialized fewer digits than the completion event, causing
+an exact-equality timing rejection (376.9400026 versus 376.940002598).
+The pure reviewer now permits <=1 microsecond serialization difference.
+`analysis_rechecked.json` passed using explicit `--recheck-offline-failure`;
+original report/raw files were preserved. That option cannot accept native,
+cleanup or unverified-disable failure; it is not a live fault retry.
+
+`paired_study.json` and hash-bound `operator_context.json` explicitly label all
+three sweeps unloaded. Eight first-cycle windows trained the model; temporal
+holdout has 7/8 supported windows, middle 16/18, final 15/17. Total transition
+candidates per sweep: 64; baseline/middle/final accepted 16/18/17. Other windows
+were rejected for measured-motion quality; static holds remain excluded.
+Angle/direction supported RMSE: holdout 0.10621, middle 0.10451, final 0.10310 Nm;
+middle/final constant baseline RMSE 0.46838/0.45394 Nm. This is local unloaded
+motor-torque prediction, NOT external force accuracy. J4 enabled speed peak
+6.57607 deg/s, max tracking 0.21713 deg, actual span 0.76499 deg. All other
+joint spans <=0.04372 deg. The same owner substantially preserved pose context.
+Remote remains removed; no human action occurred during commissioning.
+
+Next authorized step: same policy/binary in a new paired remote capture. Start
+unloaded baseline, request secure attachment ONLY in fresh awaiting_attach,
+advance after actual operator hands-clear confirmation; request removal ONLY
+in awaiting_remove, advance after confirmation. Global cap stays 600 seconds,
+no automatic fault retry. Read fresh status/process before any restart.
+
+**EARLIER — single-owner paired flow commissioning setup:**
+The operator confirmed remote removal, endpoint suspended and hands clear:
+“已取下，双手已离开”. No further manual action has been requested. A new live
+`automatic-right --mode paired` is running in
+`data/temporary/right_joint4_paired_unloaded_20261011` (exec session 56253).
+Read its status and check the process before any new lifecycle. This is an
+ALL-UNLOADED commissioning run, including the phase named `loaded`. Advance
+`attach.ready`/`remove.ready` only after their matching waiting phase is freshly
+observed; these commissioning acknowledgements do not assert manual attachment.
+The same native owner/reference spans three 109-second J4 +/-0.5-degree sweeps,
+two stationary waits and a 600-second global cap. No retry on any fault.
+
+Native SHA256 cbedf81a90c51026ea57242f1b7967077372d72c51ae69f93a54432be3b24ed0.
+New paired protocol and analysis remain experimental. Fit only first unloaded
+cycle; validate the second, then later stages without refit. Old frozen models
+have a different native hash. No FT/runtime eligibility. Hardware-free checks:
+647 pytest tests, four CTests, Ruff check/format and diff check passed. Initial
+pytest invocation inherited a ROS plugin path and failed before collection;
+the successful run explicitly unset PYTHONPATH and disabled plugin autoload.
+
+**STOPPED — loaded sweep 12:45:20–12:47:12 UTC:**
+`right_joint4_halfdegree_loaded_20261011` completed its 5-second hold then two
+J4 cycles. Both preflights 40/40; guards, disable verification and offline review
+passed. Raw sweep SHA256
+c8a0429c6273548134c1d27f6fee20187b5fa48d43673dcaddcae1473edb39fe.
+J4 enabled speed peak 6.29624 deg/s, tracking maximum 0.267 deg.
+`sweep/operator_context.json` records nominal operator-stated 300 g R3-1 securely
+bound, unknown moment arm. `loaded_response.json` has 14 accepted moving windows,
+ZERO supported, 50 rejected motion windows. Attachment/startup changed multiple
+joint positions outside the frozen unloaded context (notably J5 about -10.93
+deg, J6 -3.39 deg). Extrapolated residuals are NOT valid load/force estimates.
+Do not relax support. The remote was subsequently removed as confirmed above.
+The paired flow addresses this context loss by keeping one enabled owner.
+
+**EARLIER STOP — 12:28:02 UTC, moving-window model independently evaluated:**
+All hardware is stopped, every right-Follower motor has verified disable,
+can2 DOWN/STOPPED with TX/RX 3302384/3302384, zero CAN/interface/qdisc errors or
+drops, backlog zero. Right Leader and left links remained down. The remote was
+off during all three new captures; no manual action occurred during them.
+Native binary unchanged at 1f7a6de011e6b8b94ebc82d75f2354a981d86ceeec9d14d4e0f5bc1fa7571dd8.
+
+At this earlier stage the operator was asked to bind the nominal 300 g R3-1 remote onto the
+DISABLED right Follower in the previous position/orientation, preserve gripper
+opening, keep endpoint suspended, and confirm hands clear. **Attachment
+confirmation was pending, and was subsequently received; the loaded run and
+removal are recorded above.** No holding process was running during attachment.
+
+On confirmed secure attachment, use the existing guarded sequence with
+`configs/diagnostics/right_joint4_halfdegree_repeat.json` and a fresh output
+such as `data/temporary/right_joint4_halfdegree_loaded_20261011`. This is a
+5-second fresh-position hold followed only on success by two +/-0.5-degree J4
+cycles, 8-second transitions and unchanged gains/guards. Existing authorization
+covers this scoped motion. Write explicit loaded context after confirmation:
+side right, external_load_present true, follower_contact false,
+tool_context original_gripper_and_camera, applies_to_stages [sweep], actual
+operator_statement, payload {mass_g:300, mass_source:operator_nominal,
+attachment_description:<confirmed binding>, securely_attached:true}. Geometry
+and actual weighed mass remain unknown. Stop on any fault, no automatic retry.
+
+After verified disable and passed capture review, run `moving_window_study`
+with `--loaded-validation --frozen-study
+data/temporary/right_joint4_halfdegree_repeat_20261011/sweep/moving_study.json`,
+config/system config, source loaded sweep, its actual loaded context,
+`configs/diagnostics/right_moving_window_study.json` and a fresh output path.
+No refitting; interpret supported residuals, not error against zero. Report
+coverage/rejections and unsupported poses explicitly. A new startup or manual
+attachment can shift the pose outside support; do not relax support to force
+acceptance. Ask for removal when finished and disabled.
+
+New evidence (all sequences passed 40/40 preflight each stage, disable and
+offline review; directories under `data/temporary/`, results under `sweep/`):
+
+- `right_joint4_halfdegree_single_20261011`, 12:21:51–12:22:51 UTC sweep:
+  J4 +/-0.5 instead of +/-0.25 degrees, only policy amplitude/description
+  changed. Enabled peak 5.17691 deg/s, tracking max 0.25167 deg, actual span
+  0.76499 deg. Raw 0c0ce4ba5c9253dda0e7209b288ba81a7a22a573358cff10d8f97eea29c06822.
+- `right_joint4_halfdegree_repeat_20261011`, 12:23:32–12:25:25 UTC:
+  raw 8b33d77f7ef7a8cb1546ccdbfd99649eefa28a3ae8921a2fdf97d6189ea0e3ba.
+  `moving_study.json` trained nine first-cycle moving windows; second cycle
+  had nine, eight supported. RMSE constant/angle/angle-direction:
+  0.46282 / 0.39464 / 0.05511 Nm, last max error 0.10867 Nm. Features use actual
+  mean q4 and measured movement direction, never target/error/torque feedback.
+  Frozen BEFORE the independent capture, SHA256
+  5c344968f3bf4afe1bb126d873777fcd597ffacf1dd45b7952ab432d5ade8fcc.
+- `right_joint4_halfdegree_validation_20261011`, 12:26:10–12:28:02 UTC:
+  raw 584bd31036da802ea2f60356f796d557049d6d4015c7db1f98902d87686a3715.
+  `moving_validation.json`: no refit. 18 accepted moving windows out of 64
+  candidate transition windows; only 8 within frozen directional pose support.
+  Supported RMSE 0.43030 / 0.34792 / 0.05407 Nm, last max error 0.11171 Nm.
+  Enabled peak 5.45674 deg/s, tracking max 0.24443 deg. These are one-second
+  raw-torque window means in a local unloaded study, not whole-trajectory,
+  static, online, loaded or six-axis accuracy.
+
+`moving_window_study` is new pure offline extraction/fit/frozen evaluation.
+Tracked policy: one-second transition windows, >=80 samples, net measured
+movement >=0.05 deg (over two encoder codes), total variation <=2x net movement,
+other-joint within-window span <=0.05 deg. Requires >=6 training windows and
+>=2 each direction. Pose-support margin 0.05 deg, other-joint context 0.1 deg.
+Static holds never contribute. Rejected motion windows and unsupported moving
+windows remain distinct. Loaded fitting is forbidden; loaded evaluation keeps
+residuals and has no error-against-zero score or mass claim. Runtime export and
+FT flags remain false. All three sweeps have explicit unloaded context files.
+
+Actual-direction audit of old quarter-degree J4 data found the negative and
+following return holds both had last measured direction -1, despite ~1.03 Nm
+torque difference at identical encoder q. Direction memory alone cannot solve
+that static ambiguity. That capture's new `moving_study.json` explicitly rejects
+fitting (0 of 64 windows have adequate measured motion), rather than misusing
+commanded direction or relaxing the thresholds.
+
+Hardware-free checks: 637 pytest tests, four CTests, Ruff check/format and
+`git diff --check` passed. Changes remain uncommitted. See FORCE_ESTIMATION.md
+for CLI details and interpretation limits.
+
+**LATEST STOP — 12:17:00 UTC, J4/J6 unloaded automatic commissioning complete:**
+The operator requested continuation after confirming remote removal. No further
+manual contact/loading was requested. Four sequences (each 5-second hold then
+sweep) passed, every stage had 40/40 motion-free preflight and verified disable,
+and all captures passed offline integrity review. All links now DOWN/STOPPED,
+all CAN error counters zero; can2 TX/RX 3068176/3068176, qdisc drops/backlog zero.
+Other endpoints unchanged. No owner or operator action remains pending.
+
+Selected single-joint trajectories now support J4/J6/J7 only. Policy carries
+the active motor; version-2 native input carries its explicit index. Native
+guard and offline reviewer use that same index, while all other targets remain
+fixed. Old V1 native input fails closed. Gains and every guard are unchanged.
+J4 policies use +/-0.25 deg; J6 +/-0.5 deg; both 8-second transitions and
+5-second holds. Single-cycle commissioning preceded repeated two-cycle runs.
+New native SHA256:
+1f7a6de011e6b8b94ebc82d75f2354a981d86ceeec9d14d4e0f5bc1fa7571dd8.
+Existing frozen J7 baselines have older native hashes and must not silently
+transfer; the J7 study now explicitly rejects non-J7 sweeps.
+
+Captures under `data/temporary/`, each with `hold/` and `sweep/`:
+
+- `right_joint6_unloaded_single_20261011`: sweep 12:10:14–12:11:14 UTC,
+  raw ada510b9ca040d9a411cf6197eaf5c3bfe58d367809a1b80dc5eaf5a2c6a8305.
+- `right_joint6_unloaded_repeat_20261011`: 12:11:30–12:13:22 UTC,
+  raw 7a6b8638fd6bf5b9cde33cd0d04768c53f1b9b9361f6d7ece4dde2266d2e1d48.
+  J6 enabled speed peak 2.09875 deg/s, max tracking 0.47814 deg. Maximum
+  corresponding-path repeat difference 0.003575 Nm; nearby-pose different-path
+  torque spread 0.25932 Nm. Every scheduled hold spans at most 0.02186 deg.
+- `right_joint4_unloaded_single_20261011`: 12:13:41–12:14:41 UTC,
+  raw 89580c5f2bc20fdf5493e141e8fa9a2367f67b7c23e4bd53662126b214779cb1.
+  J4 enabled speed peak 3.77774 deg/s; nearby-pose torque spread 1.03352 Nm.
+- `right_joint4_unloaded_repeat_20261011`: 12:15:08–12:17:00 UTC,
+  raw 2780c8cf8a7c68c2562f1794aa4747dc50c59689512d35a837f33dac8009638f.
+  J4 enabled speed peak 2.93825 deg/s, max tracking 0.24519 deg. Maximum
+  corresponding-path repeat difference 0.001094 Nm, nearby-pose spread
+  1.028704 Nm. Negative and following return holds both measured
+  q4=11.07053965 deg, with torque about -0.49039 and +0.53831 Nm. Their
+  command targets differ by 0.25 deg. This is repeatable static path/controller
+  history dependence, not proof of a unique friction mechanism or calibrated
+  external torque. The spread exceeds the earlier remote response magnitude.
+
+`joint_repeatability` is a new pure offline CLI using tracked
+`right_joint_repeatability_review.json`. It requires a passed sweep, explicit
+unloaded context and stable holds, separates corresponding-cycle pairs from
+nearby-pose different-path pairs, retains all-eight deltas and capture hashes,
+and never fits load data or exports compensation. `repeatability.json` exists
+in the J6 repeat and both J4 sweep directories; all four sweeps have explicit
+`operator_context.json`. See FORCE_ESTIMATION.md for the command.
+
+Implication: a precise repeatable torque fit does not establish force accuracy.
+Angle-only subtraction and constant tare cannot resolve these static states.
+Next work needs validated history-dependent unloaded modelling and loaded
+validation under matched path history, or an uncertainty-aware output that
+does not label ambiguous static motor torque as external force. Do not subtract
+Kp tracking error (would erase load response), relax guards, or claim a full FT
+model from these four local recordings. No runtime FT output was enabled.
+Hardware-free checks: 619 pytest tests, four CTests, Ruff check/format and
+`git diff --check` passed. Source/config/docs changes remain uncommitted.
+
+**STOPPED — completed paired-load experiment, 11:25:45 UTC:**
+`data/temporary/right_same_session_remote_20261011_02` passed 40/40 motion-free
+rounds, stationary hold, requested finish at 158.3391 seconds, verified disable,
+parent release and both offline reviews. Session 76544 has been reaped. Only
+right Follower was opened; can2 is DOWN/STOPPED, TX/RX 2783632/2783632, zero CAN
+errors, interface/qdisc drops or backlog. Remote is removed, per the operator's
+confirmation. No hardware owner remains active.
+
+All three operator-confirmed windows have 1000 samples over 10 seconds,
+following five seconds settling; maximum within-window q span is 0.02186 deg.
+Empty-before: 243168233989988–243178233989988 ns; loaded:
+243246069675104–243256069675104 ns; empty-after:
+243300161241000–243310161241000 ns. `windows.json` binds labels to raw SHA256
+ba39fc46cf3202f85cce378ec26f2184b0b09a0471220b680bfecfd7d137cf00.
+`load_comparison.json` contains stable-window analysis and all-eight deltas.
+
+J4 mean torque before/loaded/after: -0.04909 / +0.62799 / -0.21067 Nm.
+The observed loading response is +0.67709 Nm versus initial empty and
++0.83866 Nm versus final empty, with -0.16157 Nm empty-return offset.
+J6 empty-return offset is -0.18311 Nm with +0.33347 deg pose change; its loading
+difference changes sign depending on which empty window is subtracted
+(-0.09749 versus +0.08562 Nm). Thus the interpolated-empty J4 value +0.77241 Nm
+is descriptive, not a calibrated external torque. Linear time interpolation
+cannot establish compensation for handling-related friction/pose changes.
+Loaded q4 shifted -0.17486 deg versus initial empty. J7 loaded-minus-initial
+empty is only -0.00153 Nm at this pose; a J7-only payload estimate is inadequate.
+
+The continuous hold reduces large repositioning between separate runs and
+demonstrates a clear J4 response, but does not eliminate hysteresis or validate
+six-dimensional force/torque. Next model work must consider all seven joints,
+pose and approach history, plus the unresolved motor/model-coordinate and tool
+gravity calibration. Do not fit the loaded window into an unloaded model or
+subtract the controller's Kp error as compensation. Nominal remote mass is
+operator-stated 300 g, not independently weighed; moment arm is unknown.
+No further manual action is currently pending.
+
+**STOPPED — incomplete paired-load experiment:**
+`data/temporary/right_same_session_remote_20261011_01` reached its 600-second
+native cap and ended at 11:05:44 UTC, before the operator's attachment
+confirmation was processed. Session 3796 was reaped. All eight motors have
+verified disable; can2 is DOWN/STOPPED, TX/RX 2656592/2656592, zero errors or
+drops. The only labelled window is empty-before in `windows.pending.json`,
+monotonic 241513351495560 through 241523351495560 ns. Do not invent loaded or
+empty-after windows, or use this incomplete run as a load validation.
+
+Native exit was zero with disabled/completed markers, but the parent reported
+`native_heartbeat_timeout` during post-disable buffered file output. Original
+failed report and raw files are preserved: raw SHA256
+2b5a2545785839432d7b295d92bb50860e33e2419e9764e1e42a22956dc5f957.
+The supervisor now uses the tracked shutdown timeout (8 seconds) from the first
+disabled marker for finalization, while the live heartbeat remains 1 second.
+Repeated markers cannot renew that deadline; exit/health/stop faults remain
+failures. Five hardware-free regression cases cover delayed output, stuck
+output, repeated markers, live heartbeat loss and native write failure.
+The subsequent 158-second paired hold passed with this supervisor fix; a full
+600-second post-fix capture has not yet been repeated.
+Hardware-free verification after this fix: 595 pytest tests, four native
+CTests, Ruff check/format and `git diff --check` passed. Passive link inspection
+confirmed can0 through can4 DOWN/STOPPED with zero live error counters.
+
+The operator's late “好了” was not assigned a measurement window. They were
+asked to remove the remote while disabled, and subsequently confirmed removal;
+the completed paired session above used a fresh empty-before window.
+
+**Latest continued work (2026-10-11, operator explicitly requested autonomous
+completion):** Two complete slow repeated unloaded sequences passed, then a
+new requested-finish stationary hold was commissioned. Hardware stopped at
+10:51:23 UTC, all eight motors disabled, all configured links DOWN/STOPPED;
+can2 TX/RX 2176224/2176224, other interfaces unchanged. The operator has kept
+the remote off; no physical intervention was requested during these runs.
+
+- `right_slow_repeat_unloaded_20261011_01/sweep`, 10:42:53–10:44:46 UTC:
+  two +/-0.5-degree cycles, 8-second transitions, tracked
+  `right_automatic_slow_repeat.json`. Enabled J7 peak 5.45674 deg/s, maximum
+  tracking error 0.35123 degrees. First-cycle fit versus second-cycle holdout
+  RMSE: constant 0.08692, angle 0.01679, angle/direction 0.002626 Nm. All four
+  holdout means supported. `frozen_wrist_study.json` was frozen before run 02.
+  Raw SHA256 049da76b14c51803cbb3f8b1519d0013fe942a3bf3811edeff57362994972f71.
+- `right_slow_repeat_unloaded_20261011_02/sweep`, 10:45:17–10:47:09 UTC:
+  independent recording, no refit, all eight hold means supported. RMSE
+  0.08770/0.01808/0.003535 Nm respectively, angle/direction max error
+  0.006657 Nm. Enabled J7 peak 4.61724 deg/s. Raw SHA256
+  548e9afcdb1a8ba61ad2509c126f387eea69fd3292d7d9d1574b62e578600f76.
+  These are local raw-torque predictions, not validated external FT.
+- `right_requested_hold_commission_20261011`, 10:51:10–10:51:23 UTC:
+  new native SHA256 a9ad3cddbee6d55a035e73cb99bf2ab32fdd7eba06dd7baf556fc927d4f5adca.
+  Fresh stationary hold completed normally at 10.140003918 seconds after
+  supervisor forwarded explicit `finish.request`; all-eight disable and
+  offline integrity review passed. Raw SHA256
+  1501039ff82ea7e04431a8cc1c70237f662d4e7760c6aac9e555b4ed29025ae1.
+
+The new native change only adds requested completion of stationary holds;
+the controller gains, trajectories and all guards remain unchanged. Do not
+silently transfer the old-native frozen model across this binary hash change.
+`right_automatic_operator_hold.json` is for `--mode hold`: fresh current
+reference, up to 600 seconds, with normal early completion on an exact
+`finish\n` file at OUTPUT/finish.request after at least five seconds.
+SIGTERM/faults still fail; disable is verified before success. Request and
+native completed-duration evidence are required for reviewing early holds.
+The ten-minute cap preserves bounded unattended holding and full raw retention.
+
+Next paired-load procedure: keep one stationary owner active for empty-before,
+loaded, empty-after. Ask for attachment/removal only after running hold is
+confirmed; keep reference/gripper unchanged. `right_hold_load_protocol.json`
+specifies settling and measurement durations (5/10 seconds). Record confirmed
+load labels and monotonic start/end windows; exclude handling transitions.
+After the last window, request finish and verify release. Offline
+`python -m vlai_l1_runtime.hold_load_review --config ... --source OUTPUT
+--windows WINDOWS.json --policy configs/diagnostics/right_hold_load_review.json
+--output NEW.json` requires passed hold, raw-hash-bound three-window labels,
+minimum samples/duration and settled q. It reports all-eight torque response,
+posture changes and empty-return drift; no pose/friction compensation or FT
+claim. Do not treat different actual poses as identical just because targets
+were held fixed. Never write an operator confirmation before it arrives.
+
+Hardware-free checks: 590 pytest tests, four CTests, Ruff check/format and
+`git diff --check` pass. Native requested-finish commissioning is separate live
+evidence, not part of those tests. Changes remain uncommitted.
+
+**Previous hardware stop: 2026-10-11 09:57:39 UTC.** Following the J7 trip,
+the operator explicitly requested continued investigation and suggested the
+peak might be noise. Completed offline timing/decoder/SDK-ABI checks, two
+motion-free captures and two bounded comparison sequences. No gain, speed
+guard, bound, zero or calibration changed; no automatic retry after a fault.
+Last motion ended at 09:54:16 with all eight motors verified disabled. The
+last operation was a motion-free state/parameter read ending 09:57:39. All
+configured links are DOWN/STOPPED with correct parents, zero live/cumulative
+CAN errors and interface drops. can2 TX/RX: 1983872/1983872; qdisc drops and
+backlog zero, 45 requeues. Other endpoints retain their previous totals.
+
+New evidence under `data/temporary/`:
+
+- `right_speed_fault_disabled_probe_20261011`, 09:49:54–09:49:57: all eight
+  motors answered all 40 rounds, all raw statuses disabled. J7 position span
+  0.02186 degrees and reported speed values +/-0.41975 and +/-1.25925 deg/s.
+- `right_speed_fault_halfdegree_20261011`: existing half-degree/4-second
+  transition policy, one cycle; hold and 41-second sweep passed. Sweep
+  09:51:33–09:52:17, J7 enabled speed peak 9.65423 deg/s, position span
+  0.48085 degrees, maximum tracking error 0.43443 degrees. Raw hash
+  11202a680177ae0dc863c2baba6ea3d2d5a7df9425ede8cb1f30e14be32b63be.
+- `right_speed_fault_slow_halfdegree_20261011`: tracked new
+  `right_automatic_slow_halfdegree.json` changes only transition duration
+  (4 to 8 seconds) and description from the prior half-degree policy. All
+  physical settings/guards unchanged. Hold and 57-second sweep passed;
+  sweep 09:53:16–09:54:16, J7 enabled speed peak 5.45674 deg/s, position span
+  0.45900 degrees, maximum tracking error 0.39939 degrees. Raw hash
+  c58217bbc67ed1509bfc286e9cbab6abb6f3aa117014f6457177ef779c1a714a.
+- `right_speed_fault_j7_parameters_20261011`, 09:57:36–09:57:39:
+  40/40 motion-free rounds and eight allowlisted read-only registers passed.
+  J7 P_MAX=12.5 rad, V_MAX=30 rad/s, T_MAX=10 Nm match tracked decoding;
+  response/send IDs 23/7 match. No parameter was written.
+- `right_speed_investigation_20261011/review.py` / `review.json` reproduce
+  the six-capture comparison, raw hashes, kernel-time position differences
+  and disabled-noise check. Adjacent disassemblies record the SDK command
+  packer/C-wrapper audit. The SDK reorders the public pos/vel/kp/kd/torque
+  fields correctly for its internal representation; native radians conversion
+  and zero velocity/torque feedforward match that ABI. This is a source/binary
+  audit, not a recording of transmitted command frames.
+
+Fault interpretation: feedback quantization is 0.02185694 degrees/count and
+0.8394986 deg/s/count. At the earlier fault, position changed seven counts
+(0.153 degrees) over 9.843872 ms of kernel-arrival time: -15.54252 deg/s by
+position difference, compared with reported -18.04922 deg/s. Dequeue delay
+was 23.8 microseconds; no timestamp backlog explains the peak. A 0.15-degree
+brief motion may be visually inconspicuous. Position/velocity share an encoder,
+so agreement does not independently exclude sensor artifacts. Evidence favors
+intermittent low-speed response over ordinary stationary quantization noise,
+but friction/controller dynamics/encoder causes remain unproven. The two
+comparison starting poses differ by about 0.22 degrees at J7; single captures
+do not establish that transition duration alone caused the peak reduction.
+
+Automatic offline reviews now include per-motor enabled/disabled raw speed
+peaks and enabled over-limit counts, without altering the live guard or the
+existing integrity-review acceptance criteria. Separate replay outputs
+`analysis_with_raw_speed.json` preserve the original reports; both new sweeps
+have zero enabled speed exceedances. Hardware-free validation: 574 pytest,
+four native CTests, Ruff check/format and `git diff --check` pass.
+
+**Next stage:** The smaller/slower policy is a passed candidate for further
+bounded characterization; it is not general controller stability or FT
+acceptance. No operator action is pending. Keep the remote off until an
+explicit attachment step. Broader unloaded pose/history coverage and a method
+to compare loads despite mounting/post-disable pose shifts remain unresolved;
+do not turn these single-cycle diagnostic records into an accepted FT model.
+
+**Previous hardware stop: 2026-10-11 09:40:55 UTC — J7 speed guard trip.**
+The operator confirmed the remote removed, hands clear and endpoint unsupported.
+`data/temporary/right_automatic_unloaded_20261011_04` passed its five-second
+hold, then failed its sweep at approximately 26.38 seconds. Native output:
+`FAIL position/speed/effort/temperature guard:joint_7`. All eight motors were
+verified disabled; all CAN links DOWN/STOPPED with correct USB parents, zero
+live/cumulative CAN errors and interface drops, can2 qdisc drops/backlog zero
+(37 requeues). Final can2 TX/RX is 1895352/1895352, all other endpoints unchanged.
+No motion retry, gain/limit change, adapter reset or new native build occurred.
+
+The failed sweep retains 2,638 accepted samples and 21,152 raw frames. Raw hash:
+3b57c1cea32231d7043f39d6da6b1bb8fb9c5ea71f0215dfeb604ddfd2cd04f1.
+At source timestamp 237020518884876 ns, enabled J7 frame `177e377ea7f31919`
+decodes to -18.04922 deg/s, exceeding the tracked 15 deg/s limit, with
+q=-9.97769 degrees, torque=-0.06105 Nm and temperatures 25/25 C. Consecutive
+positions also change rapidly, so this is not solely a velocity-field spike.
+The disabled event follows that frame by 27.60 ms; all eight final raw motor
+frames are disabled and newer than the last accepted sample. The operator
+reported no contact, visible cable/strap interference, unusual motion or noise.
+This observation does not explain or invalidate the feedback guard trip.
+
+Saved `sweep/fault_review.py` / `fault_review.json` reproduce offline hash,
+raw decoding, disabled-tail and historical comparisons. Previous unloaded
+02/03 and loaded-remote-01 enabled J7 peaks were 14.69/13.01/13.01 deg/s;
+all four reference trajectories peak near 0.469 deg/s. Investigate intermittent
+low-speed response (friction release/controller dynamics are hypotheses),
+not a commanded high-speed trajectory. Do not increase the speed threshold,
+filter away the event, fit this failed partial capture, or automatically retry.
+The initial pose also changed after removal (J1 about +1.73 degrees, J2 -0.61,
+J6 +0.50, J7 +2.95 relative to loaded startup), so old local baseline support
+remains insufficient independently of the fault.
+
+**Next work at that point (investigation now recorded above):** Keep hardware stopped while reviewing the direct-PD wrist
+response and designing a revised bounded experiment. The operator has already
+answered the contact question and removed the load; no further manual action
+is pending. Broad motion authorization remains, but does not waive the no-
+automatic-fault-retry rule. No matched load calibration was completed.
+The Python supervisor now preserves native `FAIL` text in error summaries
+after reaping the child, including trailing failures after a disabled marker;
+previous reports are unmodified. Native motor control and safety settings are
+unchanged. Hardware-free tests cover reporting and unchanged disable/no-retry
+behavior. Final hardware-free checks passed: 572 pytest tests, Ruff check/
+format and `git diff --check`; no hardware was opened by those checks.
+
+**Previous hardware stop: 2026-10-11 09:37:17 UTC.** The operator confirmed
+the nominal 300 g R3-1 remote tied securely to the right endpoint, hands clear,
+and authorized the existing automatic sequence. `right_automatic_loaded_remote_20261011_01`
+under `data/temporary/` passed hold (09:35:49–09:35:57) and sweep
+(09:35:57–09:37:17), with fresh disabled replies from all eight motors.
+All configured links are DOWN/STOPPED, zero live/cumulative CAN errors and
+interface drops, can2 qdisc drops/backlog zero (33 requeues). No controller
+remains. Only can2 totals changed, to TX/RX 1869512/1869512; other endpoints
+retain the previous totals. No live settings or native code changed.
+
+Hold: 500 samples/4,048 raw frames. Sweep: 7,700 samples/61,648 raw frames,
+maximum J7 tracking error 0.68208 degrees, actual span 1.44256 degrees,
+maximum motor gap 17.30749 ms. Raw sweep SHA256:
+093d6eab0f0aaa94daaeac107bbf6f6ea3e1a86b12e2efba49688e0209b7b6cc.
+The separate `operator_context.json` records nominal (not weighed) mass and
+unknown attachment geometry. `sweep/frozen_loaded_response.json` evaluates
+the frozen unloaded study without refit. **Zero of eight holds are supported**:
+relative to training hold means, J4 changed -2.24 degrees, J6 +5.48 degrees,
+J7 -7.01 degrees, with additional changes in J1/J2/gripper. These occurred
+between recordings, not during the bounded trajectory; do not infer their
+cause. J7 same-approach repeat torque differences are at most 0.00538 Nm.
+Diagnostic-only extrapolated residuals are about -0.11 to -0.17 Nm, but may
+include posture/model error and must not be reported as measured external
+torque, remote weight or accepted FT accuracy.
+
+**Previous operator action (completed above):** Asked the operator to remove the remote while
+disabled, leave the endpoint unsupported and hands clear, keeping posture and
+gripper opening approximately unchanged (no precise manual reset requested).
+Their completion response led to unloaded capture 04 and its speed trip above.
+Preserve the original frozen study and loaded evidence; any
+new local model must fit unloaded data only and report its actual support.
+A model developed after seeing this loaded record is exploratory; reserve a
+fresh loaded recording for independent validation. Broader posture coverage
+is still necessary for movement-tolerant FT. Do not demand exact manual pose
+reproduction or silently widen support to accept these data.
+
+**Previous unloaded study (2026-10-11):** Hardware stopped at **09:25:28 UTC**.
+All four configured CAN links are DOWN/STOPPED with exact USB parents, zero
+live/cumulative CAN errors and interface drops, and no controller remains.
+can2 qdisc drops/backlog are zero (29 requeues); final can2 TX/RX is
+1803176/1803176. Other interfaces remain at the totals recorded below. Only
+the right Follower moved. Two complete `automatic-right --mode sequence`
+runs used the unchanged repeat policy and final native hash recorded below,
+on repository base 40e3980689cc62250b5ae79ad79361c89f84d768.
+
+The operator confirmed the original gripper and camera only, endpoint free,
+no contact. Separate `operator_context.json` records this without rewriting
+original capture reports. Under `data/temporary/`:
+
+- `right_automatic_unloaded_20261011_02`, 09:19:46–09:21:14 UTC:
+  hold 500 samples/4,048 raw frames, sweep 7,700/61,648. Maximum J7 tracking
+  error 0.68576 degrees. Sweep raw SHA256
+  b8e9f76ab3b51b1c7b38f98af63b6b04da32098879cc887bc840ddd44f0a8472.
+  `sweep/frozen_wrist_study.json` fits four first-cycle settled hold means,
+  then tests four next-cycle means. Constant/angle/angle-plus-measured-direction
+  holdout RMSE: 0.09288/0.08080/0.01604 Nm. This split is within one recording.
+- `right_automatic_unloaded_20261011_03`, 09:24:00–09:25:28 UTC:
+  same sample/frame counts; maximum J7 tracking error 0.67188 degrees. Sweep
+  raw SHA256 9a76afdb09e1c71f67cdab82f3291200f26e7c61b2d47dc0b53e92b67ef243be.
+  `sweep/frozen_validation.json` uses the already frozen study, without refit.
+  Four supported holds (two distinct postures repeated twice) have RMSE
+  0.07695/0.05068/0.02629 Nm respectively. Four other holds lie outside training
+  support and are diagnostic only. Both sequences passed preflight, capture
+  review and fresh all-eight-motor disable verification with zero CAN errors.
+
+New pure `wrist_baseline_study.py` compares these local raw-J7-torque baselines.
+It uses measured approach history, explicit settled windows, operator load
+labels, artifact hashes and a tracked offline support policy. It neither
+exports a Runtime compensation model nor establishes calibrated external
+torque/FT. A separate loaded evaluation preserves measured-minus-frozen-
+baseline residuals, excludes unsupported holds and prohibits loaded fitting.
+All eight motor torque means are retained for inspection, but only J7 is
+modelled. Do not pool these records with the opaque teleoperation controller.
+Hardware-free checks passed: 571 pytest tests, Ruff check/format and
+`git diff --check`. Replaying capture 03 through the extended reader also
+passed offline artifact review; the frozen model was not modified. No native
+or live control code changed in this study.
+
+**Load reference context:** The operator selected the previous R3-1 remote,
+described as 300 g, and tied it on for the later capture above. Record this as operator-supplied
+nominal mass, not an independently weighed reference. Mounting distance and
+direction remain unknown; no ground-truth joint torque can be assigned.
+Keep the frozen
+unloaded model unchanged; do not interpret an unsupported loaded residual as
+validated external force. Do not ask again for motion authorization already given.
+
 **Latest implementation and live commissioning (2026-10-11):** The operator's
 latest direction explicitly authorizes implementing and running the complete
 bounded automatic diagnostic, waives the earlier complete-controller-source
@@ -23,7 +1218,7 @@ current measured raw motor positions, tracked PD gains and zero feedforward;
 it never homes/lifts/zeros or moves the Leader. Controller context differs
 from the previous opaque teleoperation records. No cameras were opened.
 
-**LATEST HARDWARE STOPPED: 2026-10-11 08:54:47 UTC.** All configured CAN links
+**Previous hardware stop: 2026-10-11 08:54:47 UTC.** All configured CAN links
 are DOWN/STOPPED, exact USB parents, zero live/cumulative errors and interface
 drops; can2 qdisc drops zero. No controller remains. Final TX/RX: can0
 1555912/1555855, can1 0/0, can2 1670504/1670504, can3 3904/3904. Only can2

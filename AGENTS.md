@@ -20,6 +20,29 @@ or camera code. On the onboard deployment, the host-level
   independent supervision, disable verification and no automatic fault retry.
   Keep experimental settings tracked and distinguish this raw-motor-coordinate
   diagnostic from calibrated model coordinates or validated FT control.
+  Follow-up operator authorization: distinguish manual attachment/removal from
+  automatic motion. A tracked paired-only handling policy may allow bounded
+  transient wrist speed excursions, with a separate immediate hard ceiling,
+  sustained-speed stop and post-acknowledgement settling gate. This is not a
+  global speed exemption. Bounds, excursion, effort, temperature, tracking,
+  communication, disable verification and no fault retry remain enforced.
+  Follow-up operator request (2026-10-12): expand unloaded excitation to a
+  larger coordinated multi-joint path. The isolated owner may execute explicitly
+  named, closed waypoint paths after whole-path bounds and per-segment derivative
+  checks. Keep the gripper fixed, fresh-position startup and every live guard;
+  do not infer Cartesian collision clearance from joint bounds or treat the new
+  path as commissioned before its own hardware evidence. This adds no production
+  transport, zeroing, Leader motion or automatic fault retry.
+  Subsequent explicit operator instruction (2026-10-12): raise the measured
+  arm-joint speed hard-stop limit to 45 deg/s for the tracked multi-joint
+  unloaded diagnostic. This is scoped to that policy's J1-J7; fixed gripper
+  remains 15 deg/s. Reference trajectory speed stays below 1 deg/s. Other
+  guards and historical capture policies remain unchanged; this is not a
+  general speed exemption or permission for automatic fault retry.
+  The operator subsequently requested a larger tracking-error threshold after
+  the J7 stop. In that same multi-joint policy, J7 now matches the other motors
+  at 2 deg with unchanged 0.1-second persistence; this does not change gains,
+  bounds, excursion, other guards, historical policies or automatic retry rules.
 - Static description, validation, and tests must never initialize ROS, CAN,
   cameras, systemd, or `/dev` resources.
 - One process will ultimately own each CAN endpoint and each camera. LeRobot

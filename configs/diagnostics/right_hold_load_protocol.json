@@ -1,0 +1,5 @@
+{
+  "settle_seconds": 5.0,
+  "measurement_seconds": 10.0,
+  "description": "Within one stationary automatic hold, record empty_before, then loaded, then empty_after. Before each measurement allow this settling interval after operator confirmation. Attach/remove only when explicitly requested; preserve references and gripper opening. Use the operator-hold policy's independent hard time/capacity limit."
+}

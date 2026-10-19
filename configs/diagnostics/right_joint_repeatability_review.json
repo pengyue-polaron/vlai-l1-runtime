@@ -1,0 +1,6 @@
+{
+  "minimum_hold_samples": 100,
+  "maximum_hold_span_deg": 0.1,
+  "maximum_other_joint_delta_deg": 0.1,
+  "maximum_active_joint_delta_deg": 0.05
+}

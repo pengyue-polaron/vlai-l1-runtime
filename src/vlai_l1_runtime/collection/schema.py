@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -14,13 +15,17 @@ from ..configuration import CameraConfig
 from ..contracts import NamedJointVector, validate_named_values
 from .configuration import CollectionConfig
 from .dependencies import collection_dependency_error, require_collection_python
+from .ft import FTSample
 
 STATE_KEY = "observation.state"
 ACTION_KEY = "action"
 IMAGE_PREFIX = "observation.images."
+FT_WRENCH_KEY = "observation.ft_wrench"
+FT_TIME_DELTA_KEY = "observation.ft_time_delta_s"
+FT_AXIS_NAMES = ("fx_n", "fy_n", "fz_n", "mx_nm", "my_nm", "mz_nm")
 WRIST_LEFT_IMAGE_KEY = f"{IMAGE_PREFIX}wrist_left"
 WRIST_RIGHT_IMAGE_KEY = f"{IMAGE_PREFIX}wrist_right"
-DATASET_SCHEMA = "vlai_l1_lerobot_dataset_v3_v3"
+DATASET_SCHEMA = "vlai_l1_lerobot_dataset_v3_v4"
 
 
 class CollectionContractError(ValueError):
@@ -55,6 +60,8 @@ class DatasetContract:
         features = {
             STATE_KEY: _vector_feature(self.state_names),
             ACTION_KEY: _vector_feature(self.action_names),
+            FT_WRENCH_KEY: _vector_feature(FT_AXIS_NAMES),
+            FT_TIME_DELTA_KEY: _vector_feature(("ft_minus_robot_s",)),
         }
         features.update({camera.feature_key: camera.feature() for camera in self.cameras})
         return features
@@ -71,6 +78,7 @@ class CollectionSample:
     observation: NamedJointVector
     action: NamedJointVector
     cameras: Mapping[str, CameraSample]
+    ft: FTSample | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -110,6 +118,8 @@ class CollectionSample:
         object.__setattr__(self, "observation", observation)
         object.__setattr__(self, "action", action)
         object.__setattr__(self, "cameras", MappingProxyType(snapshot))
+        if self.ft is not None and not isinstance(self.ft, FTSample):
+            raise CollectionContractError("FT sample has the wrong type")
 
 
 @dataclass(frozen=True)
@@ -117,6 +127,8 @@ class ValidatedSample:
     state: tuple[float, ...]
     action: tuple[float, ...]
     images: Mapping[str, Any]
+    ft_wrench: tuple[float, float, float, float, float, float]
+    ft_time_delta_s: float
 
     def lerobot_frame(self, *, task: str) -> dict[str, Any]:
         """Materialize NumPy vectors only at the optional LeRobot boundary."""
@@ -130,6 +142,8 @@ class ValidatedSample:
         return {
             STATE_KEY: np.asarray(self.state, dtype=np.float32),
             ACTION_KEY: np.asarray(self.action, dtype=np.float32),
+            FT_WRENCH_KEY: np.asarray(self.ft_wrench, dtype=np.float32),
+            FT_TIME_DELTA_KEY: np.asarray((self.ft_time_delta_s,), dtype=np.float32),
             **dict(self.images),
             "task": normalized_task,
         }
@@ -148,6 +162,7 @@ class SampleAssembler:
         )
         self._last_observation_sequence: int | None = None
         self._last_action_sequence: int | None = None
+        self._last_ft_sequence: int | None = None
 
     def validate(self, sample: CollectionSample, *, now_ns: int) -> ValidatedSample:
         if not isinstance(sample, CollectionSample):
@@ -203,6 +218,29 @@ class SampleAssembler:
         )
         state = tuple(state_values[name] for name in expected_features)
         candidate_action = tuple(action_values[name] for name in expected_features)
+        ft = sample.ft
+        if ft is None:
+            raise CollectionContractError("FT sample is missing")
+        if (
+            not isinstance(ft.values, tuple)
+            or len(ft.values) != 6
+            or not all(type(value) in (float, int) and math.isfinite(value) for value in ft.values)
+        ):
+            raise CollectionContractError("FT wrench must contain six finite values")
+        if type(ft.monotonic_ns) is not int or ft.monotonic_ns < 0 or ft.monotonic_ns > now_ns:
+            raise CollectionContractError("FT timestamp is invalid or in the future")
+        if type(ft.sequence) is not int or ft.sequence < 1:
+            raise CollectionContractError("FT sequence must be a positive integer")
+        if now_ns - ft.monotonic_ns > self._config.max_sample_age_s * 1_000_000_000:
+            raise CollectionContractError("FT sample is stale")
+        ft_delta_ns = ft.monotonic_ns - sample.observation.metadata.monotonic_ns
+        if abs(ft_delta_ns) > self._config.max_ft_skew_s * 1_000_000_000:
+            raise CollectionContractError("FT/robot sample skew exceeds tracked limit")
+        _require_increasing_sequence(
+            ft.sequence,
+            previous=self._last_ft_sequence,
+            label="FT sample",
+        )
 
         images: dict[str, Any] = {}
         stream_by_role = {stream.role: stream for stream in self._config.recording_camera_streams}
@@ -237,7 +275,14 @@ class SampleAssembler:
 
         self._last_observation_sequence = observation.seq
         self._last_action_sequence = action.seq
-        return ValidatedSample(state, candidate_action, MappingProxyType(images))
+        self._last_ft_sequence = ft.sequence
+        return ValidatedSample(
+            state,
+            candidate_action,
+            MappingProxyType(images),
+            tuple(ft.values),
+            ft_delta_ns / 1_000_000_000,
+        )
 
 
 @dataclass(frozen=True)

@@ -7,10 +7,13 @@ import pytest
 
 from vlai_l1_runtime.cameras import CameraFrameMetadata
 from vlai_l1_runtime.collection.configuration import load_collection_config
+from vlai_l1_runtime.collection.ft import FTSample
 from vlai_l1_runtime.collection.live import LiveCollectionSource
 from vlai_l1_runtime.collection.mock import SyntheticSampleSource
 from vlai_l1_runtime.collection.schema import (
     ACTION_KEY,
+    FT_TIME_DELTA_KEY,
+    FT_WRENCH_KEY,
     STATE_KEY,
     WRIST_LEFT_IMAGE_KEY,
     WRIST_RIGHT_IMAGE_KEY,
@@ -60,6 +63,18 @@ class _StateSource(_ContextSource):
 
 class _CameraSource(_ContextSource):
     def capture(self, *, timeout_s: float):
+        assert self.open
+        assert timeout_s > 0
+        return self.value
+
+
+class _FTSource(_ContextSource):
+    def wait_first(self, *, timeout_s: float, max_age_s: float):
+        assert self.open
+        assert timeout_s > 0
+        assert max_age_s > 0
+
+    def closest(self, *, target_monotonic_ns: int, timeout_s: float):
         assert self.open
         assert timeout_s > 0
         return self.value
@@ -137,6 +152,7 @@ def _sample(
         NamedJointVector(_pose(), SampleMetadata(sequence, timestamp_ns)),
         NamedJointVector(action or _pose(), SampleMetadata(sequence, timestamp_ns)),
         cameras,
+        FTSample((1.0, 2.0, 3.0, 0.1, 0.2, 0.3), timestamp_ns, sequence),
     )
 
 
@@ -147,7 +163,7 @@ def test_collection_config_and_schema_have_one_complete_contract() -> None:
 
     assert config.collection_ready is True
     assert config.collection_blockers == ()
-    assert config.schema_version == 5
+    assert config.schema_version == 6
     assert config.teleoperation_sides == ("left", "right")
     assert config.record_camera_roles == ("wrist_left", "wrist_right", "agent")
     assert config.minimum_capture_fps == 27.0
@@ -174,6 +190,8 @@ def test_collection_config_and_schema_have_one_complete_contract() -> None:
     assert set(contract.features()) == {
         STATE_KEY,
         ACTION_KEY,
+        FT_WRENCH_KEY,
+        FT_TIME_DELTA_KEY,
         WRIST_LEFT_IMAGE_KEY,
         WRIST_RIGHT_IMAGE_KEY,
     }
@@ -202,6 +220,8 @@ def test_right_only_collection_contract_is_exact_and_omits_left_wrist() -> None:
     assert set(contract.features()) == {
         STATE_KEY,
         ACTION_KEY,
+        FT_WRENCH_KEY,
+        FT_TIME_DELTA_KEY,
         WRIST_RIGHT_IMAGE_KEY,
         "observation.images.agent",
     }
@@ -242,6 +262,7 @@ def test_agent_observation_uses_the_exact_tracked_center_crop() -> None:
             for stream in config.system.cameras.streams
             if stream.enabled
         },
+        FTSample((1.0, 2.0, 3.0, 0.1, 0.2, 0.3), timestamp_ns, 1),
     )
 
     result = SampleAssembler(config).validate(sample, now_ns=timestamp_ns)
@@ -323,6 +344,66 @@ def test_sample_assembler_validates_fresh_named_synchronized_samples() -> None:
     assert second.action[0] == 21.0
 
 
+def test_ft_wrench_and_host_time_delta_are_recorded() -> None:
+    config = _commissioned_config()
+    sample = _sample(1, 1_000_000_000)
+    sample = replace(sample, ft=replace(sample.ft, monotonic_ns=1_005_000_000))
+    validated = SampleAssembler(config).validate(sample, now_ns=1_010_000_000)
+    assert validated.ft_wrench == (1.0, 2.0, 3.0, 0.1, 0.2, 0.3)
+    assert validated.ft_time_delta_s == 0.005
+    frame = validated.lerobot_frame(task="record a force sample")
+    assert frame["task"] == "record a force sample"
+    assert tuple(frame[FT_WRENCH_KEY]) == pytest.approx((1.0, 2.0, 3.0, 0.1, 0.2, 0.3))
+    assert tuple(frame[FT_TIME_DELTA_KEY]) == pytest.approx((0.005,))
+    assert config.max_ft_skew_s == 0.05
+    assert canonical_dataset_contract(config).features()[FT_WRENCH_KEY]["shape"] == (6,)
+    assert canonical_dataset_contract(config).features()[FT_TIME_DELTA_KEY]["shape"] == (1,)
+
+
+def test_ft_missing_stale_skewed_and_repeated_frames_fail_closed() -> None:
+    config = _commissioned_config()
+    assembler = SampleAssembler(config)
+    first = _sample(1, 1_000_000_000)
+    with pytest.raises(CollectionContractError, match="FT sample is missing"):
+        assembler.validate(replace(first, ft=None), now_ns=1_010_000_000)
+    with pytest.raises(CollectionContractError, match="FT sample is stale"):
+        assembler.validate(
+            replace(first, ft=replace(first.ft, monotonic_ns=700_000_000)),
+            now_ns=1_010_000_000,
+        )
+    with pytest.raises(CollectionContractError, match="FT/robot sample skew"):
+        assembler.validate(
+            replace(first, ft=replace(first.ft, monotonic_ns=940_000_000)),
+            now_ns=1_010_000_000,
+        )
+    assembler.validate(first, now_ns=1_010_000_000)
+    repeated = _sample(2, 1_030_000_000)
+    repeated = replace(repeated, ft=replace(repeated.ft, sequence=1))
+    with pytest.raises(CollectionContractError, match="FT sample sequence did not increase"):
+        assembler.validate(repeated, now_ns=1_040_000_000)
+
+
+def test_ft_preflight_failure_releases_all_sources() -> None:
+    config = _commissioned_config()
+    sample = _sample(1, 1_000_000_000)
+    state = _StateSource((sample.observation, sample.action))
+    cameras = _CameraSource(sample.cameras)
+
+    class NoFT(_FTSource):
+        def wait_first(self, *, timeout_s: float, max_age_s: float):
+            raise TimeoutError("no valid HKVL frame received")
+
+    ft = NoFT(sample.ft)
+    with (
+        pytest.raises(TimeoutError, match="no valid HKVL frame"),
+        LiveCollectionSource(config, state_source=state, camera_source=cameras, ft_source=ft),
+    ):
+        pytest.fail("FT preflight must fail before runtime startup")
+    assert not state.open
+    assert not cameras.open
+    assert not ft.open
+
+
 def test_invalid_image_does_not_advance_camera_continuity() -> None:
     assembler = SampleAssembler(_commissioned_config())
     sample = _sample(1, 1_000_000_000)
@@ -371,20 +452,25 @@ def test_live_source_composes_one_owned_robot_and_camera_sample() -> None:
         replace(right.metadata, monotonic_ns=1_008_000_000),
         right.image,
     )
-    sample = CollectionSample(sample.observation, sample.action, cameras)
+    sample = CollectionSample(sample.observation, sample.action, cameras, sample.ft)
     state = _StateSource((sample.observation, sample.action))
     cameras = _CameraSource(sample.cameras)
+    ft = _FTSource(sample.ft)
 
-    with LiveCollectionSource(config, state_source=state, camera_source=cameras) as source:
+    with LiveCollectionSource(
+        config, state_source=state, camera_source=cameras, ft_source=ft
+    ) as source:
         captured, now_ns = next(source.samples())
         assert captured.observation == sample.observation
         assert captured.action == sample.action
         assert captured.cameras == sample.cameras
+        assert captured.ft == sample.ft
         assert now_ns > 0
         assert state.targets == [1_004_000_000]
 
     assert state.open is False
     assert cameras.open is False
+    assert ft.open is False
 
 
 def test_live_source_refuses_uncommissioned_hardware() -> None:

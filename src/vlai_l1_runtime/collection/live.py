@@ -11,6 +11,7 @@ from ..camera_ipc import RawCameraBridgeClient
 from ..contracts import NamedJointVector
 from ..teleoperation import XAirStateReceiver
 from .configuration import CollectionConfig
+from .ft import FTSample, HKVLCollectionSource
 from .schema import CameraSample, CollectionSample
 
 
@@ -35,6 +36,16 @@ class CameraSource(Protocol):
     def __exit__(self, exc_type, exc, traceback) -> None: ...
 
 
+class FTSource(Protocol):
+    def __enter__(self) -> FTSource: ...
+
+    def wait_first(self, *, timeout_s: float, max_age_s: float) -> None: ...
+
+    def closest(self, *, target_monotonic_ns: int, timeout_s: float) -> FTSample: ...
+
+    def __exit__(self, exc_type, exc, traceback) -> None: ...
+
+
 class LiveCollectionSource:
     """Consume persistent cameras and the x_air observation socket for one run."""
 
@@ -44,6 +55,7 @@ class LiveCollectionSource:
         *,
         state_source: StateSource | None = None,
         camera_source: CameraSource | None = None,
+        ft_source: FTSource | None = None,
     ) -> None:
         if not isinstance(config, CollectionConfig):
             raise TypeError("LiveCollectionSource requires CollectionConfig")
@@ -54,6 +66,7 @@ class LiveCollectionSource:
         self._config = config
         self._state_source = state_source or XAirStateReceiver(config.system)
         self._camera_source = camera_source or RawCameraBridgeClient(config.system)
+        self._ft_source = ft_source or HKVLCollectionSource(config.system.ft_sensor)
         self._stack: ExitStack | None = None
 
     def __enter__(self) -> LiveCollectionSource:
@@ -63,6 +76,11 @@ class LiveCollectionSource:
         try:
             stack.enter_context(self._state_source)
             stack.enter_context(self._camera_source)
+            stack.enter_context(self._ft_source)
+            self._ft_source.wait_first(
+                timeout_s=self._config.system.ft_sensor.startup_timeout_s,
+                max_age_s=self._config.max_sample_age_s,
+            )
         except BaseException:
             stack.close()
             raise
@@ -96,8 +114,12 @@ class LiveCollectionSource:
             if robot is None:
                 raise TimeoutError("timed out waiting for selected x_air state")
             observation, action = robot
+            ft = self._ft_source.closest(
+                target_monotonic_ns=observation.metadata.monotonic_ns,
+                timeout_s=timeout_s,
+            )
             now_ns = time.monotonic_ns()
-            yield CollectionSample(observation, action, cameras), now_ns
+            yield CollectionSample(observation, action, cameras, ft), now_ns
             next_tick += period_ns
             remaining_ns = next_tick - time.monotonic_ns()
             if remaining_ns > 0:

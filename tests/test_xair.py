@@ -111,8 +111,8 @@ def test_pinned_xair_dependency_and_generated_launch_inputs(tmp_path: Path) -> N
         "state_timeout_ms": 100,
         "rt_priority": 20,
         "can_health_poll_ms": 100,
-        "joint_min_deg": [-80.0, -10.0, -90.0, 0.0, -90.0, -45.0, -90.0],
-        "joint_max_deg": [120.0, 180.0, 90.0, 140.0, 90.0, 45.0, 90.0],
+        "joint_min_deg": [-80.0, -10.0, -90.0, 0.0, -90.0, -50.0, -90.0],
+        "joint_max_deg": [120.0, 180.0, 90.0, 140.0, 90.0, 50.0, 90.0],
         "max_following_error_deg": [9.0, 8.0, 3.0, 10.0, 4.0, 2.0, 6.0],
         "following_error_timeout_ms": 100,
         "following_error_action": "warn",
@@ -141,11 +141,23 @@ def test_sidecar_command_carries_config_owned_joint_safety() -> None:
     def value(option: str) -> str:
         return command[command.index(option) + 1]
 
-    assert value("--joint-min-deg") == "-80,-10,-90,0,-90,-45,-90"
-    assert value("--joint-max-deg") == "120,180,90,140,90,45,90"
+    assert value("--joint-min-deg") == "-80,-10,-90,0,-90,-50,-90"
+    assert value("--joint-max-deg") == "120,180,90,140,90,50,90"
     assert value("--max-following-error-deg") == "9,8,3,10,4,2,6"
     assert value("--following-error-timeout-ms") == "100"
     assert value("--following-error-action") == "warn"
+
+    left_command = _sidecar_command(
+        config,
+        "left",
+        sidecar=Path("/runtime/vlai_l1_xair_sidecar"),
+        assets=Path("/runtime/assets"),
+        launch=describe_xair_side(config, "left"),
+        owner_uid=1000,
+        owner_gid=1000,
+    )
+    assert left_command[left_command.index("--joint-min-deg") + 1] == "-120,-90,-90,0,-90,-50,-90"
+    assert left_command[left_command.index("--joint-max-deg") + 1] == "80,10,90,140,90,50,90"
 
 
 def test_ros_library_paths_follow_host_architecture() -> None:

@@ -148,7 +148,8 @@ just collect-right right_commissioning "hold position"
 ```
 
 The selected collect recipe owns the whole live session. It preflights the
-state socket and recorded camera roles, starts exactly the configured runtime(s),
+state socket, recorded camera roles, and the configured HKVL serial FT stream;
+it requires a valid FT frame before starting exactly the configured runtime(s),
 and waits for selected state after the SDK's startup `AdjustPosition`. Use
 teleoperation to refine the episode start pose, enter `r`
 or use Reset to repeat alignment if needed, then press Enter in the terminal or

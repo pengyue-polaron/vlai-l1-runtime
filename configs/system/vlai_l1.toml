@@ -153,6 +153,14 @@ crop_y = 0
 crop_width = 480
 crop_height = 480
 
+[ft_sensor]
+port = "/dev/serial/by-id/usb-hkvtech.cn_HKV_USB-RS485_CANFD_20260717-if00"
+baudrate = 1000000
+data_bits = 8
+parity = "none"
+stop_bits = 1
+startup_timeout_s = 2.0
+
 [teleoperation]
 provider = "x_air_sdk"
 mode = "unilateral"
@@ -178,13 +186,13 @@ following_error_timeout_s = 0.1
 following_error_action = "warn"
 
 [teleoperation.joint_safety.left]
-min_deg = [-120.0, -90.0, -90.0, 0.0, -90.0, -45.0, -90.0]
-max_deg = [80.0, 10.0, 90.0, 140.0, 90.0, 45.0, 90.0]
+min_deg = [-120.0, -90.0, -90.0, 0.0, -90.0, -50.0, -90.0]
+max_deg = [80.0, 10.0, 90.0, 140.0, 90.0, 50.0, 90.0]
 max_following_error_deg = [9.0, 8.0, 3.0, 10.0, 4.0, 2.0, 6.0]
 
 [teleoperation.joint_safety.right]
-min_deg = [-80.0, -10.0, -90.0, 0.0, -90.0, -45.0, -90.0]
-max_deg = [120.0, 180.0, 90.0, 140.0, 90.0, 45.0, 90.0]
+min_deg = [-80.0, -10.0, -90.0, 0.0, -90.0, -50.0, -90.0]
+max_deg = [120.0, 180.0, 90.0, 140.0, 90.0, 50.0, 90.0]
 max_following_error_deg = [9.0, 8.0, 3.0, 10.0, 4.0, 2.0, 6.0]
 
 [runtime]

@@ -8,6 +8,45 @@ silently choosing one.
 
 ## Start here
 
+**2026-10-20 HKVL FT COLLECTION INTEGRATION — NO ROBOT RUN:**
+Tracked bimanual and right-only collection now require the identified HKVL
+USB-RS485 serial port and fresh decoded FT frames before SDK startup. Each
+LeRobot v3 frame includes a six-axis sensor-frame wrench and its host-receipt
+time delta from the robot state; collection fails on missing/stale/skewed FT.
+The full 1 kHz serial stream is not included in the canonical dataset. This
+change has no live collection evidence and does not make FT force control or
+mechanical safety claims. A separate read-only FT smoke check opened the
+configured serial port, but received no valid frame within two seconds; the
+sensor stream/power must be checked before any collection attempt. The prior
+left CAN and J6-range questions remain.
+Hardware-free pytest/Ruff/diff checks passed, and a synthetic right-only episode
+was written through the real LeRobot v3 backend with video, state, action,
+task, FT wrench and FT time-delta features.
+
+**2026-10-19 RIGHT J6 LIMIT EDIT — SOFTWARE ONLY, NOT COMMISSIONED:**
+The operator requested the same outer feedback stop change on right J6 as on
+left J6: [-45,45] to [-50,50] deg. Both side-specific J6 guards now allow
+[-50,50] deg; all other bounds and live guards remain unchanged. The pinned
+right Leader/Follower URDFs still specify J6 +/-45 deg. No additional physical
+range or coordinate reconciliation has been verified, and no hardware was run
+for this edit. Verify the physical range and coordinates before using the
+expanded region; keep the normal CAN and motion-free preflight gates.
+
+**2026-10-19 LEFT J6 LIMIT EDIT — SOFTWARE ONLY, NOT COMMISSIONED:**
+After a left teleoperation stop at Leader J6 -47.134 deg outside the tracked
+[-45,45] deg bound, the operator explicitly requested changing only the left
+J6 outer feedback stop to [-50,50] deg. The preceding J5 9.595-deg following
+error was warning-only. The pinned left Leader/Follower URDFs and description
+still specify J6 +/-45 deg; no evidence of additional mechanical range or
+coordinate reconciliation has been supplied. The later right J6 edit is noted
+above. CAN/freshness checks, following-error action and shutdown behavior are unchanged.
+This edit did not start hardware and is not a commissioned motion range.
+Read-only post-fault status showed both left CAN links DOWN and no teleoperation
+owner, but each left link's cumulative error-warning and error-passive count
+increased from 0 to 1 during the incident. The pasted stop log did not verify
+motor disable. Resolve the mechanical-range question and CAN event before any
+motion-capable restart; do not infer safety from clean live counters while down.
+
 **CURRENT STOPPED — 2026-10-12 11:38:48 UTC, VALIDATION75 PASSED:**
 `data/temporary/right_multijoint_unloaded_validation75_20261012`, exec **54281 REAPED**.
 Hold and sweep each passed 40/40 all-motor preflight, guards, all-eight verified

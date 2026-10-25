@@ -15,6 +15,13 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
 
     assert config.robot_id == "vlai_l1"
     assert config.position_unit == "degree"
+    assert config.ft_sensor.port.name == "usb-hkvtech.cn_HKV_USB-RS485_CANFD_20260717-if00"
+    assert config.ft_sensor.baudrate == 1000000
+    assert (config.ft_sensor.data_bits, config.ft_sensor.parity, config.ft_sensor.stop_bits) == (
+        8,
+        "none",
+        1,
+    )
     assert [endpoint.interface for endpoint in config.can.endpoints] == [
         "can0",
         "can1",
@@ -52,13 +59,15 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
     assert config.teleoperation.motor_probe_rate_hz == 20
     assert config.teleoperation.joint_safety.following_error_timeout_s == 0.1
     assert config.teleoperation.joint_safety.following_error_action == "warn"
+    assert config.teleoperation.joint_safety.for_side("left").min_deg[5] == -50.0
+    assert config.teleoperation.joint_safety.for_side("left").max_deg[5] == 50.0
     assert config.teleoperation.joint_safety.for_side("right").min_deg == (
         -80.0,
         -10.0,
         -90.0,
         0.0,
         -90.0,
-        -45.0,
+        -50.0,
         -90.0,
     )
     assert config.teleoperation.joint_safety.for_side("right").max_deg == (
@@ -67,7 +76,7 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         90.0,
         140.0,
         90.0,
-        45.0,
+        50.0,
         90.0,
     )
     assert config.teleoperation.joint_safety.for_side("right").max_following_error_deg == (
@@ -171,8 +180,8 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
             "must be one of",
         ),
         (
-            "min_deg = [-80.0, -10.0, -90.0, 0.0, -90.0, -45.0, -90.0]",
-            "min_deg = [120.0, -10.0, -90.0, 0.0, -90.0, -45.0, -90.0]",
+            "min_deg = [-80.0, -10.0, -90.0, 0.0, -90.0, -50.0, -90.0]",
+            "min_deg = [120.0, -10.0, -90.0, 0.0, -90.0, -50.0, -90.0]",
             "joint_1 min_deg must be less than max_deg",
         ),
         (

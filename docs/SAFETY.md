@@ -29,6 +29,13 @@ window passed. This does not affect the independent policy-command blockers.
 Synthetic sources exist only for pure integration tests and cannot enable the
 Runtime.
 
+Collection now requires a valid HKVL serial FT stream before creating a
+motion-capable teleoperation owner. The collector records sensor-frame wrench
+with host-receipt time alignment; an absent or stale stream stops collection.
+These readings are observations only and are not a force-control or safety-stop
+input. They have no verified tool-gravity compensation or sensor-to-tool
+coordinate transform.
+
 ## Operator-authorized automatic diagnostic (2026-10-11)
 
 The operator explicitly waived the complete-controller-source prerequisite for
@@ -355,9 +362,16 @@ command ownership and verified disable/release remain implementation gates.
   identifies the exact side and joint and emits one nonfatal warning per
   excursion; it does not stop the session. These checks use increasing callback
   timestamps and are reset only after a successful `AdjustPosition`.
-  The deployed bounds conservatively intersect the rendered side-specific URDF
+  Most tracked bounds conservatively intersect the rendered side-specific URDF
   ranges with narrower limit constants found in the pinned release because the
-  opaque controller could not be shown to enforce either set.
+  opaque controller could not be shown to enforce either set. On 2026-10-19 the
+  operator explicitly changed left J6's outer feedback stop to +/-50 deg, then
+  requested the same change for right J6. Both exceed the pinned URDF's +/-45 deg.
+  These are uncommissioned guard expansions,
+  not evidence that the joint has additional mechanical travel or that the
+  opaque controller will accept it. Do not use either expanded region before
+  physical-range/coordinate verification. The left side also needs a clean
+  motion-free bus probe after the reported CAN warning/passive event.
 - The sidecar caps and verifies every SDK thread at the tracked FIFO priority.
   It snapshots both CAN links before creation and stops on any live error
   counter or cumulative warning, passive, bus-off, bus-error, arbitration-loss,

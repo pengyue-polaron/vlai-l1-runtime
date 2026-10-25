@@ -278,6 +278,16 @@ class CamerasConfig:
 
 
 @dataclass(frozen=True)
+class FTSensorConfig:
+    port: Path
+    baudrate: int
+    data_bits: int
+    parity: str
+    stop_bits: int
+    startup_timeout_s: float
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     transport: str
     socket_path: Path
@@ -369,6 +379,7 @@ class SystemConfig:
     motors: tuple[MotorConfig, ...]
     control: Mapping[str, ControlProfile]
     cameras: CamerasConfig
+    ft_sensor: FTSensorConfig
     teleoperation: TeleoperationConfig
     runtime: RuntimeConfig
     operator_panel: OperatorPanelConfig
@@ -408,6 +419,7 @@ def load_system_config(path: Path) -> SystemConfig:
             "motors",
             "control",
             "cameras",
+            "ft_sensor",
             "teleoperation",
             "runtime",
             "operator_panel",
@@ -432,6 +444,7 @@ def load_system_config(path: Path) -> SystemConfig:
     motors = _parse_motors(root["motors"])
     control = _parse_control(root["control"], len(motors))
     cameras = _parse_cameras(root["cameras"])
+    ft_sensor = _parse_ft_sensor(root["ft_sensor"])
     teleoperation = _parse_teleoperation(root["teleoperation"], config_path=resolved)
     runtime = _parse_runtime(root["runtime"])
     operator_panel = _parse_operator_panel(root["operator_panel"])
@@ -460,6 +473,7 @@ def load_system_config(path: Path) -> SystemConfig:
         motors=motors,
         control=MappingProxyType(dict(control)),
         cameras=cameras,
+        ft_sensor=ft_sensor,
         teleoperation=teleoperation,
         runtime=runtime,
         operator_panel=operator_panel,
@@ -830,6 +844,26 @@ def _parse_cameras(value: Any) -> CamerasConfig:
             )
         )
     return CamerasConfig(max_age, max_skew, startup_timeout, tuple(streams))
+
+
+def _parse_ft_sensor(value: Any) -> FTSensorConfig:
+    raw = _mapping(value, "ft_sensor")
+    _exact_keys(
+        raw,
+        {"port", "baudrate", "data_bits", "parity", "stop_bits", "startup_timeout_s"},
+        "ft_sensor",
+    )
+    port = Path(_text(raw["port"], "ft_sensor.port"))
+    if port.parent != Path("/dev/serial/by-id") or port.name in ("", ".", ".."):
+        raise ConfigError("ft_sensor.port must be a stable /dev/serial/by-id path")
+    baudrate = _integer(raw["baudrate"], "ft_sensor.baudrate", minimum=1)
+    data_bits = _integer(raw["data_bits"], "ft_sensor.data_bits", minimum=1)
+    parity = _text(raw["parity"], "ft_sensor.parity")
+    stop_bits = _integer(raw["stop_bits"], "ft_sensor.stop_bits", minimum=1)
+    if (data_bits, parity, stop_bits) != (8, "none", 1):
+        raise ConfigError("ft_sensor currently supports only 8N1")
+    timeout = _positive_number(raw["startup_timeout_s"], "ft_sensor.startup_timeout_s")
+    return FTSensorConfig(port, baudrate, data_bits, parity, stop_bits, timeout)
 
 
 def _parse_runtime(value: Any) -> RuntimeConfig:
@@ -1223,6 +1257,14 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
                 )
                 for stream in config.cameras.streams
             ),
+        ),
+        (
+            str(config.ft_sensor.port),
+            config.ft_sensor.baudrate,
+            config.ft_sensor.data_bits,
+            config.ft_sensor.parity,
+            config.ft_sensor.stop_bits,
+            config.ft_sensor.startup_timeout_s,
         ),
         (
             config.teleoperation.provider,

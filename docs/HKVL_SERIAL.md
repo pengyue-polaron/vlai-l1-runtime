@@ -49,6 +49,12 @@ filtering. Values are the sensor-frame stream and are not yet a validated
 end-effector external wrench. Keep the adapter separate from the robot motor
 CAN endpoints, and do not treat this observer as a control or safety stop.
 
+The tracked `just collect` and `just collect-right` workflows also use this
+adapter. Close a standalone `hkvl_serial` process and the browser toolbox before
+collection; the collector requires exclusive access and a valid FT stream
+before it starts the robot. The canonical dataset saves one synchronized FT
+sample per 30 FPS robot/video frame, not the full serial byte stream.
+
 The HKVL-75 series product page describes the 75B force range as 200 N per axis
 and moment range as 8 Nm per axis, but the actual delivered interface and
 calibration remain device-specific:

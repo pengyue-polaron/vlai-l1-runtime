@@ -187,8 +187,8 @@ def _migration_fixture(tmp_path: Path):
     (source_root / "meta/vlai_l1.json").write_text(
         json.dumps(
             {
-                "dataset_schema": "vlai_l1_lerobot_dataset_v3_v3",
-                "collection_schema_version": 4,
+                "dataset_schema": "vlai_l1_lerobot_dataset_v3_v4",
+                "collection_schema_version": 6,
                 "collection_config_sha256": "old-config",
             }
         ),
@@ -199,6 +199,8 @@ def _migration_fixture(tmp_path: Path):
         key: object()
         for key in (
             "observation.state",
+            "observation.ft_wrench",
+            "observation.ft_time_delta_s",
             "observation.images.wrist_right",
             "observation.images.agent",
         )

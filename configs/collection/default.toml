@@ -1,4 +1,4 @@
-schema_version = 5
+schema_version = 6
 system_config = "../system/vlai_l1.toml"
 dataset_root = "../../data/datasets"
 derivative_root = "../../data/derivatives"
@@ -11,6 +11,7 @@ image_writer_threads = 12
 max_sample_age_s = 0.25
 max_state_action_skew_s = 0.05
 max_robot_camera_skew_s = 0.05
+max_ft_skew_s = 0.05
 auto_reset_before_collection = true
 auto_reset_after_save = true
 auto_reset_after_discard = true

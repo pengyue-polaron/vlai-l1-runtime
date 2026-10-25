@@ -6,9 +6,9 @@ Each tracked collection config owns dataset roots, repository ID prefix, active
 teleoperation sides, recorded camera roles, FPS,
 minimum effective capture rate, asynchronous image-writer concurrency, sample
 freshness, reset points, leading-stillness thresholds, and state/action,
-robot/camera and camera-pair skew. It points to
+robot/camera, FT/robot and camera-pair skew. It points to
 exactly one System config; camera dimensions and physical identities, joint
-names, physical units, and robot identity are not duplicated.
+names, FT serial identity, physical units, and robot identity are not duplicated.
 
 An experiment named `pick_blocks_v1` is stored at:
 
@@ -33,6 +33,8 @@ The canonical features are:
 ```text
 observation.state         float32[16], degrees
 action                    float32[16], degrees
+observation.ft_wrench     float32[6], sensor-frame Fx/Fy/Fz N, Mx/My/Mz Nm
+observation.ft_time_delta_s float32[1], FT host receipt minus robot state time
 observation.images.wrist_left   video[height,width,3]
 observation.images.wrist_right  video[height,width,3]
 observation.images.agent        video[height,width,3]
@@ -51,9 +53,20 @@ right_joint_1.pos ... right_joint_7.pos, right_gripper.pos
 
 `configs/collection/right_only.toml` uses a separate dataset root and repository
 prefix. Its canonical features are `float32[8]` right-side state/action plus
+the same single HKVL FT wrench and time-delta features, and
 `observation.images.wrist_right` and `observation.images.agent`. The Camera
 Service may continue to own and preview all enabled physical cameras, but Left
 Wrist pixels are neither passed to LeRobot nor encoded into this dataset.
+
+The collector owns the configured HKVL USB-RS485 serial port and requires a
+valid stream before starting any teleoperation runtime. At each 30 FPS frame,
+it selects the closest decoded FT sample by host monotonic receipt time, with
+a tracked 50 ms maximum FT/robot skew and the common freshness limit. Missing,
+stale, nonfinite, or out-of-order FT data fail the episode. The FT feature is
+the sensor's reported frame, without zeroing, tool-weight compensation, or a
+transform to the end effector. The time delta is based on host receipt, not a
+sensor-supplied timestamp. The canonical dataset contains one FT observation
+per video/robot frame; it does not retain the complete high-rate serial stream.
 
 ## Publication contract
 

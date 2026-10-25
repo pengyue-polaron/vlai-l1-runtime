@@ -46,7 +46,7 @@ def test_hardware_free_cli_validates_and_describes_collection(capsys) -> None:
 
     assert main(["describe-collection", "--config", str(COLLECTION_CONFIG)]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["dataset_schema"] == "vlai_l1_lerobot_dataset_v3_v3"
+    assert payload["dataset_schema"] == "vlai_l1_lerobot_dataset_v3_v4"
     assert payload["teleoperation_sides"] == ["left", "right"]
     assert payload["record_camera_roles"] == ["wrist_left", "wrist_right", "agent"]
     assert payload["collection_ready"] is True
@@ -62,6 +62,8 @@ def test_hardware_free_cli_validates_and_describes_collection(capsys) -> None:
         "observation.images.wrist_left",
         "observation.images.wrist_right",
         "observation.state",
+        "observation.ft_wrench",
+        "observation.ft_time_delta_s",
     }
 
     assert main(["describe-collection", "--config", str(RIGHT_COLLECTION_CONFIG)]) == 0

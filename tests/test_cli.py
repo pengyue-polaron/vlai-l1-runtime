@@ -41,14 +41,17 @@ def test_hardware_free_cli_validates_and_describes(capsys) -> None:
 
 
 def test_hardware_free_cli_validates_and_describes_collection(capsys) -> None:
-    assert main(["validate-collection", "--config", str(COLLECTION_CONFIG)]) == 0
+    assert main(["validate-collection", "--config", str(COLLECTION_CONFIG)]) == 2
+    assert "wrist_left" in capsys.readouterr().err
+
+    assert main(["validate-collection", "--config", str(RIGHT_COLLECTION_CONFIG)]) == 0
     assert capsys.readouterr().out.startswith("PASS ")
 
-    assert main(["describe-collection", "--config", str(COLLECTION_CONFIG)]) == 0
+    assert main(["describe-collection", "--config", str(RIGHT_COLLECTION_CONFIG)]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["dataset_schema"] == "vlai_l1_lerobot_dataset_v3_v4"
-    assert payload["teleoperation_sides"] == ["left", "right"]
-    assert payload["record_camera_roles"] == ["wrist_left", "wrist_right", "agent"]
+    assert payload["dataset_schema"] == "vlai_l1_lerobot_dataset_v3_v5"
+    assert payload["teleoperation_sides"] == ["right"]
+    assert payload["record_camera_roles"] == ["wrist_right", "agent"]
     assert payload["collection_ready"] is True
     assert payload["reset"] == {
         "after_discard": True,
@@ -59,11 +62,15 @@ def test_hardware_free_cli_validates_and_describes_collection(capsys) -> None:
     assert set(payload["features"]) == {
         "action",
         "observation.images.agent",
-        "observation.images.wrist_left",
         "observation.images.wrist_right",
         "observation.state",
         "observation.ft_wrench",
         "observation.ft_time_delta_s",
+        "observation.scale_weight_g",
+        "observation.scale_time_delta_s",
+        "observation.scale_stable",
+        "observation.scale_tared",
+        "observation.scale_net",
     }
 
     assert main(["describe-collection", "--config", str(RIGHT_COLLECTION_CONFIG)]) == 0
@@ -151,8 +158,8 @@ def test_reset_cli_uses_the_managed_teleoperation_lifecycle(monkeypatch) -> None
         lambda config: called.append(config.path),
     )
 
-    assert main(["reset", "--config", str(COLLECTION_CONFIG)]) == 0
-    assert called == [COLLECTION_CONFIG.resolve()]
+    assert main(["reset", "--config", str(RIGHT_COLLECTION_CONFIG)]) == 0
+    assert called == [RIGHT_COLLECTION_CONFIG.resolve()]
 
 
 def test_hardware_cli_selects_the_right_only_contract(monkeypatch) -> None:

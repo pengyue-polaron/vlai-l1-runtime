@@ -31,7 +31,7 @@ unavailable capabilities.
 
 ## Dataset contract
 
-The canonical dataset is written directly as LeRobot v3.0. The bimanual
+The canonical dataset is written directly as LeRobot v3.0. The historical bimanual
 [`default.toml`](configs/collection/default.toml) contract contains:
 
 - `observation.state`: 16 named left/right joint and gripper positions in degrees;
@@ -60,13 +60,23 @@ AgentView video. It never fabricates left-arm values and never writes a Left
 Wrist video. Dataset layout, provenance, doctor behavior, and v2.1 derivatives
 are documented in [Datasets](docs/DATASETS.md).
 
+The right-only setup keeps the Right Wrist D405 and uses D455 `251643060089`
+as AgentView. The operator verified the D455 on its label and by unplugging its
+USB cable. Use `just collect-right` after both cameras pass a live check. The
+bimanual `just collect` contract requires a distinct Left Wrist camera and is
+unavailable in this setup.
+The AgentView RGB exposure is tracked in `configs/system/vlai_l1.toml` under
+`[cameras.agent]`. The current manual `exposure_absolute = 200` is about 20 ms.
+The camera service applies and verifies it when opening the D455. Changing it
+requires stopping and restarting the camera service while collection is idle.
+
 ## Hardware-free operations
 
 ```bash
 just sdk-verify
 just sdk-describe right
 just hardware
-just panel
+just panel-right
 just dataset-doctor <experiment>
 just dataset-doctor <experiment> --json
 just export-v21 <experiment>
@@ -93,7 +103,7 @@ The x_air dependency and native state sidecar can be built without hardware:
 just sdk-build
 ```
 
-After tracked teleoperation is recommissioned, start a collection session with:
+The former bimanual collection command requires a distinct Left Wrist camera:
 
 ```bash
 just collect fruit_placement_v1 "place the fruit in the bowl"
@@ -106,13 +116,17 @@ isolated right-side contract:
 just collect-right blue_block_red_plate_v1 "put the blue block into the red plate"
 ```
 
-The command starts or verifies the persistent three-camera
+Once both cameras are connected, the right-only command starts or verifies the
+persistent two-camera
 owner, authorizes the privileged robot lifecycle, preflights the selected raw
 frames before enabling motors, starts exactly the configured x_air runtime(s),
 and waits for fresh selected state.
 Runtime creation performs the SDK's startup alignment once for the collection
 session, and the managed collection contract explicitly runs Reset once more
-before presenting the first episode gate. Use teleoperation to refine the
+before presenting the first episode gate. In the pinned aarch64 SDK, the
+`Control::AdjustPosition` target is an internal all-zero raw motor-angle vector
+for the seven joints and gripper; it is not read from this repository's pose
+reference or collection TOML. Use teleoperation to refine the
 episode start pose, then press `Enter`
 in the terminal or **Start recording** in the Panel. Enter `r` or use **Reset**
 before recording to run `AdjustPosition` again. The workflow
@@ -130,12 +144,12 @@ time limit and ends only when the operator makes a decision.
 The reusable `embodied-ops` Panel is available with:
 
 ```bash
-just panel
+just panel-right
 ```
 
-It serves the L1 adapter on port 8765 without opening hardware. Use **Start
+It serves the L1 adapter on port 8766 without opening hardware. Use **Start
 cameras** in the Panel or `just cameras` to start the persistent read-only
-camera owner. Left-wrist, right-wrist, and AgentView previews then remain on
+camera owner. Right Wrist and AgentView previews remain on
 port 8088 across collection runs. The owner opens each device exactly once,
 publishes exact raw RGB sets over a local Unix socket for collection, and
 encodes lower-rate MJPEG from the same latest frames. Preview never advances or
@@ -153,7 +167,7 @@ just cameras stop
 ```
 
 Stopping a collection leaves the read-only camera service available. Only
-`just cameras stop` releases the three camera handles.
+`just cameras stop` releases the two camera handles.
 
 `just reset` performs the bimanual startup alignment without opening cameras or
 a dataset transaction. `just reset-right` does the same for only the isolated

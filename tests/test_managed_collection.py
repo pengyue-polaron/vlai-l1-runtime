@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from embodied_ops import EpisodeCaptureReport, EpisodeDecision, LeadingStillnessConfig
+from legacy_bimanual import config as legacy_bimanual_config
 
 from vlai_l1_runtime.collection.configuration import load_collection_config
 from vlai_l1_runtime.collection.managed import (
@@ -22,7 +23,7 @@ from vlai_l1_runtime.collection.managed import (
 from vlai_l1_runtime.collection.orchestration import EpisodeResult
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = load_collection_config(ROOT / "configs/collection/default.toml")
+CONFIG = legacy_bimanual_config()
 RIGHT_CONFIG = load_collection_config(ROOT / "configs/collection/right_only.toml")
 NO_TRIM = LeadingStillnessConfig(
     enabled=False,

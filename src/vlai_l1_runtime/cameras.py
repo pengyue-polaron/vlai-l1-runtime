@@ -78,6 +78,8 @@ class CameraSetValidator:
                         stream.device_id,
                         stream.video_index,
                         stream.crop,
+                        stream.exposure_mode,
+                        stream.exposure_absolute,
                     )
                     for stream in config.streams
                 ),

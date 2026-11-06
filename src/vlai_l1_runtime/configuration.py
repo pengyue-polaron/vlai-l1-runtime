@@ -189,6 +189,8 @@ class CameraConfig:
     device_id: str | None
     video_index: int | None = None
     crop: ImageRoi | None = None
+    exposure_mode: str = "device"
+    exposure_absolute: int | None = None
 
     def __post_init__(self) -> None:
         if self.role not in CAMERA_ROLES:
@@ -228,6 +230,19 @@ class CameraConfig:
             raise ConfigError(f"camera {self.role} requires a video_index for v4l2")
         if self.driver != "v4l2" and self.video_index is not None:
             raise ConfigError(f"camera {self.role} video_index is only valid for v4l2")
+        if self.exposure_mode not in {"device", "manual"}:
+            raise ConfigError(f"camera {self.role} exposure_mode must be device or manual")
+        if self.exposure_mode == "manual":
+            if self.driver != "v4l2" or not self.enabled:
+                raise ConfigError(f"camera {self.role} manual exposure requires enabled v4l2")
+            if (
+                isinstance(self.exposure_absolute, bool)
+                or not isinstance(self.exposure_absolute, int)
+                or self.exposure_absolute <= 0
+            ):
+                raise ConfigError(f"camera {self.role} exposure_absolute must be positive")
+        elif self.exposure_absolute is not None:
+            raise ConfigError(f"camera {self.role} exposure_absolute requires manual mode")
         if self.crop is not None:
             if not isinstance(self.crop, ImageRoi):
                 raise ConfigError(f"camera {self.role} crop must be an ImageRoi")
@@ -279,6 +294,16 @@ class CamerasConfig:
 
 @dataclass(frozen=True)
 class FTSensorConfig:
+    port: Path
+    baudrate: int
+    data_bits: int
+    parity: str
+    stop_bits: int
+    startup_timeout_s: float
+
+
+@dataclass(frozen=True)
+class ScaleConfig:
     port: Path
     baudrate: int
     data_bits: int
@@ -380,6 +405,7 @@ class SystemConfig:
     control: Mapping[str, ControlProfile]
     cameras: CamerasConfig
     ft_sensor: FTSensorConfig
+    scale: ScaleConfig
     teleoperation: TeleoperationConfig
     runtime: RuntimeConfig
     operator_panel: OperatorPanelConfig
@@ -420,6 +446,7 @@ def load_system_config(path: Path) -> SystemConfig:
             "control",
             "cameras",
             "ft_sensor",
+            "scale",
             "teleoperation",
             "runtime",
             "operator_panel",
@@ -445,6 +472,7 @@ def load_system_config(path: Path) -> SystemConfig:
     control = _parse_control(root["control"], len(motors))
     cameras = _parse_cameras(root["cameras"])
     ft_sensor = _parse_ft_sensor(root["ft_sensor"])
+    scale = _parse_scale(root["scale"])
     teleoperation = _parse_teleoperation(root["teleoperation"], config_path=resolved)
     runtime = _parse_runtime(root["runtime"])
     operator_panel = _parse_operator_panel(root["operator_panel"])
@@ -474,6 +502,7 @@ def load_system_config(path: Path) -> SystemConfig:
         control=MappingProxyType(dict(control)),
         cameras=cameras,
         ft_sensor=ft_sensor,
+        scale=scale,
         teleoperation=teleoperation,
         runtime=runtime,
         operator_panel=operator_panel,
@@ -789,6 +818,7 @@ def _parse_cameras(value: Any) -> CamerasConfig:
                 "fps",
                 "driver",
                 "crop_enabled",
+                "exposure_mode",
             },
             {
                 "device_id",
@@ -797,6 +827,7 @@ def _parse_cameras(value: Any) -> CamerasConfig:
                 "crop_y",
                 "crop_width",
                 "crop_height",
+                "exposure_absolute",
             },
             label,
         )
@@ -831,6 +862,16 @@ def _parse_cameras(value: Any) -> CamerasConfig:
                     if "video_index" not in table
                     else _integer(table["video_index"], f"{label}.video_index", minimum=0)
                 ),
+                exposure_mode=_choice(
+                    table["exposure_mode"], {"device", "manual"}, f"{label}.exposure_mode"
+                ),
+                exposure_absolute=(
+                    None
+                    if "exposure_absolute" not in table
+                    else _integer(
+                        table["exposure_absolute"], f"{label}.exposure_absolute", minimum=1
+                    )
+                ),
                 crop=(
                     None
                     if not crop_enabled
@@ -864,6 +905,26 @@ def _parse_ft_sensor(value: Any) -> FTSensorConfig:
         raise ConfigError("ft_sensor currently supports only 8N1")
     timeout = _positive_number(raw["startup_timeout_s"], "ft_sensor.startup_timeout_s")
     return FTSensorConfig(port, baudrate, data_bits, parity, stop_bits, timeout)
+
+
+def _parse_scale(value: Any) -> ScaleConfig:
+    raw = _mapping(value, "scale")
+    _exact_keys(
+        raw,
+        {"port", "baudrate", "data_bits", "parity", "stop_bits", "startup_timeout_s"},
+        "scale",
+    )
+    port = Path(_text(raw["port"], "scale.port"))
+    if port.parent != Path("/dev") or not port.name.startswith("vlai-"):
+        raise ConfigError("scale.port must be a tracked /dev/vlai-* udev path")
+    baudrate = _integer(raw["baudrate"], "scale.baudrate", minimum=1)
+    data_bits = _integer(raw["data_bits"], "scale.data_bits", minimum=1)
+    parity = _text(raw["parity"], "scale.parity")
+    stop_bits = _integer(raw["stop_bits"], "scale.stop_bits", minimum=1)
+    if (data_bits, parity, stop_bits) != (8, "none", 1):
+        raise ConfigError("scale currently supports only 8N1")
+    timeout = _positive_number(raw["startup_timeout_s"], "scale.startup_timeout_s")
+    return ScaleConfig(port, baudrate, data_bits, parity, stop_bits, timeout)
 
 
 def _parse_runtime(value: Any) -> RuntimeConfig:
@@ -1254,6 +1315,8 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
                     stream.device_id,
                     stream.video_index,
                     None if stream.crop is None else stream.crop.xywh,
+                    stream.exposure_mode,
+                    stream.exposure_absolute,
                 )
                 for stream in config.cameras.streams
             ),
@@ -1265,6 +1328,14 @@ def _system_config_fingerprint(config: SystemConfig) -> str:
             config.ft_sensor.parity,
             config.ft_sensor.stop_bits,
             config.ft_sensor.startup_timeout_s,
+        ),
+        (
+            str(config.scale.port),
+            config.scale.baudrate,
+            config.scale.data_bits,
+            config.scale.parity,
+            config.scale.stop_bits,
+            config.scale.startup_timeout_s,
         ),
         (
             config.teleoperation.provider,

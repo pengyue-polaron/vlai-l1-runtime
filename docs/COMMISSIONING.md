@@ -131,11 +131,13 @@ same isolated-side interlock and remain truthful right-only workflows.
 
 ## Camera and collection stage
 
-The camera streams were identified from live RGB frames: D405 `255323074436` is
-the left wrist, D405 `255323074499` is the right wrist, and D455 `251643060089`
-is AgentView. All three are enabled in System config; AgentView remains an
-optional platform role but is selected by both tracked dataset modes. Verify a
-short discard before saving data:
+The right-only assignment uses D405 `255323074436` as Right Wrist and D455
+`251643060089` as AgentView. The operator confirmed the D455 label and USB
+identity by removing its cable. Both are now enumerated on separate USB 3 hub
+ports. The selected video streams passed a 30-set live check at 29.717 FPS
+with 3.344 ms maximum pair skew.
+The bimanual command below is unavailable until a separate Left Wrist camera
+is configured and verified:
 
 ```bash
 just collect commissioning "hold position"
@@ -148,8 +150,9 @@ just collect-right right_commissioning "hold position"
 ```
 
 The selected collect recipe owns the whole live session. It preflights the
-state socket, recorded camera roles, and the configured HKVL serial FT stream;
-it requires a valid FT frame before starting exactly the configured runtime(s),
+state socket, recorded camera roles, the configured HKVL serial FT stream, and
+the `/dev/vlai-scale` RS232 stream. It requires fresh valid readings from both
+serial sensors before starting exactly the configured runtime(s),
 and waits for selected state after the SDK's startup `AdjustPosition`. Use
 teleoperation to refine the episode start pose, enter `r`
 or use Reset to repeat alignment if needed, then press Enter in the terminal or

@@ -30,6 +30,7 @@ from embodied_ops.operator_panel import (
 from .collection.configuration import load_collection_config
 from .collection.interaction import L1_COLLECTION_INTERACTION
 from .collection.schema import normalize_task
+from .configuration import ConfigError
 
 
 class L1OperatorPanelAdapter:
@@ -280,7 +281,14 @@ class L1OperatorPanelAdapter:
         collection_options = []
         experiment_options = []
         for path in sorted((self.repo_root / "configs/collection").glob("*.toml")):
-            config = load_collection_config(path)
+            try:
+                config = load_collection_config(path)
+            except ConfigError as exc:
+                if not str(exc).startswith("record_camera_roles are disabled in System config:"):
+                    raise
+                # A retired camera contract must not prevent the active panel
+                # from offering its valid collection configuration.
+                continue
             if config.repo_root != self.repo_root:
                 raise ValueError("panel repo_root does not own the collection config")
             reference = self._reference(config.path)

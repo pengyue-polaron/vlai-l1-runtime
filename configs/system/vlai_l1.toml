@@ -117,9 +117,9 @@ max_pair_skew_s = 0.05
 startup_timeout_s = 2.0
 
 [cameras.wrist_left]
-required_for_collection = true
-enabled = true
-device_id = "255323074436"
+required_for_collection = false
+enabled = false
+exposure_mode = "device"
 width = 640
 height = 480
 fps = 30
@@ -130,7 +130,8 @@ crop_enabled = false
 [cameras.wrist_right]
 required_for_collection = true
 enabled = true
-device_id = "255323074499"
+device_id = "255323074436"
+exposure_mode = "device"
 width = 640
 height = 480
 fps = 30
@@ -139,8 +140,10 @@ video_index = 4
 crop_enabled = false
 
 [cameras.agent]
-required_for_collection = false
+required_for_collection = true
 enabled = true
+exposure_mode = "manual"
+exposure_absolute = 200
 device_id = "251643060089"
 width = 640
 height = 480
@@ -160,6 +163,14 @@ data_bits = 8
 parity = "none"
 stop_bits = 1
 startup_timeout_s = 2.0
+
+[scale]
+port = "/dev/vlai-scale"
+baudrate = 9600
+data_bits = 8
+parity = "none"
+stop_bits = 1
+startup_timeout_s = 3.0
 
 [teleoperation]
 provider = "x_air_sdk"
@@ -201,7 +212,7 @@ socket_path = "/run/vlai-l1/runtime.sock"
 
 [operator_panel]
 bind = "0.0.0.0"
-port = 8765
+port = 8766
 
 [camera_preview]
 bind = "0.0.0.0"

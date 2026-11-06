@@ -8,6 +8,111 @@ silently choosing one.
 
 ## Start here
 
+**2026-11-04 X_AIR RESET TARGET IDENTIFIED — OFFLINE BINARY INSPECTION:**
+The operator reported that both right Leader and Follower repeatedly move to a
+fixed pose at `just collect-right` startup. The managed path creates the pinned
+unilateral SDK session, whose wrapper calls `Control::AdjustPosition` on both
+handles, and calls it again through `xarm_teleop_go_home` before the Enter gate.
+Offline disassembly of pinned aarch64 `libxarm_teleop_lib.so` SHA256
+`43e7c95d56a6a652cefd5a22183726b15b74d28dff3cedf0e237148e7eeb8e5f`
+shows `Control::AdjustPosition` reading current arm/gripper feedback, constructing
+zero-filled destination vectors (function offset `+0x420` onward), interpolating
+current positions toward those zeros (`+0x68c` onward), and calling both arm
+and gripper MIT control (`+0xb5c`). Thus the observed fixed Reset is the SDK's
+internal raw-motor zero pose, not a tracked pose value. The published header
+describes Follower-to-Leader alignment, but the pinned binary evidence supports
+the operator's observation that each handle is driven toward its own zero.
+No source for `Control::AdjustPosition` is included, so replacing that target
+cannot be done by editing `right_only.toml`, the rendered YAML, or the SDK wrapper
+source alone. No live robot operation was used to establish this binary finding.
+
+**2026-11-04 RIGHT PAIR STARTUP POSE REQUEST — REFERENCE ONLY:**
+The operator requested that `just collect-right` automatically move both right
+Leader and Follower to the current right Follower pose before the Enter recording
+gate. After the operator stopped collection and repositioned Follower, a new
+motion-free `can2` feedback capture at 14:37:50–14:37:52 UTC completed 40/40
+rounds for all eight configured motor IDs, with no bound violations or qdisc
+drops. `can2` returned to DOWN with zero live error counters. The new median
+raw motor angles are saved in `configs/poses/right_follower_power_on_reference.json`,
+with full feedback and CAN evidence in
+`data/temporary/right_collect_target_20261104_current/`. This supersedes the
+12:45:52 UTC reference because the arm has been repositioned.
+A new motion-free Leader probe at 12:43:12 UTC also passed 40/40 rounds, with
+evidence in `data/temporary/right_leader_home_reference_20261104/` and a
+diagnostic snapshot in `configs/poses/right_leader_power_on_reference.json`.
+The older Leader J7 snapshot was 7.399 deg; it is not the selected target or
+a current Leader measurement. The
+gripper value is motor angle, not finger opening. This record does not cause
+startup motion or alter the opaque SDK `AdjustPosition` behavior; Leader pose
+and calibrated model coordinates are not interchangeable. No dual-bus return
+controller or pre-Enter integration has been commissioned.
+
+**2026-11-04 AGENTVIEW D455 RGB EXPOSURE:**
+With no collection active, the camera service was stopped and the D455 color
+node `251643060089` was read at 30 FPS: auto exposure mode 3, reported exposure
+166 V4L2 units and gain 64. The operator first requested a 20% reduction to
+133 units, then requested 146, 165, 180 and finally 200 units. The tracked
+AgentView mode is now manual at 200 units (about 20 ms); startup applies and
+verifies the exact setting. This is a
+change to exposure time, not a calibrated image-brightness change. Wrist exposure remains
+device controlled. The tracked camera-only check passed 30 two-camera sets at
+29.685 FPS with 22.479 ms maximum pair skew, confirming the startup exposure
+readback and RGB frames. The right-side Operator Panel is serving on port 8766;
+both previews are fresh at about 10 FPS. The current AgentView preview appears
+dark overall but the receiving area remains visible. No motor startup was part
+of this change.
+
+**2026-11-01 PANEL PORT COLLISION:**
+The host already runs a separate Odin One `foxglove_bridge` on TCP 8765, with
+an `/odin1/` topic whitelist. It is not the L1 collection panel or an L1
+telemetry stream. The tracked L1 Operator Panel port was moved to 8766; the
+camera preview remains on 8088. No robot or camera lifecycle was started by
+this configuration change.
+
+**2026-11-01 RIGHT-ONLY CAMERA CORRECTION — CAMERA CHECK PASSED:**
+The operator first called the replacement AgentView a D435, then checked its
+physical label and confirmed it is the D455 `251643060089`. Unplugging that
+camera removed the sole enumerated RealSense device, confirming the USB identity
+of the D455. After swapping cameras on a known-working hub port, the operator
+identified the D405 `255323074499` as the removed unit and declared the
+now-connected D405 `255323074436` to be mounted on the Right Wrist. The D455
+is at USB `2-2.3`, D405 `255323074436` at `2-2.2`; both have the configured
+V4L2 by-id RGB indices (0 and 4 respectively). The `wrist_left` role is
+disabled. The tracked right-only contract selects these two identities. The
+bimanual `just collect` contract fails closed because it requires a separate
+Left Wrist camera. The earlier physical-role table below is historical and
+does not override this operator-declared current mounting. The first camera-only
+check failed before frame capture: with D455 at USB3 `2-2.2`, its
+`video-index0` was 16-bit depth and no RGB node was present. After the operator
+swapped hub positions, both selected RGB nodes offered YUYV. The tracked
+`just camera-check` then passed 30 two-camera sets, 29.717 effective FPS,
+3.344 ms maximum pair skew, exact configured serials and 640x480x3 RGB shapes.
+One preview frame showed a close wrist view and the other a wide workspace
+view. The operator confirmed the left preview is D405 and the right preview is
+D455. This corrects the earlier inference that USB2 was necessary for D455 RGB:
+the current USB3 arrangement works. The camera service is currently stopped
+after the check; no motors were opened. The left CAN ERROR-PASSIVE incident
+remains unresolved.
+
+**2026-10-28 RS232 SCALE COLLECTION INTEGRATION — NO ROBOT RUN:**
+The operator requested merging the receiving-container scale into both
+`just collect` modes and confirmed the container is tared before each episode.
+The scale is the PL2303 `/dev/vlai-scale` port, observed at 9600 8N1 producing
+`ST,NT,+     12 g` text lines and, after tare, `ST,TR,+      0 g`.
+Tracked config now owns this identity and
+startup/freshness limits. The collector requires two fresh scale lines before
+SDK startup and records one preceding display value per 30 FPS frame, with
+host-receipt time delta and ST/TR/NT flags. This is displayed weight, not software
+tare or an independently verified poured-mass delta. No live robot collection
+was attempted; prior left CAN and J6 range questions remain. A read-only
+scale-only check using the new source passed at 0 g with ST/TR flags, and a
+synthetic right-only episode saved the new scale fields through the real
+LeRobot v3 video backend. The live scale protocol changed from NT to TR after
+the operator tared it; the parser accepts and records both modes.
+The FT-only preflight on the same date still received no fresh HKVL frame in
+two seconds, so an actual `just collect` would fail before motor startup until
+the FT stream is restored. No combined live collection was attempted.
+
 **2026-10-20 HKVL FT COLLECTION INTEGRATION — NO ROBOT RUN:**
 Tracked bimanual and right-only collection now require the identified HKVL
 USB-RS485 serial port and fresh decoded FT frames before SDK startup. Each
@@ -1720,7 +1825,7 @@ PEAK adapters and leaves every interface down. All four endpoints completed a
 No motor enable, alignment, or teleoperation launch was performed during this
 host setup.
 
-The visually verified cameras are:
+The prior visually verified camera inventory was:
 
 | Role | Model | Serial | V4L2 stream |
 | --- | --- | --- | --- |
@@ -1728,8 +1833,8 @@ The visually verified cameras are:
 | `wrist_right` | D405 | `255323074499` | `video-index4` |
 | `agent` | D455 | `251643060089` | `video-index0` |
 
-AgentView is an optional platform role, but it is enabled for this robot's
-current dataset contract.
+This table records the camera serials, but the Left Wrist role is now disabled.
+The D455 remains AgentView for right-only collection.
 
 Do not copy these values into a new script. Their single runtime owner is
 [`configs/system/vlai_l1.toml`](../configs/system/vlai_l1.toml).

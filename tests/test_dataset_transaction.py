@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from legacy_bimanual import config as legacy_bimanual_config
 
-from vlai_l1_runtime.collection.configuration import load_collection_config
 from vlai_l1_runtime.collection.dataset import (
     GENERATED_FEATURES,
     DirectDatasetState,
@@ -20,7 +20,7 @@ from vlai_l1_runtime.collection.dataset import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = load_collection_config(ROOT / "configs/collection/default.toml")
+CONFIG = legacy_bimanual_config()
 
 
 class FakeBackend:
@@ -96,7 +96,7 @@ def test_episode_publication_is_atomic_and_writes_provenance(tmp_path: Path) -> 
 
     provenance = json.loads((identity.target_root / "meta/vlai_l1.json").read_text())
     assert provenance["total_frames"] == 1
-    assert provenance["dataset_schema"] == "vlai_l1_lerobot_dataset_v3_v4"
+    assert provenance["dataset_schema"] == "vlai_l1_lerobot_dataset_v3_v5"
 
 
 def test_failed_episode_never_exposes_a_partial_dataset(tmp_path: Path) -> None:

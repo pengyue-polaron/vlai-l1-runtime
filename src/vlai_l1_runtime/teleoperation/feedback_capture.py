@@ -1,4 +1,4 @@
-"""Explicit, bounded Follower feedback diagnostic; never enables motors."""
+"""Explicit, bounded motor feedback diagnostic; never enables motors."""
 
 from __future__ import annotations
 
@@ -75,8 +75,9 @@ def capture_follower_feedback(
     sides: tuple[str, ...],
     output: Path,
     parameter_motor: str | None = None,
+    role: str = "follower",
 ) -> Path:
-    """One configured probe window per selected Follower, then close owned links.
+    """One configured probe window per selected motor role, then close owned links.
 
     This is a live query operation. It must only be called after operator
     authorization. Existing output directories and active controllers are refused.
@@ -87,15 +88,18 @@ def capture_follower_feedback(
     """
 
     if not sides or len(set(sides)) != len(sides) or any(side not in SIDES for side in sides):
-        raise ValueError("select distinct left/right Follower sides")
-    if parameter_motor is not None and (parameter_motor not in MOTOR_NAMES or len(sides) != 1):
+        raise ValueError("select distinct left/right motor sides")
+    if role not in ("leader", "follower"):
+        raise ValueError("select leader or follower motor role")
+    if parameter_motor is not None and (
+        role != "follower" or parameter_motor not in MOTOR_NAMES or len(sides) != 1
+    ):
         raise ValueError("parameter reads require exactly one Follower side and one named motor")
     if os.geteuid() != 0:
-        raise RuntimeError("Follower feedback capture requires root")
+        raise RuntimeError("motor feedback capture requires root")
     dependency = verify_xair_dependency(config)
     endpoints = tuple(
-        next(e for e in config.can.endpoints if e.side == side and e.role == "follower")
-        for side in sides
+        next(e for e in config.can.endpoints if e.side == side and e.role == role) for side in sides
     )
     output.mkdir(parents=True, exist_ok=False)
     report: dict[str, Any] = {
@@ -108,6 +112,7 @@ def capture_follower_feedback(
         "timestamp_kind": "host_sdk_cache_read_completion_monotonic_ns",
         "raw_timestamp_kind": "host_socket_dequeue_monotonic_ns_not_hardware_time",
         "coordinate_kind": "raw_motor_coordinates_unverified",
+        "motor_role": role,
         "torque_kind": "sdk_estimate_nm_unvalidated",
         "ft_validated": False,
         "motion_authorized": False,
@@ -283,5 +288,5 @@ def capture_follower_feedback(
             for signum, handler in handlers.items():
                 signal.signal(signum, handler)
         if cleanup_errors:
-            raise RuntimeError("Follower feedback cleanup failed: " + "; ".join(cleanup_errors))
+            raise RuntimeError("motor feedback cleanup failed: " + "; ".join(cleanup_errors))
     return output / "report.json"

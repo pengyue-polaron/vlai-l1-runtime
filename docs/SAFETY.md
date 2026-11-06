@@ -22,8 +22,14 @@ enabling commands requires a deliberate schema and code review rather than a
 single configuration edit.
 
 The collection loader independently requires a commissioned teleoperation path
-and the configured camera identities. Both wrist identities and AgentView
-remain commissioned. Teleoperation was recommissioned after a complete
+and the configured camera identities. The right-only roles are Right Wrist
+D405 and D455 AgentView. The D455 identity was confirmed by physical label and
+USB removal. The operator declared the now-enumerated D405 `255323074436` to
+be the right wrist camera; the two-camera live check passed after swapping
+their USB3 hub positions.
+The bimanual contract additionally
+requires a separate Left Wrist camera and fails configuration loading.
+Teleoperation was recommissioned after a complete
 motor-power restart restored both right buses and a bounded protected observer
 window passed. This does not affect the independent policy-command blockers.
 Synthetic sources exist only for pure integration tests and cannot enable the
@@ -35,6 +41,12 @@ with host-receipt time alignment; an absent or stale stream stops collection.
 These readings are observations only and are not a force-control or safety-stop
 input. They have no verified tool-gravity compensation or sensor-to-tool
 coordinate transform.
+
+Collection also requires fresh read-only RS232 scale output before startup and
+throughout each episode. It saves displayed weight and observed status flags;
+the operator reports taring the receiving container before each episode.
+No scale command, tare operation, force control or motor safety decision is
+derived from the scale. A stale or missing reading fails collection.
 
 ## Operator-authorized automatic diagnostic (2026-10-11)
 
@@ -316,7 +328,13 @@ command ownership and verified disable/release remain implementation gates.
 - A read that enables motors or emits zero-torque frames is not read-only.
 - Starting a managed collection creates exactly the configured x_air runtimes
   once. After fresh state resumes, collection explicitly runs `AdjustPosition`
-  before the first episode gate. Save and discard stop accepting frames, run
+  before the first episode gate. The pinned aarch64 binary's offline-disassembled
+  `AdjustPosition` interpolates each selected Leader/Follower handle's current
+  seven joints and gripper toward an internal raw-motor zero target; this target
+  is not read from Runtime or collection configuration. The SDK header's
+  Follower-to-Leader description does not match that binary finding. Keep the
+  workspace clear for this motion.
+  Save and discard stop accepting frames, run
   `AdjustPosition` on the
   active handles, and only then encode or discard the episode;
   `r` or the Panel's Reset input can run it again at the episode-start gate.

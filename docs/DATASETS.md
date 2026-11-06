@@ -6,9 +6,9 @@ Each tracked collection config owns dataset roots, repository ID prefix, active
 teleoperation sides, recorded camera roles, FPS,
 minimum effective capture rate, asynchronous image-writer concurrency, sample
 freshness, reset points, leading-stillness thresholds, and state/action,
-robot/camera, FT/robot and camera-pair skew. It points to
+robot/camera, FT/robot, scale/robot and camera-pair skew. It points to
 exactly one System config; camera dimensions and physical identities, joint
-names, FT serial identity, physical units, and robot identity are not duplicated.
+names, FT and scale serial identities, physical units, and robot identity are not duplicated.
 
 An experiment named `pick_blocks_v1` is stored at:
 
@@ -35,14 +35,22 @@ observation.state         float32[16], degrees
 action                    float32[16], degrees
 observation.ft_wrench     float32[6], sensor-frame Fx/Fy/Fz N, Mx/My/Mz Nm
 observation.ft_time_delta_s float32[1], FT host receipt minus robot state time
+observation.scale_weight_g float32[1], scale display reading in grams
+observation.scale_time_delta_s float32[1], scale host receipt minus robot state time
+observation.scale_stable float32[1], 1 when serial status token is ST, otherwise 0
+observation.scale_tared  float32[1], 1 when serial mode token is TR, otherwise 0
+observation.scale_net    float32[1], 1 when serial mode token is NT, otherwise 0
 observation.images.wrist_left   video[height,width,3]
 observation.images.wrist_right  video[height,width,3]
 observation.images.agent        video[height,width,3]
 ```
 
 Only enabled roles explicitly selected by the collection config are part of an
-experiment's feature contract. Both wrists and AgentView remain in the complete
-physical camera configuration. The bimanual collection selects all three.
+experiment's feature contract. The current right-only physical assignment is
+Right Wrist D405 and D455 AgentView; both passed the tracked camera-only check
+in the current USB3 hub positions. The historical bimanual contract additionally
+requires a distinct
+Left Wrist camera.
 
 Both vectors use:
 
@@ -53,10 +61,10 @@ right_joint_1.pos ... right_joint_7.pos, right_gripper.pos
 
 `configs/collection/right_only.toml` uses a separate dataset root and repository
 prefix. Its canonical features are `float32[8]` right-side state/action plus
-the same single HKVL FT wrench and time-delta features, and
+the same HKVL FT and scale features, and
 `observation.images.wrist_right` and `observation.images.agent`. The Camera
-Service may continue to own and preview all enabled physical cameras, but Left
-Wrist pixels are neither passed to LeRobot nor encoded into this dataset.
+Service owns and previews both selected cameras when connected.
+Left Wrist pixels are neither passed to LeRobot nor encoded into this dataset.
 
 The collector owns the configured HKVL USB-RS485 serial port and requires a
 valid stream before starting any teleoperation runtime. At each 30 FPS frame,
@@ -67,6 +75,19 @@ the sensor's reported frame, without zeroing, tool-weight compensation, or a
 transform to the end effector. The time delta is based on host receipt, not a
 sensor-supplied timestamp. The canonical dataset contains one FT observation
 per video/robot frame; it does not retain the complete high-rate serial stream.
+
+The collector also owns the configured `/dev/vlai-scale` RS232 port. The observed
+line format is `ST,NT,+     12 g` at 9600 8N1; after tare we observed
+`ST,TR,+      0 g`. It accepts ST/US status, NT/GS/TR mode and signed g/kg
+readings, converts kg to grams, and records the observed
+status flags. Each robot/video frame uses the most recent scale reading that
+preceded its robot timestamp; one reading may serve several 30 FPS frames.
+The tracked age limit is 600 ms and scale/robot skew limit is 500 ms. Missing,
+malformed, or stale scale data fail collection. Host-receipt time is not a
+sensor timestamp. The operator stated that the receiving container is tared
+before each episode; software does not perform or verify tare. The saved value
+is the scale's displayed weight, not an independently calculated poured mass.
+The full scale serial stream is not retained in the canonical dataset.
 
 ## Publication contract
 

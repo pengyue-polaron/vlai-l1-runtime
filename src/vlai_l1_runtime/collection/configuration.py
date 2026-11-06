@@ -57,6 +57,8 @@ class CollectionConfig:
     max_state_action_skew_s: float
     max_robot_camera_skew_s: float
     max_ft_skew_s: float
+    max_scale_age_s: float
+    max_scale_skew_s: float
     reset_policy: CollectionResetPolicy
     leading_stillness: LeadingStillnessConfig
     teleoperation_sides: tuple[str, ...]
@@ -127,6 +129,8 @@ def load_collection_config(path: Path) -> CollectionConfig:
         "max_state_action_skew_s",
         "max_robot_camera_skew_s",
         "max_ft_skew_s",
+        "max_scale_age_s",
+        "max_scale_skew_s",
         "auto_reset_before_collection",
         "auto_reset_after_save",
         "auto_reset_after_discard",
@@ -136,7 +140,7 @@ def load_collection_config(path: Path) -> CollectionConfig:
     }
     _exact_keys(root, keys, "collection")
     schema_version = _integer(root["schema_version"], "schema_version", minimum=1)
-    if schema_version != 6:
+    if schema_version != 7:
         raise ConfigError(f"unsupported collection schema_version: {schema_version}")
 
     system_path = _relative_path(root["system_config"], "system_config", resolved.parent)
@@ -177,6 +181,10 @@ def load_collection_config(path: Path) -> CollectionConfig:
     ft_skew = _positive_number(root["max_ft_skew_s"], "max_ft_skew_s")
     if ft_skew > sample_age:
         raise ConfigError("max_ft_skew_s must not exceed max_sample_age_s")
+    scale_age = _positive_number(root["max_scale_age_s"], "max_scale_age_s")
+    scale_skew = _positive_number(root["max_scale_skew_s"], "max_scale_skew_s")
+    if scale_skew > scale_age:
+        raise ConfigError("max_scale_skew_s must not exceed max_scale_age_s")
     system = load_system_config(system_path)
     teleoperation_sides = _ordered_selection(
         root["teleoperation_sides"],
@@ -266,6 +274,8 @@ def load_collection_config(path: Path) -> CollectionConfig:
         max_state_action_skew_s=state_action_skew,
         max_robot_camera_skew_s=robot_camera_skew,
         max_ft_skew_s=ft_skew,
+        max_scale_age_s=scale_age,
+        max_scale_skew_s=scale_skew,
         reset_policy=reset_policy,
         leading_stillness=leading_stillness,
         teleoperation_sides=teleoperation_sides,

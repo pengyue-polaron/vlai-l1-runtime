@@ -2,6 +2,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from legacy_bimanual import config as legacy_bimanual_config
 
 from vlai_l1_runtime.collection.configuration import load_collection_config
 from vlai_l1_runtime.collection.managed import ManagedXAirRuntimes
@@ -81,7 +82,7 @@ def test_managed_logging_requires_isolation_and_forwards_only_diagnostic_options
     assert manager._runtimes == []
     with pytest.raises(ValueError, match="isolated"):
         ManagedXAirRuntimes(
-            load_collection_config(ROOT / "configs/collection/default.toml"),
+            legacy_bimanual_config(),
             feedback_log=tmp_path / "raw.csv",
             feedback_max_frames=1000,
         )

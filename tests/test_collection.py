@@ -4,16 +4,23 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from legacy_bimanual import config as legacy_bimanual_config
 
 from vlai_l1_runtime.cameras import CameraFrameMetadata
 from vlai_l1_runtime.collection.configuration import load_collection_config
 from vlai_l1_runtime.collection.ft import FTSample
 from vlai_l1_runtime.collection.live import LiveCollectionSource
 from vlai_l1_runtime.collection.mock import SyntheticSampleSource
+from vlai_l1_runtime.collection.scale import ScaleSample
 from vlai_l1_runtime.collection.schema import (
     ACTION_KEY,
     FT_TIME_DELTA_KEY,
     FT_WRENCH_KEY,
+    SCALE_NET_KEY,
+    SCALE_STABLE_KEY,
+    SCALE_TARED_KEY,
+    SCALE_TIME_DELTA_KEY,
+    SCALE_WEIGHT_KEY,
     STATE_KEY,
     WRIST_LEFT_IMAGE_KEY,
     WRIST_RIGHT_IMAGE_KEY,
@@ -80,8 +87,20 @@ class _FTSource(_ContextSource):
         return self.value
 
 
+class _ScaleSource(_ContextSource):
+    def wait_first(self, *, timeout_s: float, max_age_s: float):
+        assert self.open
+        assert timeout_s > 0
+        assert max_age_s > 0
+
+    def latest_before(self, *, target_monotonic_ns: int):
+        assert self.open
+        assert self.value.monotonic_ns <= target_monotonic_ns
+        return self.value
+
+
 def _commissioned_config():
-    config = load_collection_config(COLLECTION_CONFIG)
+    config = legacy_bimanual_config()
     cameras = CamerasConfig(
         max_age_s=0.5,
         max_pair_skew_s=0.05,
@@ -153,17 +172,18 @@ def _sample(
         NamedJointVector(action or _pose(), SampleMetadata(sequence, timestamp_ns)),
         cameras,
         FTSample((1.0, 2.0, 3.0, 0.1, 0.2, 0.3), timestamp_ns, sequence),
+        ScaleSample(12.0, True, True, False, timestamp_ns, sequence),
     )
 
 
 def test_collection_config_and_schema_have_one_complete_contract() -> None:
-    config = load_collection_config(COLLECTION_CONFIG)
+    config = legacy_bimanual_config()
     contract = canonical_dataset_contract(_commissioned_config())
     full_contract = canonical_dataset_contract(config)
 
     assert config.collection_ready is True
     assert config.collection_blockers == ()
-    assert config.schema_version == 6
+    assert config.schema_version == 7
     assert config.teleoperation_sides == ("left", "right")
     assert config.record_camera_roles == ("wrist_left", "wrist_right", "agent")
     assert config.minimum_capture_fps == 27.0
@@ -192,6 +212,11 @@ def test_collection_config_and_schema_have_one_complete_contract() -> None:
         ACTION_KEY,
         FT_WRENCH_KEY,
         FT_TIME_DELTA_KEY,
+        SCALE_WEIGHT_KEY,
+        SCALE_TIME_DELTA_KEY,
+        SCALE_STABLE_KEY,
+        SCALE_TARED_KEY,
+        SCALE_NET_KEY,
         WRIST_LEFT_IMAGE_KEY,
         WRIST_RIGHT_IMAGE_KEY,
     }
@@ -222,6 +247,11 @@ def test_right_only_collection_contract_is_exact_and_omits_left_wrist() -> None:
         ACTION_KEY,
         FT_WRENCH_KEY,
         FT_TIME_DELTA_KEY,
+        SCALE_WEIGHT_KEY,
+        SCALE_TIME_DELTA_KEY,
+        SCALE_STABLE_KEY,
+        SCALE_TARED_KEY,
+        SCALE_NET_KEY,
         WRIST_RIGHT_IMAGE_KEY,
         "observation.images.agent",
     }
@@ -235,7 +265,7 @@ def test_right_only_collection_contract_is_exact_and_omits_left_wrist() -> None:
 def test_agent_observation_uses_the_exact_tracked_center_crop() -> None:
     import numpy as np
 
-    config = load_collection_config(COLLECTION_CONFIG)
+    config = legacy_bimanual_config()
     timestamp_ns = 1_000_000_000
     images = {
         stream.role: np.arange(
@@ -263,6 +293,7 @@ def test_agent_observation_uses_the_exact_tracked_center_crop() -> None:
             if stream.enabled
         },
         FTSample((1.0, 2.0, 3.0, 0.1, 0.2, 0.3), timestamp_ns, 1),
+        ScaleSample(12.0, True, True, False, timestamp_ns, 1),
     )
 
     result = SampleAssembler(config).validate(sample, now_ns=timestamp_ns)
@@ -360,6 +391,48 @@ def test_ft_wrench_and_host_time_delta_are_recorded() -> None:
     assert canonical_dataset_contract(config).features()[FT_TIME_DELTA_KEY]["shape"] == (1,)
 
 
+def test_scale_weight_status_and_repeated_samples_are_recorded() -> None:
+    config = _commissioned_config()
+    assembler = SampleAssembler(config)
+    first = _sample(1, 1_000_000_000)
+    first = replace(first, scale=replace(first.scale, monotonic_ns=900_000_000))
+    validated = assembler.validate(first, now_ns=1_010_000_000)
+    assert validated.scale_weight_g == 12.0
+    assert validated.scale_time_delta_s == -0.1
+    frame = validated.lerobot_frame(task="pour into tared container")
+    assert tuple(frame[SCALE_WEIGHT_KEY]) == (12.0,)
+    assert tuple(frame[SCALE_TIME_DELTA_KEY]) == pytest.approx((-0.1,))
+    assert tuple(frame[SCALE_STABLE_KEY]) == (1.0,)
+    assert tuple(frame[SCALE_TARED_KEY]) == (1.0,)
+    assert tuple(frame[SCALE_NET_KEY]) == (0.0,)
+    second = _sample(2, 1_030_000_000)
+    second = replace(second, scale=first.scale)
+    assert assembler.validate(second, now_ns=1_040_000_000).scale_weight_g == 12.0
+
+
+def test_scale_missing_stale_skewed_and_backward_samples_fail_closed() -> None:
+    config = _commissioned_config()
+    assembler = SampleAssembler(config)
+    first = _sample(1, 1_000_000_000)
+    with pytest.raises(CollectionContractError, match="scale sample is missing"):
+        assembler.validate(replace(first, scale=None), now_ns=1_010_000_000)
+    with pytest.raises(CollectionContractError, match="scale sample is stale"):
+        assembler.validate(
+            replace(first, scale=replace(first.scale, monotonic_ns=400_000_000)),
+            now_ns=1_010_000_000,
+        )
+    with pytest.raises(CollectionContractError, match="scale/robot sample skew"):
+        assembler.validate(
+            replace(first, scale=replace(first.scale, monotonic_ns=490_000_000)),
+            now_ns=1_000_000_000,
+        )
+    assembler.validate(first, now_ns=1_010_000_000)
+    second = _sample(2, 1_030_000_000)
+    second = replace(second, scale=replace(second.scale, sequence=0))
+    with pytest.raises(CollectionContractError, match="positive integer"):
+        assembler.validate(second, now_ns=1_040_000_000)
+
+
 def test_ft_missing_stale_skewed_and_repeated_frames_fail_closed() -> None:
     config = _commissioned_config()
     assembler = SampleAssembler(config)
@@ -402,6 +475,35 @@ def test_ft_preflight_failure_releases_all_sources() -> None:
     assert not state.open
     assert not cameras.open
     assert not ft.open
+
+
+def test_scale_preflight_failure_releases_all_sources() -> None:
+    config = _commissioned_config()
+    sample = _sample(1, 1_000_000_000)
+    state = _StateSource((sample.observation, sample.action))
+    cameras = _CameraSource(sample.cameras)
+    ft = _FTSource(sample.ft)
+
+    class NoScale(_ScaleSource):
+        def wait_first(self, *, timeout_s: float, max_age_s: float):
+            raise TimeoutError("no fresh scale stream received")
+
+    scale = NoScale(sample.scale)
+    with (
+        pytest.raises(TimeoutError, match="no fresh scale stream"),
+        LiveCollectionSource(
+            config,
+            state_source=state,
+            camera_source=cameras,
+            ft_source=ft,
+            scale_source=scale,
+        ),
+    ):
+        pytest.fail("scale preflight must fail before runtime startup")
+    assert not state.open
+    assert not cameras.open
+    assert not ft.open
+    assert not scale.open
 
 
 def test_invalid_image_does_not_advance_camera_continuity() -> None:
@@ -452,29 +554,32 @@ def test_live_source_composes_one_owned_robot_and_camera_sample() -> None:
         replace(right.metadata, monotonic_ns=1_008_000_000),
         right.image,
     )
-    sample = CollectionSample(sample.observation, sample.action, cameras, sample.ft)
+    sample = CollectionSample(sample.observation, sample.action, cameras, sample.ft, sample.scale)
     state = _StateSource((sample.observation, sample.action))
     cameras = _CameraSource(sample.cameras)
     ft = _FTSource(sample.ft)
+    scale = _ScaleSource(sample.scale)
 
     with LiveCollectionSource(
-        config, state_source=state, camera_source=cameras, ft_source=ft
+        config, state_source=state, camera_source=cameras, ft_source=ft, scale_source=scale
     ) as source:
         captured, now_ns = next(source.samples())
         assert captured.observation == sample.observation
         assert captured.action == sample.action
         assert captured.cameras == sample.cameras
         assert captured.ft == sample.ft
+        assert captured.scale == sample.scale
         assert now_ns > 0
         assert state.targets == [1_004_000_000]
 
     assert state.open is False
     assert cameras.open is False
     assert ft.open is False
+    assert scale.open is False
 
 
 def test_live_source_refuses_uncommissioned_hardware() -> None:
-    config = load_collection_config(COLLECTION_CONFIG)
+    config = legacy_bimanual_config()
     config = replace(
         config,
         system=replace(

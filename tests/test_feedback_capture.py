@@ -128,6 +128,25 @@ def test_complete_capture_owns_only_followers_and_preserves_units(fake_hardware,
     assert fake_hardware.lock.closed
 
 
+def test_leader_capture_uses_configured_leader_endpoint_only(fake_hardware, tmp_path):
+    path = capture.capture_follower_feedback(
+        fake_hardware.config,
+        sides=("right",),
+        output=tmp_path / "leader",
+        role="leader",
+    )
+    report = json.loads(path.read_text())
+    assert report["status"] == "passed"
+    assert report["motor_role"] == "leader"
+    assert report["endpoints"][0]["parentdev"] == "1-3.1.4:1.0"
+    assert fake_hardware.calls == [
+        ("configure", "can0"),
+        ("probe", "can0"),
+        ("down", "can0"),
+    ]
+    assert fake_hardware.lock.closed
+
+
 def test_optional_parameter_read_runs_after_probe_and_keeps_the_same_guard(
     fake_hardware, tmp_path, monkeypatch
 ):

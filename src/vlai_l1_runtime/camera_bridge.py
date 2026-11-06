@@ -419,6 +419,18 @@ class _OpenCvBackend:
             capture.set(cv2.CAP_PROP_FRAME_HEIGHT, stream.height)
             capture.set(cv2.CAP_PROP_FPS, stream.fps)
             capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if stream.exposure_mode == "manual":
+                if not capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1):
+                    raise RuntimeError(f"{stream.role} could not enter manual exposure mode")
+                if not capture.set(cv2.CAP_PROP_EXPOSURE, stream.exposure_absolute):
+                    raise RuntimeError(f"{stream.role} could not set manual exposure")
+                actual_exposure = round(capture.get(cv2.CAP_PROP_EXPOSURE))
+                actual_mode = round(capture.get(cv2.CAP_PROP_AUTO_EXPOSURE))
+                if (actual_mode, actual_exposure) != (1, stream.exposure_absolute):
+                    raise RuntimeError(
+                        f"{stream.role} manual exposure is {(actual_mode, actual_exposure)}, "
+                        f"expected {(1, stream.exposure_absolute)}"
+                    )
             actual = (
                 round(capture.get(cv2.CAP_PROP_FRAME_WIDTH)),
                 round(capture.get(cv2.CAP_PROP_FRAME_HEIGHT)),

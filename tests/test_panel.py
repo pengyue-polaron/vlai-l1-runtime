@@ -15,7 +15,7 @@ from vlai_l1_runtime.collection.interaction import L1_COLLECTION_INTERACTION
 from vlai_l1_runtime.panel import L1OperatorPanelAdapter
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "configs/collection/default.toml"
+CONFIG = ROOT / "configs/collection/right_only.toml"
 RIGHT_CONFIG = ROOT / "configs/collection/right_only.toml"
 
 
@@ -27,7 +27,6 @@ def test_panel_exposes_the_commissioned_collection_stack() -> None:
     assert validate_panel_catalog(catalog) is catalog
     assert catalog["product"] == {"brand": "VLAI L1", "title": "Operator Panel"}
     assert {(camera["id"], camera["port"], camera["path"]) for camera in catalog["cameras"]} == {
-        ("wrist_left", 8088, "/wrist_left.mjpg"),
         ("wrist_right", 8088, "/wrist_right.mjpg"),
         ("agent", 8088, "/agent.mjpg"),
     }
@@ -46,7 +45,7 @@ def test_panel_exposes_the_commissioned_collection_stack() -> None:
     launch = adapter.build_launch(
         "dataset-doctor",
         {
-            "config": "configs/collection/default.toml",
+            "config": "configs/collection/right_only.toml",
             "experiment": "pick_v1",
         },
     )
@@ -60,7 +59,7 @@ def test_panel_exposes_the_commissioned_collection_stack() -> None:
         str(ROOT / "scripts/camera_service.sh"),
         "start",
     )
-    reset = adapter.build_launch("reset", {"config": "configs/collection/default.toml"})
+    reset = adapter.build_launch("reset", {"config": "configs/collection/right_only.toml"})
     assert reset.command[-3:] == (
         "reset",
         "--config",
@@ -79,7 +78,7 @@ def test_panel_builds_live_collection_from_tracked_contract() -> None:
     launch = adapter.build_launch(
         "collect",
         {
-            "config": "configs/collection/default.toml",
+            "config": "configs/collection/right_only.toml",
             "experiment": "pick_v1",
             "task": "pick up the object",
         },
@@ -103,7 +102,6 @@ def test_right_only_panel_exposes_only_recorded_camera_roles() -> None:
     config_field = next(field for field in collect["fields"] if field["name"] == "config")
     assert config_field["default"] == "configs/collection/right_only.toml"
     assert {item["value"] for item in config_field["options"]} == {
-        "configs/collection/default.toml",
         "configs/collection/right_only.toml",
     }
     task_field = next(field for field in collect["fields"] if field["name"] == "task")
@@ -148,7 +146,7 @@ def test_panel_registers_a_create_only_collection_prompt(tmp_path: Path) -> None
     shutil.copytree(ROOT / "configs", tmp_path / "configs")
     adapter = L1OperatorPanelAdapter(
         tmp_path,
-        tmp_path / "configs/collection/default.toml",
+        tmp_path / "configs/collection/right_only.toml",
     )
     application = OperatorPanelApplication(adapter)
     payload = {

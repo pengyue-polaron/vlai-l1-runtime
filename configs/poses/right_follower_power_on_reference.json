@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "name": "right_follower_power_on_reference_2026_11_04",
+  "purpose": "operator-recorded right Follower startup pose reference",
+  "status": "recorded_reference_only",
+  "automatic_motion_enabled": false,
+  "requested_target_for_roles": ["leader", "follower"],
+  "coordinate_kind": "raw_motor_coordinates_unverified",
+  "gripper_unit": "motor_degrees_not_opening_width",
+  "captured_utc": "2026-11-04T14:37:52Z",
+  "source_report": "data/temporary/right_collect_target_20261104_current/report.json",
+  "source_feedback": "data/temporary/right_collect_target_20261104_current/feedback.csv",
+  "side": "right",
+  "role": "follower",
+  "interface": "can2",
+  "usb_parentdev": "1-3.1.2:1.0",
+  "probe_rounds": 40,
+  "probe_status": "passed",
+  "bound_violations": [],
+  "qdisc_drops": 0,
+  "position_statistic": "median_of_40_motion_free_feedback_rounds",
+  "positions_deg": {
+    "joint_1": 2.677475,
+    "joint_2": 1.737627,
+    "joint_3": -0.032785,
+    "joint_4": 6.939578,
+    "joint_5": 0.491781,
+    "joint_6": 0.14207,
+    "joint_7": 9.278271,
+    "gripper": -29.386653
+  }
+}

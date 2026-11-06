@@ -22,6 +22,13 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         "none",
         1,
     )
+    assert str(config.scale.port) == "/dev/vlai-scale"
+    assert config.scale.baudrate == 9600
+    assert (config.scale.data_bits, config.scale.parity, config.scale.stop_bits) == (
+        8,
+        "none",
+        1,
+    )
     assert [endpoint.interface for endpoint in config.can.endpoints] == [
         "can0",
         "can1",
@@ -100,15 +107,20 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
     assert config.cameras.collection_ready is True
     assert config.cameras.startup_timeout_s == 2.0
     assert [(camera.role, camera.device_id) for camera in config.cameras.streams] == [
-        ("wrist_left", "255323074436"),
-        ("wrist_right", "255323074499"),
+        ("wrist_left", None),
+        ("wrist_right", "255323074436"),
         ("agent", "251643060089"),
     ]
+    assert config.cameras.streams[0].enabled is False
+    assert config.cameras.streams[2].video_index == 0
+    assert config.cameras.streams[1].exposure_mode == "device"
+    assert config.cameras.streams[2].exposure_mode == "manual"
+    assert config.cameras.streams[2].exposure_absolute == 200
     assert config.cameras.streams[0].crop is None
     assert config.cameras.streams[1].crop is None
     assert config.cameras.streams[2].crop is not None
     assert config.cameras.streams[2].crop.xywh == (80, 0, 480, 480)
-    assert config.operator_panel.port == 8765
+    assert config.operator_panel.port == 8766
     assert config.camera_preview.port == 8088
     assert config.camera_preview.fps == 10
     assert config.camera_preview.jpeg_quality == 80
@@ -153,7 +165,13 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         ("startup_timeout_s = 2.0", "startup_timeout_s = 0.0", "must be positive"),
         ("crop_x = 80", "crop_x = 161", "exceeds source image"),
         ("crop_width = 480", "crop_width = 479", "must be square"),
-        ("port = 8088", "port = 8765", "must differ"),
+        ("exposure_absolute = 200", "exposure_absolute = 0", "outside the allowed range"),
+        (
+            'exposure_mode = "manual"',
+            'exposure_mode = "device"',
+            "requires manual mode",
+        ),
+        ("port = 8088", "port = 8766", "must differ"),
         (
             'bridge_socket_path = "/run/vlai-l1/camera-bridge.sock"',
             'bridge_socket_path = "camera-bridge.sock"',

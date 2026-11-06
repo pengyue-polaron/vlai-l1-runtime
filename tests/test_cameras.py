@@ -228,10 +228,15 @@ def test_tracked_camera_mapping_is_commissioned() -> None:
         for stream in system.cameras.streams
         if stream.enabled
     } == {
-        "wrist_left": ("255323074436", 4),
-        "wrist_right": ("255323074499", 4),
+        "wrist_right": ("255323074436", 4),
         "agent": ("251643060089", 0),
     }
+    assert (
+        next(
+            stream for stream in system.cameras.streams if stream.role == "agent"
+        ).exposure_absolute
+        == 200
+    )
 
 
 def test_camera_set_validates_freshness_skew_and_identity() -> None:
@@ -493,10 +498,10 @@ def test_raw_camera_bridge_preserves_exact_frames_and_metadata(tmp_path: Path) -
         first = client.capture(timeout_s=0.5)
         second = client.capture(timeout_s=0.5)
 
-    assert tuple(first) == ("wrist_left", "wrist_right", "agent")
+    assert tuple(first) == ("wrist_right", "agent")
     assert first["agent"].metadata.stream_epoch == "owner-epoch"
     assert second["agent"].metadata.source_sequence > first["agent"].metadata.source_sequence
-    assert first["wrist_left"].image.data == source._images["wrist_left"].data
+    assert first["agent"].image.data == source._images["agent"].data
     assert not socket_path.exists()
 
 

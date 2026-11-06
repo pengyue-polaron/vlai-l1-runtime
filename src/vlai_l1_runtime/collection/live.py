@@ -12,6 +12,7 @@ from ..contracts import NamedJointVector
 from ..teleoperation import XAirStateReceiver
 from .configuration import CollectionConfig
 from .ft import FTSample, HKVLCollectionSource
+from .scale import ScaleCollectionSource, ScaleSample
 from .schema import CameraSample, CollectionSample
 
 
@@ -46,6 +47,16 @@ class FTSource(Protocol):
     def __exit__(self, exc_type, exc, traceback) -> None: ...
 
 
+class ScaleSource(Protocol):
+    def __enter__(self) -> ScaleSource: ...
+
+    def wait_first(self, *, timeout_s: float, max_age_s: float) -> None: ...
+
+    def latest_before(self, *, target_monotonic_ns: int) -> ScaleSample: ...
+
+    def __exit__(self, exc_type, exc, traceback) -> None: ...
+
+
 class LiveCollectionSource:
     """Consume persistent cameras and the x_air observation socket for one run."""
 
@@ -56,6 +67,7 @@ class LiveCollectionSource:
         state_source: StateSource | None = None,
         camera_source: CameraSource | None = None,
         ft_source: FTSource | None = None,
+        scale_source: ScaleSource | None = None,
     ) -> None:
         if not isinstance(config, CollectionConfig):
             raise TypeError("LiveCollectionSource requires CollectionConfig")
@@ -67,6 +79,7 @@ class LiveCollectionSource:
         self._state_source = state_source or XAirStateReceiver(config.system)
         self._camera_source = camera_source or RawCameraBridgeClient(config.system)
         self._ft_source = ft_source or HKVLCollectionSource(config.system.ft_sensor)
+        self._scale_source = scale_source or ScaleCollectionSource(config.system.scale)
         self._stack: ExitStack | None = None
 
     def __enter__(self) -> LiveCollectionSource:
@@ -80,6 +93,11 @@ class LiveCollectionSource:
             self._ft_source.wait_first(
                 timeout_s=self._config.system.ft_sensor.startup_timeout_s,
                 max_age_s=self._config.max_sample_age_s,
+            )
+            stack.enter_context(self._scale_source)
+            self._scale_source.wait_first(
+                timeout_s=self._config.system.scale.startup_timeout_s,
+                max_age_s=self._config.max_scale_age_s,
             )
         except BaseException:
             stack.close()
@@ -118,8 +136,11 @@ class LiveCollectionSource:
                 target_monotonic_ns=observation.metadata.monotonic_ns,
                 timeout_s=timeout_s,
             )
+            scale = self._scale_source.latest_before(
+                target_monotonic_ns=observation.metadata.monotonic_ns,
+            )
             now_ns = time.monotonic_ns()
-            yield CollectionSample(observation, action, cameras, ft), now_ns
+            yield CollectionSample(observation, action, cameras, ft, scale), now_ns
             next_tick += period_ns
             remaining_ns = next_tick - time.monotonic_ns()
             if remaining_ns > 0:

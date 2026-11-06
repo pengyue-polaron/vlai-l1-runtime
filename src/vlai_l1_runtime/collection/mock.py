@@ -9,6 +9,7 @@ from ..cameras import CameraFrameMetadata
 from ..contracts import NamedJointVector, SampleMetadata
 from .configuration import CollectionConfig
 from .ft import FTSample
+from .scale import ScaleSample
 from .schema import CameraSample, CollectionSample
 
 ImageFactory = Callable[[str, int, int, int], Any]
@@ -73,6 +74,7 @@ class SyntheticSampleSource:
                     NamedJointVector(pose, metadata, self._config.feature_names),
                     cameras,
                     FTSample((0.0, 0.0, 0.0, 0.0, 0.0, 0.0), timestamp_ns, sequence + 1),
+                    ScaleSample(0.0, True, True, False, timestamp_ns, sequence + 1),
                 ),
                 timestamp_ns,
             )

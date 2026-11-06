@@ -16,6 +16,7 @@ from ..contracts import NamedJointVector, validate_named_values
 from .configuration import CollectionConfig
 from .dependencies import collection_dependency_error, require_collection_python
 from .ft import FTSample
+from .scale import ScaleSample
 
 STATE_KEY = "observation.state"
 ACTION_KEY = "action"
@@ -23,9 +24,14 @@ IMAGE_PREFIX = "observation.images."
 FT_WRENCH_KEY = "observation.ft_wrench"
 FT_TIME_DELTA_KEY = "observation.ft_time_delta_s"
 FT_AXIS_NAMES = ("fx_n", "fy_n", "fz_n", "mx_nm", "my_nm", "mz_nm")
+SCALE_WEIGHT_KEY = "observation.scale_weight_g"
+SCALE_TIME_DELTA_KEY = "observation.scale_time_delta_s"
+SCALE_STABLE_KEY = "observation.scale_stable"
+SCALE_TARED_KEY = "observation.scale_tared"
+SCALE_NET_KEY = "observation.scale_net"
 WRIST_LEFT_IMAGE_KEY = f"{IMAGE_PREFIX}wrist_left"
 WRIST_RIGHT_IMAGE_KEY = f"{IMAGE_PREFIX}wrist_right"
-DATASET_SCHEMA = "vlai_l1_lerobot_dataset_v3_v4"
+DATASET_SCHEMA = "vlai_l1_lerobot_dataset_v3_v5"
 
 
 class CollectionContractError(ValueError):
@@ -62,6 +68,11 @@ class DatasetContract:
             ACTION_KEY: _vector_feature(self.action_names),
             FT_WRENCH_KEY: _vector_feature(FT_AXIS_NAMES),
             FT_TIME_DELTA_KEY: _vector_feature(("ft_minus_robot_s",)),
+            SCALE_WEIGHT_KEY: _vector_feature(("weight_g",)),
+            SCALE_TIME_DELTA_KEY: _vector_feature(("scale_minus_robot_s",)),
+            SCALE_STABLE_KEY: _vector_feature(("status_is_ST",)),
+            SCALE_TARED_KEY: _vector_feature(("mode_is_TR",)),
+            SCALE_NET_KEY: _vector_feature(("mode_is_NT",)),
         }
         features.update({camera.feature_key: camera.feature() for camera in self.cameras})
         return features
@@ -79,6 +90,7 @@ class CollectionSample:
     action: NamedJointVector
     cameras: Mapping[str, CameraSample]
     ft: FTSample | None = None
+    scale: ScaleSample | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -120,6 +132,8 @@ class CollectionSample:
         object.__setattr__(self, "cameras", MappingProxyType(snapshot))
         if self.ft is not None and not isinstance(self.ft, FTSample):
             raise CollectionContractError("FT sample has the wrong type")
+        if self.scale is not None and not isinstance(self.scale, ScaleSample):
+            raise CollectionContractError("scale sample has the wrong type")
 
 
 @dataclass(frozen=True)
@@ -129,6 +143,11 @@ class ValidatedSample:
     images: Mapping[str, Any]
     ft_wrench: tuple[float, float, float, float, float, float]
     ft_time_delta_s: float
+    scale_weight_g: float
+    scale_time_delta_s: float
+    scale_stable: bool
+    scale_tared: bool
+    scale_net: bool
 
     def lerobot_frame(self, *, task: str) -> dict[str, Any]:
         """Materialize NumPy vectors only at the optional LeRobot boundary."""
@@ -144,6 +163,11 @@ class ValidatedSample:
             ACTION_KEY: np.asarray(self.action, dtype=np.float32),
             FT_WRENCH_KEY: np.asarray(self.ft_wrench, dtype=np.float32),
             FT_TIME_DELTA_KEY: np.asarray((self.ft_time_delta_s,), dtype=np.float32),
+            SCALE_WEIGHT_KEY: np.asarray((self.scale_weight_g,), dtype=np.float32),
+            SCALE_TIME_DELTA_KEY: np.asarray((self.scale_time_delta_s,), dtype=np.float32),
+            SCALE_STABLE_KEY: np.asarray((float(self.scale_stable),), dtype=np.float32),
+            SCALE_TARED_KEY: np.asarray((float(self.scale_tared),), dtype=np.float32),
+            SCALE_NET_KEY: np.asarray((float(self.scale_net),), dtype=np.float32),
             **dict(self.images),
             "task": normalized_task,
         }
@@ -163,6 +187,7 @@ class SampleAssembler:
         self._last_observation_sequence: int | None = None
         self._last_action_sequence: int | None = None
         self._last_ft_sequence: int | None = None
+        self._last_scale_sequence: int | None = None
 
     def validate(self, sample: CollectionSample, *, now_ns: int) -> ValidatedSample:
         if not isinstance(sample, CollectionSample):
@@ -241,6 +266,33 @@ class SampleAssembler:
             previous=self._last_ft_sequence,
             label="FT sample",
         )
+        scale = sample.scale
+        if scale is None:
+            raise CollectionContractError("scale sample is missing")
+        if type(scale.weight_g) not in (float, int) or not math.isfinite(scale.weight_g):
+            raise CollectionContractError("scale weight must be finite")
+        if (
+            type(scale.stable) is not bool
+            or type(scale.tared) is not bool
+            or type(scale.net) is not bool
+            or (scale.tared and scale.net)
+        ):
+            raise CollectionContractError("scale status must be explicit")
+        if (
+            type(scale.monotonic_ns) is not int
+            or scale.monotonic_ns < 0
+            or scale.monotonic_ns > sample.observation.metadata.monotonic_ns
+        ):
+            raise CollectionContractError("scale timestamp must precede robot state")
+        if type(scale.sequence) is not int or scale.sequence < 1:
+            raise CollectionContractError("scale sequence must be a positive integer")
+        if now_ns - scale.monotonic_ns > self._config.max_scale_age_s * 1_000_000_000:
+            raise CollectionContractError("scale sample is stale")
+        scale_delta_ns = scale.monotonic_ns - sample.observation.metadata.monotonic_ns
+        if abs(scale_delta_ns) > self._config.max_scale_skew_s * 1_000_000_000:
+            raise CollectionContractError("scale/robot sample skew exceeds tracked limit")
+        if self._last_scale_sequence is not None and scale.sequence < self._last_scale_sequence:
+            raise CollectionContractError("scale sample sequence went backward")
 
         images: dict[str, Any] = {}
         stream_by_role = {stream.role: stream for stream in self._config.recording_camera_streams}
@@ -276,12 +328,18 @@ class SampleAssembler:
         self._last_observation_sequence = observation.seq
         self._last_action_sequence = action.seq
         self._last_ft_sequence = ft.sequence
+        self._last_scale_sequence = scale.sequence
         return ValidatedSample(
             state,
             candidate_action,
             MappingProxyType(images),
             tuple(ft.values),
             ft_delta_ns / 1_000_000_000,
+            float(scale.weight_g),
+            scale_delta_ns / 1_000_000_000,
+            scale.stable,
+            scale.tared,
+            scale.net,
         )
 
 

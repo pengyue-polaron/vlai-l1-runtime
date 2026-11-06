@@ -139,6 +139,13 @@ def build_parser() -> argparse.ArgumentParser:
         choices=MOTOR_NAMES,
         help="LIVE: after state probe, read eight identity/version/range registers of one motor",
     )
+    leader_feedback = subparsers.add_parser(
+        "capture-leader-feedback",
+        help="LIVE CAN QUERIES: bounded Leader position/velocity/torque capture without enable",
+    )
+    leader_feedback.add_argument("--config", type=Path, required=True)
+    leader_feedback.add_argument("--side", choices=("left", "right"), required=True)
+    leader_feedback.add_argument("--output", type=Path, required=True)
     redecode = subparsers.add_parser(
         "redecode-follower-feedback",
         help="OFFLINE: compare saved raw feedback decoded with tracked ranges against SDK values",
@@ -227,7 +234,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             report = redecode_capture(load_system_config(args.config), args.source, args.output)
             console.success(f"Offline feedback comparison saved: {report}")
             return 0
-        if args.command == "capture-follower-feedback":
+        if args.command in ("capture-follower-feedback", "capture-leader-feedback"):
             from .teleoperation.feedback_capture import capture_follower_feedback
 
             sides = ("left", "right") if args.side == "bimanual" else (args.side,)
@@ -235,9 +242,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 load_system_config(args.config),
                 sides=sides,
                 output=args.output,
-                parameter_motor=args.read_parameters_for,
+                parameter_motor=(
+                    args.read_parameters_for
+                    if args.command == "capture-follower-feedback"
+                    else None
+                ),
+                role="leader" if args.command == "capture-leader-feedback" else "follower",
             )
-            console.success(f"Follower feedback saved: {report}")
+            console.success(f"Motor feedback saved: {report}")
             return 0
         if args.command == "observe-xair":
             return _run_xair_observer(args)
@@ -601,8 +613,10 @@ def _run_camera_service_command(args: argparse.Namespace) -> int:
     if args.action == "start":
         console.step("Starting or verifying persistent camera service")
         status = controller.start()
+        enabled_camera_count = sum(stream.enabled for stream in config.cameras.streams)
         console.success(
-            f"Three-camera service ready · preview port {config.camera_preview.port} "
+            f"{enabled_camera_count}-camera service ready · preview port "
+            f"{config.camera_preview.port} "
             f"· pid {status.pid}"
         )
     elif args.action == "stop":

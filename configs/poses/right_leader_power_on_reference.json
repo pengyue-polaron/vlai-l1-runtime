@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "name": "right_leader_power_on_reference_2026_11_04",
+  "purpose": "right Leader diagnostic snapshot, not the selected shared return target",
+  "status": "recorded_reference_only",
+  "automatic_motion_enabled": false,
+  "selected_as_target": false,
+  "coordinate_kind": "raw_motor_coordinates_unverified",
+  "gripper_unit": "motor_degrees_not_opening_width",
+  "captured_utc": "2026-11-04T12:43:12Z",
+  "source_report": "data/temporary/right_leader_home_reference_20261104/report.json",
+  "source_feedback": "data/temporary/right_leader_home_reference_20261104/feedback.csv",
+  "side": "right",
+  "role": "leader",
+  "interface": "can0",
+  "usb_parentdev": "1-3.1.4:1.0",
+  "probe_rounds": 40,
+  "probe_status": "passed",
+  "bound_violations": [],
+  "qdisc_drops": 0,
+  "position_statistic": "median_of_40_motion_free_feedback_rounds",
+  "positions_deg": {
+    "joint_1": -3.85775,
+    "joint_2": -3.333183,
+    "joint_3": -0.010928,
+    "joint_4": 9.540554,
+    "joint_5": -1.540914,
+    "joint_6": -0.557352,
+    "joint_7": 7.398574,
+    "gripper": -13.999369
+  }
+}

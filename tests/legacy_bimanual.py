@@ -31,6 +31,7 @@ def config() -> CollectionConfig:
         image_writer_threads=12,
         teleoperation_sides=("left", "right"),
         record_camera_roles=("wrist_left", "wrist_right", "agent"),
+        reset_policy=replace(right.reset_policy, after_save=True),
         leading_stillness=replace(
             right.leading_stillness,
             action_thresholds=right.leading_stillness.action_thresholds * 2,

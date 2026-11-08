@@ -134,11 +134,13 @@ rechecks the recorded camera roles after that confirmation before recording the
 atomic canonical dataset transaction. Recording buffers the stationary prefix
 and starts writing only after tracked action thresholds indicate sustained
 motion, while preserving a short preroll. During recording, press `Enter` to save, enter
-`d` to discard, or enter `q` to discard the current episode and quit. After a
-save or discard, recording stops and the same active runtime immediately runs
-`AdjustPosition`; encoding and publication then run with the selected arm(s)
-still enabled at Reset. The workflow advances to the next episode without
-disabling the selected pair(s). Recording has no automatic
+`d` to discard, or enter `q` to discard the current episode and quit. For
+`collect-right`, saving with `Enter` leaves the right Leader and Follower under
+active teleoperation at their current pose while encoding and publication run;
+the next episode then waits for another `Enter`. Discard still runs
+`AdjustPosition`. The bimanual `collect` contract runs `AdjustPosition` after
+both save and discard. The selected runtime stays active between episodes.
+Recording has no automatic
 time limit and ends only when the operator makes a decision.
 
 The reusable `embodied-ops` Panel is available with:

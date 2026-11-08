@@ -8,6 +8,198 @@ silently choosing one.
 
 ## Start here
 
+**2026-11-07 CAN HUB FAILED AGAIN DURING COLLECT START (15:07 UTC):**
+The next `collect-right` passed camera/sensor preflight but failed before a
+motor probe because `can1` disappeared during the isolated-side DOWN check;
+shutdown also could not inspect `can0`/`can2`. Read-only inspection found only
+the Jetson platform `can4`: all four PEAK interfaces and their parent hub
+`1-3.1` were absent. Kernel logs at 15:07:46 reported repeated `-71` errors
+and failed reset/enumeration of `1-3.1-port2` (the configured right-Follower
+adapter position when the mapping is valid); at 15:07:49 the whole hub
+disconnected and the remaining `can0` was removed, followed by `-32`/`-71`
+descriptor failures. This is a USB enumeration fault before CAN startup. The
+first port2 error is a clue, not proof that its adapter rather than the port,
+hub supply or upstream connection is defective. No CAN frame, motor enable,
+USB reset or rename was performed for this check. Do not run collection until
+the physical hub/port/cable/power fault is isolated and all four exact
+parentdev identities return stable.
+
+**2026-11-07 REPEATED CAN-HUB DISCONNECT AND NAME DRIFT (14:54 UTC):**
+Another `collect-right` attempt failed before any motor probe because `can0`
+resolved to USB parent `1-3.1.1:1.0` rather than tracked right-Leader parent
+`1-3.1.4:1.0`. Read-only inspection found all four adapters on the correct
+physical hub ports but kernel-assigned names `can0=.1, can1=.2, can2=.3,
+can3=.4`. Each interface was DOWN/STOPPED with zero errors; both teleop
+services and all controller processes were inactive. The installed host
+`vlai-l1-can-rename` script was run once and restored the tracked names:
+`can0=.4`, `can1=.1`, `can2=.2`, `can3=.3`, all still DOWN and zero-error.
+Kernel logs also showed a fresh upstream USB hub `1-3.1` disconnect at
+14:54:24, removal of all four PEAK adapters, another disconnect at 14:54:26,
+and `-71`/`-32` enumeration errors. The recurring host-to-hub USB fault can
+undo naming again; renaming is only a current-session repair. Inspect or
+replace the upstream USB cable, connector, hub and its power before motion.
+No CAN query, motor enable or collection retry was performed by this check.
+The earlier right-Follower bus-off under `AdjustPosition` remains a separate
+unresolved fault.
+
+**2026-11-07 USB RECONNECTION AND CAN NAME RESTORATION:**
+After the operator reconnected the USB integrator, all four PEAK adapters,
+HKVL CDC-ACM sensor and PL2303 scale re-enumerated. The kernel initially
+assigned PEAK names in upstream-port order (`can0` parent `.1` through
+`can3` parent `.4`), which disagreed with tracked physical identities. With
+all four interfaces DOWN, zero counters, no control processes and teleop
+services inactive, the already installed host `vlai-l1-can-rename` script
+was run once against tracked system config. It restored `can0=.4` right
+Leader, `can1=.1` left Leader, `can2=.2` right Follower and `can3=.3` left
+Follower. Final read-only check found each DOWN/STOPPED with zero live and
+cumulative errors. HKVL stable by-id path resolved to `/dev/ttyACM0` and
+its collection reader received fresh decoded FT frames. `/dev/vlai-scale`
+resolved to `/dev/ttyUSB0` and its collection reader received fresh stable,
+tared display output. These are USB/serial checks only: no CAN frame, motor
+probe, enable or collection retry ran. The earlier can2 bus-off under
+`AdjustPosition` remains unresolved, and a clean newly enumerated controller
+does not close that fault. The upstream CAN USB hub had repeated `-32`/`-71`
+enumeration errors before this reconnection; monitor for recurrence.
+
+**2026-11-07 ALL PEAK USB-CAN ADAPTERS DISAPPEARED (14:31 UTC):**
+`collect-right` passed camera/sensor preflight but failed before any motor
+probe while checking inactive `can1`: `ip -j link show dev can1` exited 1.
+Shutdown then could not verify `can0` or `can2` DOWN for the same reason.
+Read-only checks found all four configured PCAN-USB FD interfaces `can0`–`can3`
+absent from `ip` and `lsusb`; only the Jetson platform `can4` remained. The
+shared upstream USB hub `1-3.1` was absent from sysfs. Kernel logs show all
+four adapters removed together at 14:31:49 UTC, followed by hub descriptor
+errors `-32` and enumeration failures `-71` through 14:45. No controller
+process remained. This is an upstream USB hub/connection/power enumeration
+fault, not evidence of a particular CAN motor failing; do not remap CAN names
+or start collection. Have the operator support/power down the arm and inspect
+the physical Jetson-to-CAN-hub USB connection and hub power. After restoration,
+verify every configured parentdev and run the tracked motion-free probe before
+any SDK constructor. No USB reset, CAN query or motor command was run here.
+
+**2026-11-07 HKVL STREAM STOPPED AFTER RIGHT CAN FAULT:**
+Following the right-Follower `AdjustPosition` bus-off, `collect-right` failed
+before motor startup with `no fresh HKVL stream received`. The configured
+HKVL CDC-ACM by-id path still resolved to `/dev/ttyACM0`, both CDC interfaces
+remained bound to `cdc_acm`, and no process held the port. The exact collection
+reader failed its two-frame/two-second startup gate. A separate three-second
+read-only serial capture at the tracked 1 Mbaud 8N1 received zero bytes, zero
+decoded frames and zero CRC errors. This localizes the new preflight failure
+to absent serial input, not frame decoding; check sensor power, RS485 wiring,
+adapter receive state and shared right-arm power/harness. No CAN query, motor
+enable or collection retry was performed for this diagnosis.
+
+**2026-11-07 RIGHT-FOLLOWER BUS-OFF DURING SDK ADJUSTPOSITION (13:23 UTC):**
+After the HKVL driver was restored, the operator's `collect-right` passed
+40/40 motion-free probes on both right buses (`can0` Leader and `can2`
+Follower). The SDK created and enabled both control handles and reported the
+right-arm control running. During the subsequent explicit `AdjustPosition`
+request, `can2` became unhealthy: sidecar reported state 2, txerr 117,
+rxerr 127, warning 6, passive 14, bus-off 4 and restarts 4. Kernel logged
+four `can2` bus-off/restart events at 13:23:41–43 UTC. Read-only post-fault
+checks found `can0` DOWN with zero errors, `can2` DOWN with txerr 117/rxerr 120
+and the same four bus-off/restart events, zero can2 qdisc drops, and no active
+teleoperation owner. Shutdown reported unverified status; DOWN/no process
+does not prove all motors disabled. No additional CAN query, reset, enable or
+collection retry was performed. The evidence localizes the incident to the
+right-Follower bus under enabled/AdjustPosition traffic, not to one motor ID;
+the fault mechanism remains undetermined. Do not repeat collection to clear
+counters. Inspect motor-bus power, CAN connectors/harness, termination and
+signal integrity before another motion-capable test.
+
+**2026-11-07 HKVL SERIAL DRIVER AFTER REBOOT:**
+`collect-right` failed in sensor preflight before any CAN or motor startup
+because its configured HKVL stable path was absent. The exact adapter
+`eeee:485c`, serial `20260717`, was still present on USB interface `1-3.2.4`,
+but its CDC interfaces had no driver and `/dev/ttyACM*` was absent. The host's
+`/etc/modprobe.d/blacklist.conf` contains `blacklist cdc_acm`, and that module
+was unloaded after the Jetson reboot. One explicit `sudo -n modprobe cdc_acm`
+bound both CDC interfaces and restored the configured by-id path to
+`/dev/ttyACM0`. The collection HKVL reader then passed its two-fresh-frame
+preflight at the tracked 0.25-second age limit; a sample age was 0.56 ms.
+No permanent host blacklist change, CAN query, motor startup or collection
+run was performed. A later reboot will require the same driver recovery until
+the host module policy is deliberately corrected.
+
+**2026-11-07 TWO-CAMERA RECOVERY (13:16 UTC):**
+The operator replugged both USB3 cameras again. D405 `255323074436` and D455
+`251643060089` re-enumerated on the configured hub ports, and `just cameras
+start` recovered the persistent service on port 8088 (PID 18865). The tracked
+`just camera-check 30 0.25` passed: 30 synchronized RGB pairs at 640x480x3,
+28.86 effective FPS, maximum pair skew 24.96 ms, with the exact configured
+serial numbers. The camera service was left running for the Operator Panel.
+This camera-only result does not clear any independent CAN or motor fault.
+
+**2026-11-07 TWO-CAMERA USB RECHECK (13:06 UTC):**
+After a Jetson reboot and operator replug of both USB3 cameras, D405
+`255323074436` and D455 `251643060089` again enumerated on the configured
+hub ports. The D455 exposes depth and RGB interfaces with the same local
+`video-index0`; its shared `/dev/v4l/by-id` alias pointed to depth `/dev/video6`
+after this boot, while the RGB YUYV node was `/dev/video10`. The camera resolver
+now selects a unique node using the tracked serial, interface-local index and
+YUYV format through `/dev/v4l/by-path`. This was read-only verified as D405
+`/dev/video4` and D455 `/dev/video10`; hardware-free tests (729), Ruff and
+diff-check passed. The camera service remains STOPPED: D405 repeatedly failed
+to deliver its first frame within two seconds, including when opened alone
+through the production reader, while D455 delivered frames. Kernel UVC status
+`-71` appeared repeatedly on D405 USB path `2-2.2:1.3` and later also on D455
+`2-2.3:1.4`. Brief single-frame reads of each camera sometimes succeeded, so
+those reads do not validate stable two-camera operation. Investigate the shared
+hub, power and cables before collection; do not claim video recovery or change
+the camera identity based on a transient frame. No CAN or motor command ran.
+
+**2026-11-07 RIGHT-FOLLOWER MOTION-FREE RECHECK (12:32 UTC):**
+At the operator's explicit request, one bounded state-only probe ran after
+all four CAN interfaces were verified DOWN on their configured USB parents,
+both teleoperation services were inactive, no controller owner was running,
+and `can2` had zero live TX/RX errors and zero qdisc drops. The exclusive
+right-Follower capture completed 40/40 rounds on `can2`: every configured
+response ID `0x011` through `0x018` answered in every round, with 320 TX and
+320 RX frames, unchanged cumulative health counters, and zero final live
+errors or qdisc drops. Each motor's raw status nibble was 0 in all 40 rounds;
+this raw value alone does not establish enabled or healthy drive status. No
+enable, motion target, reset, or retry occurred; `can2` was returned DOWN.
+Evidence: `/tmp/right_follower_single_probe_20261107_b/report.json` and
+`raw_feedback.jsonl` in the same directory. This pass proves only the
+motion-free query window. The recent SDK-session creation fault occurred
+after a separate 40/40 probe, so this capture does not identify a faulty
+motor or clear the fault under enable/control traffic. Before another SDK
+constructor, inspect power and physical continuity, then plan a separately
+supervised enable-stage diagnostic with passive per-ID feedback logging.
+
+**2026-11-07 FOLLOWER CAN CABLE SWAP DIAGNOSTIC (07:29 UTC):**
+The operator exchanged only the left/right Follower CAN cable plugs at the
+integrator; USB adapter positions were unchanged. With no motor owner active,
+all CAN interfaces DOWN, and their configured USB parents verified, one
+motion-free feedback capture was attempted on `can3` (USB parent
+`1-3.1.3:1.0`, now connected to the original right-Follower cable). The
+exclusive capture sent eight state queries, received one frame, completed zero
+of 40 rounds, and stopped immediately when the link entered ERROR-WARNING
+with `rxerr=119`. It returned `can3` DOWN; `can2` was not queried because it
+already retained `rxerr=127`. No motor enable, alignment, reset, or motion
+occurred. Evidence: `/tmp/follower_can3_swap_probe_20261107_a/report.json`.
+This is evidence that the failure follows the original right-Follower cable
+side across adapters, not a definitive identification of the failed part.
+The physical cable swap makes the tracked right/left Follower mapping invalid:
+do not run SDK startup or collection. Next, power down the motor bus and
+inspect the original right-Follower cable, connector pins, termination,
+transceiver and supply; restore the original cable routing before a new
+single bounded motion-free probe. Runtime revision
+`94b44d352d642147b8fce9155099c831a1246095`, x-air-sdk
+`bf300508e179f652b23f0efaf3b6c9048f1f12e9`, embodied-ops
+`6eeb9e04b05cd59f8854efd1cb08572e08e5a4fa`.
+
+**2026-11-07 RIGHT-ONLY EPISODE SAVE HOLDS POSE:**
+The operator requested that pressing Enter to save a `collect-right` episode
+leave the active Leader/Follower pair at its current teleoperated pose for the
+next episode. The tracked `right_only.toml` now sets
+`auto_reset_after_save = false`; startup Reset, explicit Reset and discard still
+use SDK `AdjustPosition`. The bimanual collection policy is unchanged. The
+old `push_block_10cm` dataset contained one episode under the previous
+collection-config hash. At the operator's request, that sole dataset was deleted
+after collection exited; the `push_block_10cm` experiment ID can now be reused
+with the new right-only config.
+
 **2026-11-04 X_AIR RESET TARGET IDENTIFIED — OFFLINE BINARY INSPECTION:**
 The operator reported that both right Leader and Follower repeatedly move to a
 fixed pose at `just collect-right` startup. The managed path creates the pinned

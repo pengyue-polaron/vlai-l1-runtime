@@ -35,6 +35,12 @@ window passed. This does not affect the independent policy-command blockers.
 Synthetic sources exist only for pure integration tests and cannot enable the
 Runtime.
 
+The right-only collection contract keeps the active Leader/Follower teleoperation
+session at its current pose after a saved episode so the next episode can start
+without automatic Reset. This does not disable joint bounds, state freshness,
+CAN health, or normal shutdown; explicit Reset and discard still call the SDK's
+`AdjustPosition`. Initial collection startup alignment is unchanged.
+
 Collection now requires a valid HKVL serial FT stream before creating a
 motion-capable teleoperation owner. The collector records sensor-frame wrench
 with host-receipt time alignment; an absent or stale stream stops collection.

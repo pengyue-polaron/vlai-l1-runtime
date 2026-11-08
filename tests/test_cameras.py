@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from embodied_ops import add_contract_digest
 
+import vlai_l1_runtime.camera_bridge as camera_bridge
 from vlai_l1_runtime import (
     CameraContractError,
     CameraFrameMetadata,
@@ -236,6 +237,37 @@ def test_tracked_camera_mapping_is_commissioned() -> None:
             stream for stream in system.cameras.streams if stream.role == "agent"
         ).exposure_absolute
         == 200
+    )
+
+
+def test_rgb_device_selection_handles_duplicate_uvc_index_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent = next(
+        stream
+        for stream in load_system_config(ROOT / "configs/system/vlai_l1.toml").cameras.streams
+        if stream.role == "agent"
+    )
+    dev_root = tmp_path / "dev"
+    by_path = tmp_path / "by-path"
+    sys_video = tmp_path / "sys-video"
+    usb = tmp_path / "usb" / "2-2.3"
+    for directory in (dev_root, by_path, sys_video, usb):
+        directory.mkdir(parents=True, exist_ok=True)
+    (usb / "serial").write_text(agent.device_id or "")
+    for name, interface in (("video6", "1.0"), ("video10", "1.3")):
+        device = dev_root / name
+        device.touch()
+        (by_path / f"usb-2-2.3:{interface}-video-index0").symlink_to(device)
+        (usb / f"2-2.3:{interface}").mkdir()
+        (sys_video / name).mkdir()
+        (sys_video / name / "device").symlink_to(usb / f"2-2.3:{interface}")
+    monkeypatch.setattr(camera_bridge, "_supports_yuyv", lambda device: device.name == "video10")
+    assert (
+        camera_bridge._resolve_v4l2_device(
+            agent, by_path=by_path, dev_root=dev_root, sys_video=sys_video
+        )
+        == dev_root / "video10"
     )
 
 

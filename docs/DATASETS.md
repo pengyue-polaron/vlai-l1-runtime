@@ -106,8 +106,10 @@ finite, fresh, synchronized, and increasing in sequence. The Runtime does not
 apply joint or gripper position ranges to collected values.
 
 Each episode is buffered by LeRobot inside a hidden sibling directory. After
-the last accepted frame, save/discard runs `AdjustPosition` on the still-active
-selected runtime(s). Saving then performs video encoding, LeRobot finalization,
+the last accepted frame, right-only save leaves the active Leader and Follower
+at their teleoperated pose; right-only discard still runs `AdjustPosition`.
+The bimanual contract runs `AdjustPosition` after save or discard. Saving then
+performs video encoding, LeRobot finalization,
 provenance writing, and a deep
 validation of task metadata, episode ranges, Parquet row counts and columns,
 and every referenced video. Only then is the complete directory renamed over

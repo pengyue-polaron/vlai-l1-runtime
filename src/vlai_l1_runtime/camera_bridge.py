@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import errno
+import fcntl
 import math
+import os
+import struct
 import threading
 import time
 import uuid
@@ -445,19 +449,59 @@ class _OpenCvBackend:
             raise
 
 
-def _resolve_v4l2_device(stream: CameraConfig) -> Path:
+def _resolve_v4l2_device(
+    stream: CameraConfig,
+    *,
+    by_path: Path = Path("/dev/v4l/by-path"),
+    dev_root: Path = Path("/dev"),
+    sys_video: Path = Path("/sys/class/video4linux"),
+) -> Path:
     if stream.device_id is None or stream.video_index is None:
         raise ValueError(f"{stream.role} V4L2 identity is incomplete")
-    by_id = Path("/dev/v4l/by-id")
-    if not by_id.is_dir():
-        raise RuntimeError("V4L2 by-id directory is unavailable")
-    suffix = f"_{stream.device_id}-video-index{stream.video_index}"
-    matches = tuple(path for path in by_id.iterdir() if path.name.endswith(suffix))
+    if not by_path.is_dir():
+        raise RuntimeError("V4L2 by-path directory is unavailable")
+    suffix = f"-video-index{stream.video_index}"
+    matches = []
+    for link in by_path.iterdir():
+        if not link.name.endswith(suffix):
+            continue
+        resolved = link.resolve(strict=True)
+        if resolved.parent != dev_root or not resolved.name.startswith("video"):
+            raise RuntimeError(
+                f"{stream.role} V4L2 identity resolves outside /dev/video*: {resolved}"
+            )
+        serial_path = (sys_video / resolved.name / "device").resolve(strict=True).parent / "serial"
+        try:
+            serial = serial_path.read_text().strip()
+        except FileNotFoundError:
+            continue
+        if serial != stream.device_id:
+            continue
+        if _supports_yuyv(resolved):
+            matches.append(resolved)
     if len(matches) != 1:
         raise RuntimeError(
-            f"{stream.role} expected one V4L2 device ending {suffix!r}, found {len(matches)}"
+            f"{stream.role} expected one YUYV V4L2 device for serial "
+            f"{stream.device_id} at index {stream.video_index}, found {len(matches)}"
         )
-    resolved = matches[0].resolve(strict=True)
-    if resolved.parent != Path("/dev") or not resolved.name.startswith("video"):
-        raise RuntimeError(f"{stream.role} V4L2 identity resolves outside /dev/video*: {resolved}")
-    return resolved
+    return matches[0]
+
+
+def _supports_yuyv(device: Path) -> bool:
+    """Query formats without starting a stream; UVC interface indices can collide."""
+    fd = os.open(device, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        for index in range(32):
+            descriptor = bytearray(64)
+            struct.pack_into("II", descriptor, 0, index, 1)  # V4L2_BUF_TYPE_VIDEO_CAPTURE
+            try:
+                fcntl.ioctl(fd, 0xC0405602, descriptor, True)  # VIDIOC_ENUM_FMT
+            except OSError as exc:
+                if exc.errno == errno.EINVAL:
+                    return False
+                raise
+            if descriptor[44:48] == b"YUYV":
+                return True
+        raise RuntimeError(f"too many V4L2 formats on {device}")
+    finally:
+        os.close(fd)

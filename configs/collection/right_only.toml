@@ -15,7 +15,8 @@ max_ft_skew_s = 0.05
 max_scale_age_s = 0.6
 max_scale_skew_s = 0.5
 auto_reset_before_collection = true
-auto_reset_after_save = true
+# Keep the right pair at its teleoperated pose between saved episodes.
+auto_reset_after_save = false
 auto_reset_after_discard = true
 
 [leading_stillness]

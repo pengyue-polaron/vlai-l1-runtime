@@ -55,7 +55,7 @@ def test_hardware_free_cli_validates_and_describes_collection(capsys) -> None:
     assert payload["collection_ready"] is True
     assert payload["reset"] == {
         "after_discard": True,
-        "after_save": True,
+        "after_save": False,
         "before_collection": True,
     }
     assert payload["leading_stillness"]["enabled"] is True

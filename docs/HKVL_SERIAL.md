@@ -2,8 +2,8 @@
 
 The parser reads continuous 28-byte frames: `53 54`, six little-endian float32
 values ordered Fx/Fy/Fz/Mx/My/Mz, then CRC16/MODBUS (low byte first).
-Current defaults are 1,000,000 baud and 8N1; verify device settings if CRC decoding
-fails. Use the dedicated USB-RS485 adapter, preferably its stable
+The example uses 1,000,000 baud; --baudrate is required, with no default. The
+script configures 8N1. Verify device settings if CRC decoding fails. Use the dedicated USB-RS485 adapter, preferably its stable
 `/dev/serial/by-id/` path, and close other serial clients before capture.
 
 ```bash

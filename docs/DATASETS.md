@@ -16,7 +16,7 @@ current parameter values.
 | `observation.ft_time_delta_s` | FT host receipt time minus robot state time. |
 | `observation.scale_weight_g` | Scale display reading converted to grams. |
 | `observation.scale_time_delta_s` | Scale host receipt time minus robot state time. |
-| `observation.scale_stable/tared/net` | Observed ST/TR/NT flags, not software verification of tare. |
+| `observation.scale_stable`, `observation.scale_tared`, `observation.scale_net` | Observed ST/TR/NT flags, not software verification of tare. |
 | `observation.images.*` | Selected camera RGB videos. |
 
 Bimanual state/action vectors contain 16 values:

@@ -34,8 +34,8 @@ captures; do not silently pool their baselines. `ft_validated` remains false
 and external load is unknown unless separately documented by the operator.
 This diagnostic commissions automatic data acquisition, not a general policy
 transport, gravity compensation, zero calibration, or six-axis force control.
-See the README for the single-command entry and SAFETY.md for the scoped
-operator authorization and stop behavior.
+For current task authority see [AGENTS.md](../AGENTS.md). Current stop behavior
+is defined by the selected runtime configuration and controller implementation.
 
 On 2026-10-12 the operator requested larger multi-joint excitation. The new
 `configs/diagnostics/right_multijoint_unloaded_single.json` was prepared as a
@@ -137,8 +137,7 @@ not supported by this study. The separate tracked reverse motion policy visits
 the same offset-space segments in reverse order, with identical guards/timing.
 It starts from fresh feedback, so actual absolute-pose coverage must be measured.
 All four forward models were frozen before the reverse experiment; its results
-must not be used to retune this held-out comparison. The source/plan hashes and
-latest experiment state are in HANDOFF.md.
+must not be used to retune this held-out comparison.
 
 The reverse sequence completed at 2026-10-12 11:13:55 UTC with verified disable
 and zero CAN errors/drops. The operator subsequently replied “没有异常，你继续”
@@ -239,8 +238,7 @@ The tests do not distinguish all possible physical mechanisms. A fitted
 position/torque curve with low repeat error cannot establish external-force
 accuracy: J4's unloaded history spread exceeds the preceding remote response.
 Preserve this ambiguity in future validation; neither a larger pose tolerance
-nor subtraction of the PD control response resolves it. Captures and exact
-hashes are listed at the top of HANDOFF.md.
+nor subtraction of the PD control response resolves it.
 
 ### Moving-window study
 

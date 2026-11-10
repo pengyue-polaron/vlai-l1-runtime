@@ -7,11 +7,58 @@ teleoperation integration is built against a pinned `x_air_sdk` checkout and
 converts its per-side full-state callback into versioned, exact named-vector
 contracts for either bimanual or isolated single-side collection.
 
-The camera mappings and x_air teleoperation collection path are commissioned.
-A complete motor-power restart recovered the right-leader all-node no-ACK
-fault, and a protected isolated-right commissioning window passed.
-Policy-command transport and policy evaluation remain separate, explicitly
-unavailable capabilities.
+The current task workflow is saved Follower start -> automatic positioning ->
+continuous policy -> return and hold; commands are documented below.
+The experimental task owner is separate from the unavailable generic production
+command transport. Build/offline validation is not completed live commissioning.
+Teleoperation collection remains a separate supported workflow.
+
+## Automatic task operation
+
+Workflow: saved Follower start -> move -> hold -> continuous policy -> return
+and hold, using the original automatic owner. Normal stages retain the same
+enabled process. Use direct pengyue SSH and Jetson tmux.
+
+Task definitions are in `configs/tasks/<id>.json`; starts are in
+`data/start_poses/<id>.json`. With teleoperation already active and the Follower
+positioned, `just capture-start-pose-right push-distance` reads the measured
+Follower joint8 in SDK degrees from existing IPC. Capture settings are in
+`configs/tasks/pose_capture.json`. The current capture CLI creates new files;
+update an existing pose through the authorized update workflow. Git manages
+versioned files; this does not imply that ignored datasets/poses are Git-backed.
+End teleoperation while parked/supported before starting the separate task owner.
+
+| Command | When to use |
+|---|---|
+| `just task-check push-distance` | Validate a new or changed task configuration. |
+| `just task-start push-distance SESSION` | Start a new owner when none already serves this task; SESSION is a new output directory. |
+| `just task-status SESSION` | Inspect the existing owner when current status is needed. |
+| `just task-policy SESSION` | Run policy on the existing owner at the saved start; an optional positive action count is supported. |
+| `just task-finish SESSION` | Return to the saved start and hold. |
+| `just task-shutdown SESSION` | Explicitly disable and exit. |
+
+These are command references, not a checklist to rerun from the beginning.
+Reuse an existing healthy owner and completed setup. Policy uses direct 30 Hz
+absolute joint targets, existing Kp/Kd, zero desired velocity and zero feedforward
+torque. Only start/return use smooth trajectories, with duration computed from
+distance and configured reference limits. Normal finish retains torque;
+physical/producer faults use the implemented verified-disable path.
+
+Inference runs on the 4090 host (`asus4090` from pengyue, `work-pc` from Jetson)
+under `/data/research/pengyue/vlai-distance-inference-20261108`.
+Server source: `scripts/inference/serve_native.py`. Current native pi0 inputs are
+AgentView/right-wrist RGB, ordered absolute joint8 degrees and separate
+`distance_cm`; output is horizon32 at 30 Hz. Unified needs its actual force/FK
+history interface. Existing Camera Service and inference workers operate outside
+the motor loop. The selected SSH tunnel provides loopback
+`ws://127.0.0.1:8808`; the client validates checkpoint identity.
+Chunk-arrival freshness and future scheduled plan samples are distinct.
+
+Implementation: `start_pose.py`, `task_definition.py`, `task_runtime.py`,
+`pi0_inference.py`, `teleoperation/automatic.py` and
+`native/xair_sidecar/automatic_main.cpp`. Hardware values and checks come from
+`configs/system/vlai_l1.toml`; model/task contracts come from
+`configs/inference/` and `configs/tasks/`.
 
 ## Boundaries
 
@@ -202,31 +249,6 @@ LeRobot collection, doctor, and export processes require Python 3.12.
 
 ## Development
 
-The operator-authorized automatic right-Follower diagnostic now provides a
-single bounded hold / wrist sweep / saved-data review sequence. This **moves
-hardware**; keep the workspace clear and all other controllers stopped:
-
-```bash
-sudo -n env -u PYTHONPATH .venv/bin/vlai-l1 automatic-right \
-  --config configs/system/vlai_l1.toml \
-  --policy configs/diagnostics/right_automatic_motion.json \
-  --output data/temporary/NEW_SESSION_NAME --mode sequence
-```
-
-The output directory must be new. `--mode hold` and `--mode sweep` select
-individual stages. The first policy uses +/-0.5 degrees; the separately tracked
-`right_automatic_repeat.json` uses two +/-1-degree cycles. Each stage records
-positions, targets, torque and raw feedback, verifies motor disable before
-closing CAN, and writes `report.json` plus `analysis.json`. `sequence.json`
-summarizes the automatic gates. `Ctrl+C` requests guarded shutdown. A failed
-stage stops the sequence without an automatic enable retry or CAN recovery.
-Only J7's target varies; this does not lift/home the arm. Captures use a direct
-PD controller and are not calibrated FT. See [Safety](docs/SAFETY.md) for scope.
-
-For bounded Follower torque feedback capture and the hardware-free endpoint
-wrench solver, see [Force estimation](docs/FORCE_ESTIMATION.md). The new capture
-command requires a separately approved hardware test; it never enables motors.
-
 For temporary two-wrist-camera plus all-motor position recording without
 AgentView, see [Temporary recording](docs/TEMPORARY_RECORDING.md). That standalone
 CSV/MJPEG recorder consumes already-running teleoperation and never enables or
@@ -239,7 +261,7 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-Start with the current [workspace handoff](docs/HANDOFF.md), then read
-[Architecture](docs/ARCHITECTURE.md), [Safety](docs/SAFETY.md),
-[Datasets](docs/DATASETS.md), [x_air commissioning](docs/COMMISSIONING.md), and
-[Source gaps](SOURCE_GAPS.md) before extending the Runtime.
+Default AI instructions are in [AGENTS.md](AGENTS.md) only.
+Architecture, collection, datasets, sensors and source-gap documents are optional
+feature references. Historical diagnostics and incident records are not routine
+context or prerequisites for unrelated tasks.

@@ -86,7 +86,7 @@ def test_reported_id_disagreement_is_not_silently_remapped(register):
 )
 def test_recorded_right_j3_parameter_replies(register, payload, expected):
     # Eight received CAN-FD payloads from the authorized 2026-10-09 06:16 UTC
-    # capture; provenance and limits of this evidence are in FORCE_ESTIMATION.md.
+    # capture.
     query = ParameterRead("joint_3", 3, 19, register)
     response = RawMotorFrame("joint_3", 19, 20, payload, True)
     assert query.decode(response, sent_ns=10, deadline_ns=30) == expected

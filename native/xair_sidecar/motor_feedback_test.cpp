@@ -83,7 +83,7 @@ void decoder_tests() {
         rejects([&] { vlai_l1::decode_feedback(spec, input); });
     }
     // Recorded right J1, 2026-10-09 05:20:59 UTC. This is a regression fixture,
-    // not a model lookup table. Source hash/provenance is in FORCE_ESTIMATION.md.
+    // not a model lookup table.
     const vlai_l1::FeedbackSpec recorded{"joint_1", 17, 1, 12.5, 45, 54};
     const vlai_l1::FeedbackFrame raw{17, {1, 0x80, 0x55, 0x7f, 0xf7, 0xff, 0x1a, 0x17}, 8, 10, true};
     decoded = vlai_l1::decode_feedback(recorded, raw);

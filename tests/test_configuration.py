@@ -73,7 +73,7 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         -10.0,
         -90.0,
         0.0,
-        -90.0,
+        -95.0,
         -50.0,
         -90.0,
     )
@@ -82,7 +82,7 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
         180.0,
         90.0,
         140.0,
-        90.0,
+        95.0,
         50.0,
         90.0,
     )
@@ -198,8 +198,8 @@ def test_system_config_maps_the_complete_tracked_contract() -> None:
             "must be one of",
         ),
         (
-            "min_deg = [-80.0, -10.0, -90.0, 0.0, -90.0, -50.0, -90.0]",
-            "min_deg = [120.0, -10.0, -90.0, 0.0, -90.0, -50.0, -90.0]",
+            "min_deg = [-80.0, -10.0, -90.0, 0.0, -95.0, -50.0, -90.0]",
+            "min_deg = [120.0, -10.0, -90.0, 0.0, -95.0, -50.0, -90.0]",
             "joint_1 min_deg must be less than max_deg",
         ),
         (

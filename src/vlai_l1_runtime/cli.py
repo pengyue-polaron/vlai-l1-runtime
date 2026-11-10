@@ -96,6 +96,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_collection_selection(reset)
 
+    task = subparsers.add_parser("task", help="saved-start Follower task workflows")
+    task_sub = task.add_subparsers(dest="task_command", required=True)
+    for name in ("check", "record-start", "import-start", "start"):
+        child = task_sub.add_parser(name)
+        child.add_argument("--config", type=Path, required=True)
+        child.add_argument("--task", type=Path, required=True)
+        if name == "import-start":
+            child.add_argument("--source", type=Path, required=True)
+        if name == "start":
+            child.add_argument("--output", type=Path, required=True)
+    for name in ("status", "policy", "finish", "shutdown"):
+        child = task_sub.add_parser(name)
+        child.add_argument("--session", type=Path, required=True)
+        if name == "policy":
+            child.add_argument(
+                "--actions", type=int, help="optional episode count; default runs until finish"
+            )
+
     automatic = subparsers.add_parser(
         "automatic-right",
         help="MOVES HARDWARE: isolated right Follower hold, bounded joint path, or verified sequence",
@@ -207,6 +225,8 @@ def _add_collection_selection(parser: argparse.ArgumentParser) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "task":
+            return _run_task_command(args)
         if args.command == "automatic-right":
             from .teleoperation.automatic import run_automatic, run_automatic_sequence
 
@@ -646,6 +666,81 @@ def _run_camera_service_command(args: argparse.Namespace) -> int:
         )
     )
     return 0 if args.action != "status" or status.healthy else 1
+
+
+def _run_task_command(args):
+    if args.task_command in ("status", "policy", "finish", "shutdown"):
+        status_path = args.session / "task-status.json"
+        status = json.loads(status_path.read_text())
+        if args.task_command == "status":
+            # A saved file alone never proves a resident owner is still alive.
+            import os
+
+            pid = status.get("owner_pid")
+            native = status.get("native") or {}
+            stamp = native.get("monotonic_ns", 0)
+            try:
+                os.kill(int(pid), 0)
+                alive = 0 <= time.monotonic_ns() - stamp < 1_000_000_000
+            except (OSError, TypeError, ValueError):
+                alive = False
+            status["owner_observed_live"] = alive
+            print(json.dumps(status, indent=2))
+            return 0 if alive else 1
+        if status.get("phase") == "stopped":
+            raise ValueError("task session is stopped")
+        request = {"operation": args.task_command}
+        if args.task_command == "policy":
+            request["actions"] = args.actions
+        import os
+        import tempfile
+
+        fd, temporary_name = tempfile.mkstemp(prefix=".request-", dir=args.session)
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(fd, "w") as stream:
+                json.dump(request, stream)
+                stream.write("\n")
+            os.link(temporary, args.session / "request.json")  # atomic, create-only
+        finally:
+            temporary.unlink()
+        print(json.dumps({"submitted": request, "session": str(args.session)}))
+        return 0
+
+    from .start_pose import CaptureSpec, capture_pose, import_task_pose
+    from .task_definition import load_task
+    from .task_runtime import render_task_spec
+    from .teleoperation.automatic import run_automatic
+
+    config = load_system_config(args.config)
+    task = load_task(config, args.task, require_start_pose=args.task_command == "start")
+    policy = json.loads(task.automatic_policy.read_text())
+    render_task_spec(config, policy, task)
+    if args.task_command == "check":
+        print(
+            json.dumps(
+                {
+                    "task": task.id,
+                    "code_validation": "passed",
+                    "start_recorded": task.pose is not None,
+                    "start_pose": str(task.start_pose),
+                    "checkpoint": task.expected_checkpoint,
+                    "hardware_commissioned": False,
+                },
+                indent=2,
+            )
+        )
+    elif args.task_command == "record-start":
+        spec = CaptureSpec.load(task.root / "configs/tasks/pose_capture.json")
+        record = capture_pose(config, spec, task_id=task.id)
+        print(json.dumps({"saved": str(task.start_pose), "follower_deg": record["follower_deg"]}))
+    elif args.task_command == "import-start":
+        record = import_task_pose(config, task.id, args.source)
+        print(json.dumps({"saved": str(task.start_pose), "provenance": record["provenance"]}))
+    else:
+        report = run_automatic(config, task.automatic_policy, args.output, mode="task", task=task)
+        return 0 if report["disabled_verified"] else 1
+    return 0
 
 
 def _description_json(description: RobotDescription) -> dict[str, object]:

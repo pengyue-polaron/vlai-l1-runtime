@@ -1,0 +1,19 @@
+{
+  "kind": "vlai_task_v1",
+  "id": "push-distance",
+  "prompt": "将方块向前推动10厘米",
+  "distance_cm": 10,
+  "start_pose": "data/start_poses/push-distance.json",
+  "expected_checkpoint": {
+    "kind": "pi0",
+    "path": "/data/research/pengyue/vlai-distance-inference-20261108/checkpoints/pi0-29999",
+    "deployment_sha256": "9298437bbda0c4809e334175e5eeb8f7debd759e50c40900e027c77eeef483a4"
+  },
+  "inference_spec": "configs/inference/pi0_right.json",
+  "automatic_policy": "configs/tasks/right_follower_control.json",
+  "settings": {
+    "observation_max_age_s": 1.5,
+    "producer_timeout_s": 0.5,
+    "arrival_tolerance_deg": 2.0
+  }
+}

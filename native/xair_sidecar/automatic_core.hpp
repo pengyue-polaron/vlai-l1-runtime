@@ -214,17 +214,27 @@ private:
     std::uint64_t since_=0,last_=0;
     std::array<double,8> lo_{},hi_{};
 };
+class TaskPathGuard;
 class AutoGuard {
 public:
     explicit AutoGuard(AutoSpec spec):spec_(std::move(spec)) { spec_.validate(); }
-    void set_reference(const std::array<double,8>& q) {
+    void set_reference(const std::array<double,8>& q) { initialize_reference(q,true); }
+    void check(std::uint64_t now, const std::array<DecodedFeedback,8>& states,
+               const std::array<double,8>& target, bool enabled, bool handling=false) {
+        check_impl(now,states,target,enabled,handling,false);
+    }
+private:
+    friend class TaskPathGuard;
+    void initialize_reference(const std::array<double,8>& q, bool diagnostic_trajectory) {
         if (ready_ || failed_) throw std::runtime_error("reference already set/faulted");
         reference_=q;
         for (std::size_t i=0;i<8;++i) {
             const auto& m=spec_.motors[i];
             if (!std::isfinite(q[i]) || q[i] < m.min_deg || q[i] > m.max_deg) fail("initial bounds:"+m.feedback.name);
         }
-        if(spec_.waypoints.empty()) {
+        if(!diagnostic_trajectory) {
+            // Initial bounds above and all ongoing guards below are unchanged.
+        } else if(spec_.waypoints.empty()) {
             const auto active=spec_.active_motor;
             if (q[active]-spec_.amplitude_deg < spec_.motors[active].min_deg || q[active]+spec_.amplitude_deg > spec_.motors[active].max_deg)
                 fail("trajectory bounds:"+spec_.motors[active].feedback.name);
@@ -236,8 +246,9 @@ public:
         }
         ready_=true;
     }
-    void check(std::uint64_t now, const std::array<DecodedFeedback,8>& states,
-               const std::array<double,8>& target, bool enabled, bool handling=false) {
+    void check_impl(std::uint64_t now, const std::array<DecodedFeedback,8>& states,
+               const std::array<double,8>& target, bool enabled, bool handling,
+               bool task) {
         if (failed_ || !ready_ || now<=last_now_) fail("invalid/non-monotonic guard state");
         last_now_=now;
         if(handling && (!enabled || !spec_.handling || target!=reference_)) fail("invalid manual handling context");
@@ -246,9 +257,11 @@ public:
             if (!stamp || stamp>now || now-stamp>spec_.state_timeout_ns || stamp<last_source_[i]) fail("stale/regressed motor:"+m.feedback.name);
             last_source_[i]=stamp;
             const auto q=s.position_rad*kDegrees;
+            const bool outside_envelope=!task &&
+                (std::abs(q-reference_[i])>m.excursion_deg || std::abs(target[i]-reference_[i])>m.excursion_deg);
             if (!std::isfinite(q) || !std::isfinite(target[i]) || !std::isfinite(s.velocity_rad_s) || !std::isfinite(s.torque_nm) ||
                 q<m.min_deg || q>m.max_deg || target[i]<m.min_deg || target[i]>m.max_deg ||
-                std::abs(q-reference_[i])>m.excursion_deg || std::abs(target[i]-reference_[i])>m.excursion_deg ||
+                outside_envelope ||
                 std::abs(s.torque_nm)>m.torque_nm ||
                 s.mos_temperature_raw>spec_.temperature || s.rotor_temperature_raw>spec_.temperature || s.at_protocol_endpoint)
                 fail("position/effort/temperature guard:"+m.feedback.name);

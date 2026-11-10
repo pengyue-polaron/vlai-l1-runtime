@@ -267,7 +267,9 @@ def render_native_spec(config: SystemConfig, policy: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode: str) -> dict:
+def run_automatic(
+    config: SystemConfig, policy_path: Path, output: Path, *, mode: str, task=None
+) -> dict:
     """LIVE MOTOR ENABLE: one bounded hold/sweep, then verified disable/down.
 
     Never retries enable or trajectory after failure. A killed/unconfirmed child
@@ -287,9 +289,16 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
 
     policy_bytes = read_artifact(policy_path)
     policy = json.loads(policy_bytes)
-    rendered = render_native_spec(config, policy)
-    if mode not in ("hold", "sweep", "paired"):
-        raise ValueError("select hold, sweep or paired")
+    if (mode == "task") != (task is not None):
+        raise ValueError("task mode requires a validated task definition")
+    if task is not None:
+        from ..task_runtime import render_task_spec
+
+        rendered = render_task_spec(config, policy, task)
+    else:
+        rendered = render_native_spec(config, policy)
+    if mode not in ("hold", "sweep", "paired", "task"):
+        raise ValueError("select hold, sweep, paired or task")
     if "manual_handling" in policy and mode != "paired":
         raise ValueError("manual handling policy requires paired mode")
     if is_waypoint_policy(policy) and mode == "paired":
@@ -324,7 +333,7 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
         "ft_validated": False,
         "coordinate_kind": "raw_motor_coordinates",
         "external_load_present": None,
-        "feedback_retention": "full",
+        "feedback_retention": "latest" if task is not None else "full",
         "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "disabled_verified": False,
         "events": [],
@@ -334,6 +343,17 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
     configured = False
     stop = False
     old_handlers = {}
+    task_controller = None
+    if task is not None:
+        from ..task_runtime import TaskController
+
+        task_controller = TaskController(config, task, policy, output)
+        report["task"] = task.id
+        report["checkpoint"] = task.expected_checkpoint
+        report["start_pose"] = json.loads(task.start_pose.read_text())
+        # The invoking operator may submit tiny request files; motor ownership
+        # remains exclusively in the existing native child under this lock.
+        os.chown(output, owner_uid, owner_gid)
 
     def request_stop(_sig, _frame):
         nonlocal stop
@@ -352,8 +372,14 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
             str(os.getpid()),
         ]
         child = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, pass_fds=(lock.fileno(),)
+            command,
+            stdin=subprocess.PIPE if which == "task" else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            pass_fds=(lock.fileno(),),
         )
+        if which == "task":
+            os.set_blocking(child.stdin.fileno(), False)
         last_line = time.monotonic()
         startup = True
         termination_at = None
@@ -365,6 +391,7 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
         finish_sent = False
         phase = None
         paired_sent = set()
+        last_task_status = 0.0
         try:
             with (
                 selectors.DefaultSelector() as selector,
@@ -373,6 +400,22 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
                 selector.register(child.stdout, selectors.EVENT_READ)
                 while child.poll() is None:
                     now = time.monotonic()
+                    if which == "task" and failure is None and not stop:
+                        task_controller.service_request()
+                        if task_controller.shutdown_requested:
+                            failure = "operator_shutdown"
+                        else:
+                            line = task_controller.tick(time.monotonic_ns())
+                            if line is not None:
+                                payload = line.encode("ascii")
+                                if os.write(child.stdin.fileno(), payload) != len(payload):
+                                    raise RuntimeError("native task input blocked/partial")
+                        if now - last_task_status >= 0.1:
+                            current = task_controller.status()
+                            temporary = output / "task-status.tmp"
+                            temporary.write_text(json.dumps(current) + "\n")
+                            temporary.replace(output / "task-status.json")
+                            last_task_status = now
                     timeout = (
                         config.teleoperation.startup_timeout_s
                         if startup
@@ -444,6 +487,11 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
                         if not chunk:
                             selector.unregister(key.fileobj)
                             continue
+                        if which == "task" and console.tell() + len(chunk) > 8 * 1024 * 1024:
+                            console.seek(0)
+                            console.truncate()
+                            report["console_retention"] = "latest_8_mib_rotating"
+                            report["console_rotations"] = report.get("console_rotations", 0) + 1
                         console.write(chunk)
                         console.flush()
                         buffer += chunk
@@ -457,6 +505,11 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
                                 continue
                             last_line = time.monotonic()
                             startup = False
+                            if which == "task" and event["state"] == "task_state":
+                                task_controller.on_state(event)
+                                # Feedback remains in the native bounded raw log;
+                                # do not grow an unbounded in-memory event list.
+                                continue
                             if which == "paired" and "phase" in event:
                                 phase = event["phase"]
                             if event["state"] == "disabled":
@@ -502,6 +555,8 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
                     child.kill()
                     child.wait()
             child.stdout.close()
+            if getattr(child, "stdin", None) is not None:
+                child.stdin.close()
 
     try:
         lock = lifecycle._acquire_lifecycle_lock(config, exclusive=True)
@@ -517,12 +572,14 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
         if (
             info["info_data"]["state"] != "STOPPED"
             or any(info["info_data"]["berr_counter"].values())
-            or any(info["info_xstats"].values())
+            or (task is None and any(info["info_xstats"].values()))
         ):
             raise RuntimeError("startup CAN fault; no reset/retry")
         report["can_before"] = baseline
         configured = True
         lifecycle._configure_can(config, endpoint.interface)
+        if task is not None:
+            time.sleep(0.2)  # USB status notification; no probe round is skipped.
         _require_healthy(endpoint.interface, baseline)
         probe = probe_motor_feedback(
             config,
@@ -615,7 +672,7 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
                     read_artifact(output / name)
                 )
         (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
-        if report["status"] == "passed":
+        if report["status"] == "passed" and task is None:
             try:
                 from ..automatic_review import review_automatic
 
@@ -636,6 +693,16 @@ def run_automatic(config: SystemConfig, policy_path: Path, output: Path, *, mode
                 }
             )
         )
+        if task_controller is not None:
+            terminal = task_controller.status()
+            terminal.update(
+                active=False,
+                phase="stopped",
+                disabled_verified=report["disabled_verified"],
+                failure=report.get("error"),
+            )
+            (output / "task-status.json").write_text(json.dumps(terminal) + "\n")
+            task_controller.close()
         for artifact in output.iterdir():
             os.chown(artifact, owner_uid, owner_gid, follow_symlinks=False)
         os.chown(output, owner_uid, owner_gid, follow_symlinks=False)

@@ -1,0 +1,7 @@
+{
+  "kind": "vlai_pose_capture_v1",
+  "settle_ns": 200000000,
+  "maximum_hold_ns": 10000000000,
+  "settle_speed_deg_s": 0.1,
+  "settle_span_deg": 0.05
+}

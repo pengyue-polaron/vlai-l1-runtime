@@ -1,5 +1,7 @@
 // Explicit experimental right-Follower owner. Never runs beside teleoperation.
 #include "automatic_core.hpp"
+#include "automatic_input.hpp"
+#include "task_session_io.hpp"
 #include "passive_feedback_log.hpp"
 #include "runtime_safety.hpp"
 #include <xarm_can_sdk.h>
@@ -18,6 +20,9 @@
 #include <cstring>
 #include <optional>
 #include <atomic>
+#include <fcntl.h>
+#include <deque>
+#include <cerrno>
 
 namespace {
 volatile std::sig_atomic_t stopped=0;
@@ -37,44 +42,8 @@ void check(int result, const char* operation) {
         throw std::runtime_error(std::string(operation)+":"+message);
     }
 }
-struct Input { std::string interface; vlai_l1::AutoSpec spec; };
-Input read_input(const char* path) {
-    std::ifstream f(path); Input input; std::string magic; auto& s=input.spec;
-    f>>magic>>input.interface;
-    const bool multi=magic=="VLAI_RIGHT_FOLLOWER_DIAGNOSTIC_V4";
-    if ((!multi && magic!="VLAI_RIGHT_FOLLOWER_DIAGNOSTIC_V3") || input.interface.size()>=IFNAMSIZ)
-        throw std::runtime_error("invalid diagnostic input");
-    f>>s.amplitude_deg>>s.transition_s>>s.hold_s>>s.hold_test_s>>s.maximum_amplitude_deg
-      >>s.maximum_reference_speed>>s.maximum_reference_acceleration>>s.cycles>>s.rate_hz>>s.capacity
-      >>s.enabled_status>>s.disabled_status>>s.temperature>>s.state_timeout_ns>>s.tracking_timeout_ns
-      >>s.shutdown_timeout_ns>>s.health_poll_ms>>s.priority>>s.active_motor;
-    for (auto& m:s.motors) {
-        unsigned slave=0;
-        f>>m.feedback.name>>m.send_id>>m.feedback.response_id>>slave>>m.motor_type
-         >>m.feedback.position_max_rad>>m.feedback.velocity_max_rad_s>>m.feedback.torque_max_nm
-         >>m.kp>>m.kd>>m.min_deg>>m.max_deg>>m.tracking_deg>>m.speed_deg_s>>m.torque_nm>>m.excursion_deg;
-        if (slave>15) throw std::runtime_error("invalid slave nibble");
-        m.feedback.slave_id=static_cast<std::uint8_t>(slave);
-    }
-    unsigned handling=0;
-    f>>handling;
-    if(handling>1) throw std::runtime_error("invalid handling flag");
-    if(handling) {
-        s.handling.emplace(); auto& h=*s.handling;
-        f>>h.speed_persistence_ns>>h.settle_ns>>h.settle_timeout_ns>>h.settle_speed_deg_s>>h.settle_span_deg;
-        for(auto& speed:h.hard_speed_deg_s) f>>speed;
-    }
-    if(multi) {
-        unsigned count=0; f>>count;
-        if(!f || count<3 || count>64 || s.active_motor!=8)
-            throw std::runtime_error("invalid waypoint count/selection");
-        s.waypoints.resize(count);
-        for(auto& point:s.waypoints) for(auto& value:point) f>>value;
-    }
-    std::string extra;
-    if (!f || (f>>extra)) throw std::runtime_error("truncated/trailing diagnostic input");
-    s.validate(); return input;
-}
+using vlai_l1::Input;
+using vlai_l1::read_input;
 struct Handle {
     xarm_sdk_handle_t h=nullptr;
     ~Handle() { if(h) xarm_sdk_destroy(h); }
@@ -128,14 +97,18 @@ void orphan_link_down(const std::string& interface) {
     if(ioctl(fd,SIOCGIFFLAGS,&req)==0) { req.ifr_flags &= ~IFF_UP; ioctl(fd,SIOCSIFFLAGS,&req); }
     close(fd);
 }
+using vlai_l1::nonblocking;
+using vlai_l1::task_input;
+using vlai_l1::task_output;
+
 }
 int main(int argc,char** argv) {
     // Paths/mode are supplied by the exclusive guarded Python supervisor.
-    if(argc!=6) { std::cerr<<"usage: automatic <spec> <hold|sweep|paired|disable> <raw.csv> <samples.csv> <owner-pid>\n"; return 2; }
+    if(argc!=6) { std::cerr<<"usage: automatic <spec> <hold|sweep|paired|task|disable> <raw.csv> <samples.csv> <owner-pid>\n"; return 2; }
     try {
         if(geteuid()!=0) throw std::runtime_error("root required");
         const std::string mode=argv[2];
-        if(mode!="hold" && mode!="sweep" && mode!="paired" && mode!="disable") throw std::runtime_error("invalid mode");
+        if(mode!="hold" && mode!="sweep" && mode!="paired" && mode!="task" && mode!="disable") throw std::runtime_error("invalid mode");
         const auto owner=std::stoi(argv[5]);
         std::signal(SIGINT,stop_handler); std::signal(SIGTERM,stop_handler);
         std::signal(SIGHUP,stop_handler); std::signal(SIGPIPE,SIG_IGN);
@@ -143,6 +116,8 @@ int main(int argc,char** argv) {
         std::signal(SIGUSR2,advance_handler);
         if(prctl(PR_SET_PDEATHSIG,SIGTERM)!=0 || getppid()!=owner) throw std::runtime_error("supervisor disappeared");
         const auto input=read_input(argv[1]); const auto& spec=input.spec;
+        if((mode=="task")!=input.task.has_value() && mode!="disable") throw std::runtime_error("task mode/spec mismatch");
+        if(mode=="task") { nonblocking(STDIN_FILENO);nonblocking(STDOUT_FILENO); }
         std::optional<vlai_l1::PairedSweep> paired;
         std::optional<vlai_l1::SettlingGate> settling;
         if(spec.handling) {
@@ -155,14 +130,14 @@ int main(int argc,char** argv) {
         Handle sdk; sdk.open(input);
         std::array<std::uint32_t,8> ids{}; for(std::size_t i=0;i<8;++i) ids[i]=spec.motors[i].feedback.response_id;
         vlai_l1::PassiveFeedbackLog log(argv[3],ids,spec.capacity,spec.state_timeout_ns,
-            static_cast<int>(1000/spec.rate_hz),getuid(),getgid());
+            static_cast<int>(1000/spec.rate_hz),getuid(),getgid(),mode=="task");
         log.start(input.interface);
         bool may_be_enabled=false, confirmed_disabled=false, success=false;
         bool requested_completion=false;
         double completion_elapsed=0;
         std::string error;
-        std::vector<std::array<double,26>> samples;
-        samples.reserve(static_cast<std::size_t>(spec.duration(mode=="hold" || paired.has_value())*spec.rate_hz)+2);
+        std::deque<std::array<double,26>> samples;
+        std::uint64_t evicted_samples=0;
         std::array<double,8> reference{};
         try {
             if(mode!="disable") {
@@ -172,8 +147,15 @@ int main(int argc,char** argv) {
             for(const auto& s:feedback) if(s.status_nibble!=spec.disabled_status)
                 throw std::runtime_error("motor not disabled at startup");
             for(std::size_t i=0;i<8;++i) reference[i]=feedback[i].position_rad*vlai_l1::kDegrees;
-            vlai_l1::AutoGuard guard(spec); guard.set_reference(reference);
-            guard.check(now_ns(),feedback,reference,false);
+            std::optional<vlai_l1::AutoGuard> guard;
+            std::optional<vlai_l1::TaskPathGuard> task_guard;
+            if(mode=="task") {
+                task_guard.emplace(spec,reference);
+                task_guard->check_initial(now_ns(),feedback,reference);
+            } else {
+                guard.emplace(spec);guard->set_reference(reference);
+                guard->check(now_ns(),feedback,reference,false);
+            }
             health.check();
             vlai_l1::set_and_require_all_threads_fifo(spec.priority,2);
             if(stopped) throw std::runtime_error("stopped before enable");
@@ -192,6 +174,9 @@ int main(int argc,char** argv) {
                 }
                 if(!ready || stopped) throw std::runtime_error("enable feedback did not become ready");
                 const auto start=now_ns(); auto deadline=start; auto last_health=start; auto last_output=start;
+                std::optional<vlai_l1::TaskSession> task;
+                std::string pending_input;
+                if(mode=="task") task.emplace(spec,*input.task,reference,start);
                 const auto period=1'000'000'000ULL/spec.rate_hz;
                 output("running",start,0,reference);
                 if(paired) output("phase",start,0,reference,paired->name());
@@ -210,17 +195,21 @@ int main(int argc,char** argv) {
                             output("phase",now,elapsed,reference,paired->name());
                         }
                         if(paired->complete()) { success=true; completion_elapsed=elapsed; break; }
-                    } else if(elapsed>=spec.duration(mode=="hold") ||
-                       (mode=="hold" && finish_requested && elapsed>=spec.hold_s)) {
+                    } else if(!task && (elapsed>=spec.duration(mode=="hold") ||
+                       (mode=="hold" && finish_requested && elapsed>=spec.hold_s))) {
                         success=true; completion_elapsed=elapsed;
                         requested_completion=mode=="hold" && finish_requested && elapsed<spec.hold_test_s;
                         break;
                     }
-                    const auto target=spec.target(reference,paired ? paired->local(elapsed) : elapsed,
+                    if(task) task_input(*task,pending_input);
+                    const auto target=task ? task->advance(now_ns()) :
+                        spec.target(reference,paired ? paired->local(elapsed) : elapsed,
                         paired ? paired->waiting() : mode=="hold");
-                    guard.check(now_ns(),feedback,target,true,paired && spec.handling && paired->waiting());
+                    if(task) task_guard->check(now_ns(),feedback,*task);
+                    else guard->check(now_ns(),feedback,target,true,paired && spec.handling && paired->waiting());
                     if(now-last_health>=spec.health_poll_ms*1'000'000ULL) { health.check(); last_health=now; }
                     sdk.send(spec,target);
+                    if(task) {task->mark_sent();task_output(*task,feedback,target);}
                     std::array<double,26> row{}; row[0]=static_cast<double>(now); row[1]=elapsed;
                     std::array<double,8> q{};
                     for(std::size_t i=0;i<8;++i) {
@@ -228,7 +217,8 @@ int main(int argc,char** argv) {
                         row[2+i]=q[i]; row[10+i]=target[i]; row[18+i]=feedback[i].torque_nm;
                     }
                     samples.push_back(row);
-                    if(now-last_output>=spec.health_poll_ms*1'000'000ULL) { output("running",now,elapsed,q,paired ? paired->name() : nullptr); last_output=now; }
+                    if(task && samples.size()>spec.capacity/8) {samples.pop_front();++evicted_samples;}
+                    if(!task && now-last_output>=spec.health_poll_ms*1'000'000ULL) { output("running",now,elapsed,q,paired ? paired->name() : nullptr); last_output=now; }
                     deadline+=period;
                     timespec next{static_cast<time_t>(deadline/1'000'000'000ULL),static_cast<long>(deadline%1'000'000'000ULL)};
                     clock_nanosleep(CLOCK_MONOTONIC,TIMER_ABSTIME,&next,nullptr);
@@ -265,6 +255,7 @@ int main(int argc,char** argv) {
         states<<'\n'<<std::setprecision(17);
         for(const auto& row:samples) { for(std::size_t i=0;i<row.size();++i) states<<(i?",":"")<<row[i]; states<<'\n'; }
         states.close(); if(!states) { success=false; error+="; sample output failed"; }
+        if(input.task) std::cout<<"{\"state\":\"task_samples\",\"evicted_rows\":"<<evicted_samples<<"}"<<std::endl;
         try { log.finish(confirmed_disabled && error.empty() && success); } catch(const std::exception& e) { success=false; error+="; log:"+std::string(e.what()); }
         orphan_link_down(input.interface);
         if(!success || !confirmed_disabled || !error.empty()) { std::cerr<<"FAIL "<<error<<std::endl; return 1; }

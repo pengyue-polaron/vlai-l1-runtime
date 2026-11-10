@@ -1,0 +1,61 @@
+{
+  "kind": "isolated_right_follower_diagnostic_v1",
+  "side": "right",
+  "role": "follower",
+  "active_motor": "joint_4",
+  "amplitude_deg": 16.0,
+  "transition_seconds": 40.0,
+  "hold_seconds": 5.0,
+  "cycles": 1,
+  "hold_test_seconds": 5.0,
+  "maximum_amplitude_deg": 16.0,
+  "maximum_reference_speed_deg_s": 3.0,
+  "maximum_reference_acceleration_deg_s2": 2.4,
+  "maximum_observed_speed_deg_s": [
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    15
+  ],
+  "maximum_tracking_error_deg": [
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    2
+  ],
+  "tracking_persistence_seconds": 0.1,
+  "maximum_motor_torque_nm": [
+    12,
+    12,
+    8,
+    8,
+    3,
+    3,
+    3,
+    3
+  ],
+  "maximum_temperature_c": 70,
+  "maximum_relative_excursion_deg": [
+    3,
+    12,
+    12,
+    18,
+    12,
+    12,
+    12,
+    3
+  ],
+  "enabled_raw_status": 1,
+  "disabled_raw_status": 0,
+  "raw_log_capacity": 600000,
+  "shutdown_confirmation_seconds": 2.0,
+  "description": "Right-Follower task control parameters. Legacy sweep fields are retained for native spec compatibility; task start/return and policy targets define the motion."
+}

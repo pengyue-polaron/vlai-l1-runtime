@@ -16,6 +16,50 @@ check:
     {{ vpy }} -m ruff check .
     {{ vpy }} -m ruff format --check .
 
+# Record a task's stationary Follower pose from the existing teleop state stream.
+capture-start-pose-right task="push-distance":
+    {{ vpy }} -m vlai_l1_runtime.start_pose \
+        --config {{ system_config }} \
+        --stationary-spec {{ repo }}/configs/tasks/pose_capture.json --task-id "{{ task }}"
+
+task-check task="push-distance":
+    {{ vpy }} -m vlai_l1_runtime.cli task check --config {{ system_config }} --task {{ repo }}/configs/tasks/{{ task }}.json
+
+# MOVES HARDWARE. Run this resident command inside Jetson tmux when instructed.
+task-start task output:
+    sudo {{ vpy }} -m vlai_l1_runtime.cli task start --config {{ system_config }} --task {{ repo }}/configs/tasks/{{ task }}.json --output "{{ output }}"
+
+task-status session:
+    {{ vpy }} -m vlai_l1_runtime.cli task status --session "{{ session }}"
+
+task-policy $session $actions="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=()
+    if [[ -n "$actions" ]]; then args=(--actions "$actions"); fi
+    {{ vpy }} -m vlai_l1_runtime.cli task policy --session "$session" "${args[@]}"
+
+# Normal completion returns to the task start and keeps the owner enabled.
+task-finish session:
+    {{ vpy }} -m vlai_l1_runtime.cli task finish --session "{{ session }}"
+
+# Explicit shutdown disables the Follower. This is not normal task completion.
+task-shutdown session:
+    {{ vpy }} -m vlai_l1_runtime.cli task shutdown --session "{{ session }}"
+
+# Real live-IPC observations to pi0 predictions; does not send motor commands.
+setup-inference:
+    {{ uv }} pip install --python {{ vpy }} -r {{ repo }}/configs/inference/requirements.txt
+
+infer-right $task $distance_cm $output $samples="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ vpy }} -m vlai_l1_runtime.pi0_inference \
+        --config {{ system_config }} \
+        --inference {{ repo }}/configs/inference/pi0_right.json \
+        --task "$task" --distance-cm "$distance_cm" \
+        --samples "$samples" --output "$output"
+
 # x_air SDK preparation and commissioning observation
 
 sdk-build:

@@ -4,45 +4,101 @@ Runtime for the VLAI L1 robot: automatic policy execution, teleoperation collect
 cameras and datasets. Jetson source root: /home/nvidia/vlai-l1-runtime.
 Default AI instructions are in [AGENTS.md](AGENTS.md); other documents are feature references.
 
-## Automatic policy execution
+## Inference workflow
 
 Saved Follower start -> move -> hold -> continuous policy -> return and hold.
-The original automatic owner stays enabled across normal stages. Use direct
-pengyue SSH and Jetson tmux. Reuse a healthy running owner and completed setup.
+One automatic motor owner stays enabled throughout these normal stages. Run
+persistent control in Jetson tmux through direct pengyue SSH. Reuse healthy
+services and an existing healthy owner instead of restarting them.
 
-Task definitions: `configs/tasks/<id>.json`. Starts: `data/start_poses/<id>.json`.
-With teleoperation already active and the Follower positioned:
+### Task and start pose
+
+Task definitions live in `configs/tasks/<id>.json`; saved starts live in
+`data/start_poses/<id>.json`. The configured `push-distance` task requests 10 cm
+and pins native `pi0-29999`, its deployment identity and inference/control specs
+in `configs/tasks/push-distance.json`.
+
+A saved start is reusable: teleoperation is only needed when capturing or changing
+the pose. With teleoperation already active and the Follower positioned, run:
 
 ```bash
 just capture-start-pose-right push-distance
 ```
 
 Capture reads measured Follower J1-J7 plus gripper in SDK degrees from existing
-IPC. Settings are in `configs/tasks/pose_capture.json`. End teleoperation while
-parked/supported before starting the separate automatic owner.
+IPC; settings are in `configs/tasks/pose_capture.json`. Before replacing the
+teleoperation owner, park/support the arms because ending teleoperation can
+remove holding effort. The automatic owner then moves from measured position to
+the saved start. Subsequent inference runs do not require teleoperation.
+
+### Services and execution
+
+Inference deployment is on `asus4090` from pengyue (`work-pc` from Jetson), under
+`/data/research/pengyue/vlai-distance-inference-20261108`. The ASUS user systemd
+service is `vlai-pi0-live.service`; server source is
+`scripts/inference/serve_native.py`. Jetson tmux session `vlai-policy-tunnel`
+forwards local port 8808 to `work-pc:8808`, exposing `ws://127.0.0.1:8808`.
+Use `just cameras status` to inspect the persistent camera service and
+`just cameras` to start or reuse it. Check actual service state before restarting.
+
+Before motion, check current motor ownership, the configured Follower CAN identity
+and fresh feedback. Hardware changes can change USB/CAN numbering. Inspect only
+devices needed by the selected task; old logs do not establish current hardware
+health. Use a new output directory for each new owner and retain previous records.
 
 | Command | Purpose |
 |---|---|
 | `just task-check push-distance` | Validate a new or changed task configuration. |
-| `just task-start push-distance SESSION` | Start a new owner; SESSION is a new output directory. |
-| `just task-status SESSION` | Inspect an existing owner when needed. |
+| `just task-start push-distance SESSION` | Start an owner, move to the saved start and hold; SESSION is a new output directory. |
+| `just task-status SESSION` | Inspect owner state and arrival before requesting policy. |
 | `just task-policy SESSION` | Run continuous policy; an optional positive action count is supported. |
-| `just task-finish SESSION` | Return to the saved start and hold. |
+| `just task-finish SESSION` | Return to the saved start and hold without disabling. |
 | `just task-shutdown SESSION` | Explicitly disable and exit. |
 
-These are command references, not a sequence to repeat on every request.
-Policy uses direct 30 Hz absolute joint targets and existing Kp/Kd, with zero
-desired velocity/feedforward torque. Only start/return use smooth trajectories;
-their duration comes from distance and configured reference limits.
-Normal finish retains torque. Fault handling follows the running controller.
+These are lifecycle operations, not checks to repeat indiscriminately. A healthy
+owner already holding at the start can proceed directly to policy. Normal finish
+retains torque; explicit shutdown and fault handling are separate paths.
 
-Inference deployment: `asus4090` from pengyue, `work-pc` from Jetson,
-`/data/research/pengyue/vlai-distance-inference-20261108`.
-Server source: `scripts/inference/serve_native.py`. Native pi0 uses AgentView
-and right-wrist RGB, ordered joint8 degrees and separate `distance_cm`;
-output is horizon32 at 30 Hz. Unified needs its actual force/FK-history interface.
-The selected SSH tunnel provides loopback `ws://127.0.0.1:8808`; the client
-checks checkpoint identity. Camera/model work stays outside the motor loop.
+### Model interface and motor control
+
+Native pi0 consumes AgentView and right-wrist RGB, ordered joint8 degrees and a
+separate `distance_cm`; output is horizon32 at 30 Hz. The client validates
+checkpoint identity. Unified requires its actual force/FK-history interface and
+is not interchangeable with this pi0 configuration. Camera/model work stays
+outside the motor loop.
+
+The 100 Hz motor loop continuously conditions the 30 Hz absolute joint targets
+with a 0.15-second first-order filter and a 20 deg/s reference slew limit
+(`TaskCommandFilter`). It starts from the last commanded holding position without
+resetting at chunk boundaries or dropping holding effort. This introduces lag and
+changes the sent reference; it does not guarantee physical speed. Measured-speed
+and other fault guards remain active. Desired velocity and feedforward torque
+remain zero. Start/return use smooth planned trajectories, with duration calculated
+from distance and configured reference limits.
+
+Optional `position_gains` in the task control JSON sets right-Follower-only Kp/Kd;
+omitted values use system gains. J7 uses 50/0.4. Teleoperation gains are unchanged.
+Telemetry separates `desired_deg` (model/planner) from `reference_deg` (sent
+command). `applied_sequence` identifies the sample selected for filtering, not
+physical arrival at its original target.
+
+### Results and fault diagnosis
+
+Session `task-status.json`, `report.json` and controller logs describe execution
+and cleanup. A current-session pointer identifies a directory, not a live owner.
+Read the actual owner state and fresh feedback. Preserve the native fault when
+diagnosing a stop rather than treating secondary cleanup errors as its cause.
+If communication is lost, a disable request may not be verifiable;
+`disabled_verified: false` must not be interpreted as disabled or holding.
+
+Arrival and sustained execution have been demonstrated with the current gains
+and filtering: `data/task-runs/push-distance-20261110T110947/task-status.json`
+records 470 chunks and 15,008 sent targets (about 8 minutes 20 seconds at 30 Hz).
+That run ended with a shared USB/CAN disconnect and unverified disable, as recorded
+in its `report.json`. These records establish execution, not verified 10 cm block
+displacement or task success. Hardware health must be assessed from current state,
+not this historical fault. Native task/filter and Python task, position-gain and
+supervision tests cover the implementation; rerun affected checks when it changes.
 
 ## Teleoperation and collection
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import math
 import socket
 import struct
@@ -33,9 +34,11 @@ from vlai_l1_runtime.teleoperation.lifecycle import (
     _await_managed_startup_release,
     _decode_can_health,
     _decode_link_is_up,
+    _ensure_can_names,
     _find_competing_control,
     _inactive_can_interfaces,
     _qdisc_drops,
+    _qdisc_safe_to_rename,
     _relay_sidecar_output,
     _remove_orphaned_control_socket,
     _require_can_identity,
@@ -344,6 +347,98 @@ def test_can_health_and_physical_identity_are_exact(tmp_path: Path) -> None:
     (interface / "device").symlink_to(wrong_device)
     with pytest.raises(RuntimeError, match="USB identity mismatch"):
         _require_can_identity(config, "can1", sysfs_root=tmp_path)
+
+
+@pytest.mark.parametrize("bus_off", [0, 1])
+def test_can_name_recovery_requires_complete_error_free_idle_set(
+    tmp_path: Path, monkeypatch, bus_off: int
+) -> None:
+    config = load_system_config(SYSTEM_CONFIG)
+    config = replace(
+        config,
+        teleoperation=replace(config.teleoperation, state_socket_path=tmp_path / "state.sock"),
+    )
+    net = tmp_path / "sys/class/net"
+    net.mkdir(parents=True)
+    driver = tmp_path / "sys/bus/usb/drivers/peak_usb"
+    driver.mkdir(parents=True)
+    for index, endpoint in enumerate(config.can.endpoints):
+        device = tmp_path / "sys/devices" / endpoint.parentdev
+        device.mkdir(parents=True)
+        (device / "driver").symlink_to(driver)
+        source = net / f"can{(index + 1) % 4}"
+        source.mkdir()
+        (source / "type").write_text("280\n", encoding="ascii")
+        (source / "device").symlink_to(device)
+
+    gadget = tmp_path / "sys/devices/gadget"
+    gadget.mkdir()
+    usb_network = net / "usb1"
+    usb_network.mkdir()
+    (usb_network / "type").write_text("1\n", encoding="ascii")
+    (usb_network / "device").symlink_to(gadget)
+
+    calls: list[tuple[str, ...]] = []
+
+    def fake_run(command, **_kwargs):
+        command = tuple(command)
+        calls.append(command)
+        if command[1:3] == ("-j", "-details"):
+            payload = [
+                {
+                    "flags": ["NOARP"],
+                    "linkinfo": {
+                        "info_data": {"state": "STOPPED", "berr_counter": {"tx": 0, "rx": 0}},
+                        "info_xstats": {
+                            "restarts": 0,
+                            "bus_error": 0,
+                            "arbitration_lost": 0,
+                            "error_warning": 0,
+                            "error_passive": 0,
+                            "bus_off": bus_off,
+                        },
+                    },
+                    "stats64": {
+                        "rx": {"errors": 0, "dropped": 0},
+                        "tx": {"errors": 0, "dropped": 0},
+                    },
+                }
+            ]
+            return subprocess.CompletedProcess(command, 0, json.dumps(payload))
+        (net / command[3]).rename(net / command[5])
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(lifecycle_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(lifecycle_module, "_process_arguments", lambda: ())
+    monkeypatch.setattr(lifecycle_module, "_qdisc_safe_to_rename", lambda _name: True)
+    monkeypatch.setattr(lifecycle_module, "_read_link_is_up", lambda _name: False)
+
+    if bus_off:
+        with pytest.raises(RuntimeError, match="is UP or has errors"):
+            _ensure_can_names(config, sysfs_root=tmp_path / "sys")
+        assert not any(command[1:3] == ("link", "set") for command in calls)
+    else:
+        _ensure_can_names(config, sysfs_root=tmp_path / "sys")
+        for endpoint in config.can.endpoints:
+            assert (
+                _require_can_identity(config, endpoint.interface, sysfs_root=tmp_path / "sys")
+                == endpoint.parentdev
+            )
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [("[]", True), ('[{"drops":0}]', True), ('[{"drops":1}]', False), ("{}", False)],
+)
+def test_can_name_recovery_handles_down_link_qdisc(
+    monkeypatch, payload: str, expected: bool
+) -> None:
+    monkeypatch.setattr(
+        lifecycle_module.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, payload),
+    )
+    assert _qdisc_safe_to_rename("can2") is expected
 
 
 def test_sidecar_ready_output_is_relayed(capsys) -> None:

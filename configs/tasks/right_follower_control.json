@@ -2,6 +2,10 @@
   "kind": "isolated_right_follower_diagnostic_v1",
   "side": "right",
   "role": "follower",
+  "position_gains": {
+    "kp": [240, 240, 240, 240, 24, 31, 50, 16],
+    "kd": [3, 3, 3, 3, 0.2, 0.2, 0.4, 0.2]
+  },
   "active_motor": "joint_4",
   "amplitude_deg": 16.0,
   "transition_seconds": 40.0,
@@ -19,7 +23,7 @@
     50,
     50,
     50,
-    15
+    50
   ],
   "maximum_tracking_error_deg": [
     3,

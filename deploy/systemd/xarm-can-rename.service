@@ -1,0 +1,12 @@
+[Unit]
+Description=VLAI L1 stable PEAK USB CAN interface naming
+After=systemd-modules-load.service systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vlai-l1-can-rename /home/nvidia/vlai-l1-runtime/configs/system/vlai_l1.toml
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

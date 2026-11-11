@@ -203,6 +203,7 @@ def run_xair_side(
     lifecycle_lock = _acquire_lifecycle_lock(config, exclusive=isolated_side)
     try:
         _require_exclusive_control(interfaces)
+        _ensure_can_names(config)
         inactive_interfaces = _require_inactive_side_off(config, side) if isolated_side else ()
         remove_orphaned_xair_control_socket(config, side)
     except BaseException:
@@ -658,6 +659,140 @@ def _configured_parentdev(config: SystemConfig, interface: str) -> str:
     return matches[0]
 
 
+def _ensure_can_names(config: SystemConfig, *, sysfs_root: Path = Path("/sys")) -> None:
+    """Restore tracked names only for a complete, idle, error-free PEAK set."""
+
+    lock_path = config.teleoperation.state_socket_path.with_name("teleop-can-naming.lock")
+    descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise RuntimeError("CAN naming lock is not a regular file")
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        endpoints = config.can.endpoints
+        expected = {endpoint.parentdev: endpoint.interface for endpoint in endpoints}
+        sources: dict[str, str] = {}
+        for entry in (sysfs_root / "class/net").iterdir():
+            try:
+                # ARPHRD_CAN; unrelated USB network gadgets need not have a driver link.
+                if (entry / "type").read_text(encoding="ascii").strip() != "280":
+                    continue
+            except OSError:
+                continue
+            device_link = entry / "device"
+            if not device_link.exists():
+                continue
+            try:
+                device = device_link.resolve(strict=True)
+                driver = (device / "driver").resolve(strict=True)
+            except OSError as exc:
+                raise RuntimeError(f"cannot resolve {entry.name} physical identity") from exc
+            if driver.name == "peak_usb":
+                if device.name in sources:
+                    raise RuntimeError(f"duplicate PEAK USB identity: {device.name}")
+                sources[device.name] = entry.name
+        if set(sources) != set(expected):
+            raise RuntimeError(
+                "CAN USB adapters missing or unexpected; automatic naming refused: "
+                f"missing={sorted(set(expected) - set(sources))}, "
+                f"unexpected={sorted(set(sources) - set(expected))}"
+            )
+        if all(sources[parent] == name for parent, name in expected.items()):
+            return
+        for name in expected.values():
+            if (sysfs_root / "class/net" / name).exists() and name not in sources.values():
+                raise RuntimeError(f"CAN naming refused: {name} belongs to another device")
+        competing = _find_competing_control(tuple(expected.values()), _process_arguments())
+        if competing is not None:
+            raise RuntimeError(f"CAN naming refused while a controller is running: {competing}")
+        for source in sources.values():
+            result = subprocess.run(
+                ("ip", "-j", "-details", "-statistics", "link", "show", "dev", source),
+                check=True,
+                capture_output=True,
+                text=True,
+                start_new_session=True,
+            )
+            if not _can_link_safe_to_rename(result.stdout):
+                raise RuntimeError(f"CAN naming refused: {source} is UP or has errors")
+            if not _qdisc_safe_to_rename(source):
+                raise RuntimeError(f"CAN naming refused: {source} has qdisc drops")
+        for index, _endpoint in enumerate(endpoints):
+            temp = f"vlai_can_tmp{index}"
+            if (sysfs_root / "class/net" / temp).exists():
+                raise RuntimeError(f"CAN naming temporary interface exists: {temp}")
+        for index, endpoint in enumerate(endpoints):
+            source = sources[endpoint.parentdev]
+            temp = f"vlai_can_tmp{index}"
+            subprocess.run(("ip", "link", "set", source, "name", temp), check=True)
+        for index, endpoint in enumerate(endpoints):
+            subprocess.run(
+                ("ip", "link", "set", f"vlai_can_tmp{index}", "name", endpoint.interface),
+                check=True,
+            )
+        for endpoint in endpoints:
+            _require_can_identity(config, endpoint.interface, sysfs_root=sysfs_root)
+            if _read_link_is_up(endpoint.interface):
+                raise RuntimeError(f"CAN naming left {endpoint.interface} UP")
+        console.success("CAN names restored from tracked USB physical identities")
+    finally:
+        os.close(descriptor)
+
+
+def _can_link_safe_to_rename(payload: str) -> bool:
+    try:
+        entries = json.loads(payload)
+        if len(entries) != 1:
+            return False
+        entry = entries[0]
+        data = entry["linkinfo"]["info_data"]
+        counters = data["berr_counter"]
+        xstats = entry["linkinfo"]["info_xstats"]
+        stats = entry["stats64"]
+        return (
+            "UP" not in entry["flags"]
+            and data["state"] == "STOPPED"
+            and counters["tx"] == counters["rx"] == 0
+            and all(
+                xstats[key] == 0
+                for key in (
+                    "restarts",
+                    "bus_error",
+                    "arbitration_lost",
+                    "error_warning",
+                    "error_passive",
+                    "bus_off",
+                )
+            )
+            and stats["rx"]["errors"] == stats["rx"]["dropped"] == 0
+            and stats["tx"]["errors"] == stats["tx"]["dropped"] == 0
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def _qdisc_safe_to_rename(interface: str) -> bool:
+    result = subprocess.run(
+        ("tc", "-j", "-s", "qdisc", "show", "dev", interface),
+        check=True,
+        capture_output=True,
+        text=True,
+        start_new_session=True,
+        timeout=0.25,
+    )
+    try:
+        entries = json.loads(result.stdout)
+        # A DOWN interface may have no qdisc and tc returns [].
+        return entries == [] or (
+            isinstance(entries, list)
+            and len(entries) == 1
+            and isinstance(entries[0], dict)
+            and type(entries[0].get("drops")) is int
+            and entries[0]["drops"] == 0
+        )
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
 def _require_can_identity(
     config: SystemConfig,
     interface: str,
@@ -769,7 +904,11 @@ def _find_competing_control(
         if not arguments:
             continue
         executable = Path(arguments[0]).name
-        if executable in ("unilateral_control", "vlai_l1_automatic_follower"):
+        if executable in (
+            "unilateral_control",
+            "vlai_l1_automatic_follower",
+            "vlai_native_reference_owner",
+        ):
             return " ".join(arguments)
         if executable != "vlai_l1_xair_sidecar":
             continue

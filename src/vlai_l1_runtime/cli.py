@@ -102,11 +102,15 @@ def build_parser() -> argparse.ArgumentParser:
         child = task_sub.add_parser(name)
         child.add_argument("--config", type=Path, required=True)
         child.add_argument("--task", type=Path, required=True)
+        if name == "record-start":
+            child.add_argument("--replace", action="store_true")
         if name == "import-start":
             child.add_argument("--source", type=Path, required=True)
         if name == "start":
             child.add_argument("--output", type=Path, required=True)
-    for name in ("status", "policy", "finish", "shutdown"):
+    capture_park = task_sub.add_parser("record-park")
+    capture_park.add_argument("--config", type=Path, required=True)
+    for name in ("status", "policy", "finish", "park", "shutdown"):
         child = task_sub.add_parser(name)
         child.add_argument("--session", type=Path, required=True)
         if name == "policy":
@@ -164,6 +168,12 @@ def build_parser() -> argparse.ArgumentParser:
     leader_feedback.add_argument("--config", type=Path, required=True)
     leader_feedback.add_argument("--side", choices=("left", "right"), required=True)
     leader_feedback.add_argument("--output", type=Path, required=True)
+    for capture_parser in (feedback, leader_feedback):
+        capture_parser.add_argument(
+            "--read-control-modes-only",
+            action="store_true",
+            help="LIVE read-only: all eight right-side CTRL_MODE registers; no SDK or state probe",
+        )
     redecode = subparsers.add_parser(
         "redecode-follower-feedback",
         help="OFFLINE: compare saved raw feedback decoded with tracked ranges against SDK values",
@@ -268,6 +278,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     else None
                 ),
                 role="leader" if args.command == "capture-leader-feedback" else "follower",
+                control_modes_only=args.read_control_modes_only,
             )
             console.success(f"Motor feedback saved: {report}")
             return 0
@@ -669,18 +680,28 @@ def _run_camera_service_command(args: argparse.Namespace) -> int:
 
 
 def _run_task_command(args):
-    if args.task_command in ("status", "policy", "finish", "shutdown"):
+    if args.task_command == "record-park":
+        from .parking_pose import capture_parking_pose
+
+        path = capture_parking_pose(load_system_config(args.config))
+        print(json.dumps({"saved": str(path)}))
+        return 0
+    if args.task_command in ("status", "policy", "finish", "park", "shutdown"):
         status_path = args.session / "task-status.json"
         status = json.loads(status_path.read_text())
         if args.task_command == "status":
             # A saved file alone never proves a resident owner is still alive.
             import os
+            from contextlib import suppress
 
             pid = status.get("owner_pid")
             native = status.get("native") or {}
             stamp = native.get("monotonic_ns", 0)
             try:
-                os.kill(int(pid), 0)
+                # A sudo-owned controller can exist without signal permission.
+                # Still require fresh controller feedback below.
+                with suppress(PermissionError):
+                    os.kill(int(pid), 0)
                 alive = 0 <= time.monotonic_ns() - stamp < 1_000_000_000
             except (OSError, TypeError, ValueError):
                 alive = False
@@ -689,6 +710,10 @@ def _run_task_command(args):
             return 0 if alive else 1
         if status.get("phase") == "stopped":
             raise ValueError("task session is stopped")
+        if args.task_command == "park":
+            native = status.get("native") or {}
+            if not 0 <= time.monotonic_ns() - native.get("monotonic_ns", 0) < 1_000_000_000:
+                raise ValueError("parking requires fresh task owner status")
         request = {"operation": args.task_command}
         if args.task_command == "policy":
             request["actions"] = args.actions
@@ -732,7 +757,7 @@ def _run_task_command(args):
         )
     elif args.task_command == "record-start":
         spec = CaptureSpec.load(task.root / "configs/tasks/pose_capture.json")
-        record = capture_pose(config, spec, task_id=task.id)
+        record = capture_pose(config, spec, task_id=task.id, replace=args.replace)
         print(json.dumps({"saved": str(task.start_pose), "follower_deg": record["follower_deg"]}))
     elif args.task_command == "import-start":
         record = import_task_pose(config, task.id, args.source)

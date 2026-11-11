@@ -2,6 +2,7 @@
 #include "automatic_core.hpp"
 #include "automatic_input.hpp"
 #include "task_session_io.hpp"
+#include "task_command_filter.hpp"
 #include "passive_feedback_log.hpp"
 #include "runtime_safety.hpp"
 #include <xarm_can_sdk.h>
@@ -177,6 +178,7 @@ int main(int argc,char** argv) {
                 std::optional<vlai_l1::TaskSession> task;
                 std::string pending_input;
                 if(mode=="task") task.emplace(spec,*input.task,reference,start);
+                vlai_l1::TaskCommandFilter task_filter(reference,start,spec.rate_hz);
                 const auto period=1'000'000'000ULL/spec.rate_hz;
                 output("running",start,0,reference);
                 if(paired) output("phase",start,0,reference,paired->name());
@@ -202,10 +204,11 @@ int main(int argc,char** argv) {
                         break;
                     }
                     if(task) task_input(*task,pending_input);
-                    const auto target=task ? task->advance(now_ns()) :
+                    const auto requested=task ? task->advance(now_ns()) :
                         spec.target(reference,paired ? paired->local(elapsed) : elapsed,
                         paired ? paired->waiting() : mode=="hold");
-                    if(task) task_guard->check(now_ns(),feedback,*task);
+                    const auto target=task ? task_filter.advance(requested,now_ns()) : requested;
+                    if(task) task_guard->check_command(now_ns(),feedback,target);
                     else guard->check(now_ns(),feedback,target,true,paired && spec.handling && paired->waiting());
                     if(now-last_health>=spec.health_poll_ms*1'000'000ULL) { health.check(); last_health=now; }
                     sdk.send(spec,target);

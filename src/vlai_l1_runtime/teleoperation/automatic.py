@@ -175,7 +175,7 @@ def validate_policy(config: SystemConfig, policy: dict) -> None:
                 raise ValueError("invalid manual handling envelope")
 
 
-def render_native_spec(config: SystemConfig, policy: dict) -> str:
+def render_native_spec(config: SystemConfig, policy: dict, *, position_gains=None) -> str:
     """Only pure rendering; all identities/gains/ranges/bounds come from config."""
     validate_policy(config, policy)
     endpoint = next(e for e in config.can.endpoints if e.side == "right" and e.role == "follower")
@@ -208,6 +208,23 @@ def render_native_spec(config: SystemConfig, policy: dict) -> str:
     ]
     bounds = config.teleoperation.joint_safety.for_side("right")
     gains = config.control["follower"]
+    kp, kd = gains.kp, gains.kd
+    if position_gains is not None:
+        if type(position_gains) is not dict or set(position_gains) != {"kp", "kd"}:
+            raise ValueError("position gains require kp and kd")
+        for name, maximum in (("kp", 500), ("kd", 5)):
+            values = position_gains[name]
+            if (
+                type(values) is not list
+                or len(values) != 8
+                or any(
+                    type(v) not in (int, float) or not math.isfinite(v) or not 0 < v <= maximum
+                    for v in values
+                )
+            ):
+                raise ValueError(f"eight positive {name} values within MIT range required")
+        kp = tuple(map(float, position_gains["kp"]))
+        kd = tuple(map(float, position_gains["kd"]))
     for i, (motor, profile) in enumerate(
         zip(config.motors, config.follower_feedback.right, strict=True)
     ):
@@ -229,8 +246,8 @@ def render_native_spec(config: SystemConfig, policy: dict) -> str:
                         profile.position_max_rad,
                         profile.velocity_max_rad_s,
                         profile.torque_max_nm,
-                        gains.kp[i],
-                        gains.kd[i],
+                        kp[i],
+                        kd[i],
                         lo,
                         hi,
                         policy["maximum_tracking_error_deg"][i],
@@ -392,15 +409,71 @@ def run_automatic(
         phase = None
         paired_sent = set()
         last_task_status = 0.0
+        task_health = None
         try:
+            if which == "task":
+                from .task_health import TaskHealthMonitor
+
+                task_health = TaskHealthMonitor(
+                    lambda: _require_healthy(endpoint.interface, health_baseline),
+                    interval_s=config.teleoperation.can_health_poll_s,
+                    timeout_s=config.safety.session_liveness_timeout_s,
+                )
             with (
                 selectors.DefaultSelector() as selector,
                 (output / f"{which}_console.log").open("xb") as console,
             ):
                 selector.register(child.stdout, selectors.EVENT_READ)
                 while child.poll() is None:
+                    for key, _mask in selector.select(timeout=0.02):
+                        chunk = os.read(key.fd, 65536)
+                        if not chunk:
+                            selector.unregister(key.fileobj)
+                            continue
+                        if which == "task" and console.tell() + len(chunk) > 8 * 1024 * 1024:
+                            console.seek(0)
+                            console.truncate()
+                            report["console_retention"] = "latest_8_mib_rotating"
+                            report["console_rotations"] = report.get("console_rotations", 0) + 1
+                        console.write(chunk)
+                        console.flush()
+                        buffer += chunk
+                        while b"\n" in buffer:
+                            line, buffer = buffer.split(b"\n", 1)
+                            try:
+                                event = json.loads(line)
+                            except (ValueError, UnicodeDecodeError):
+                                continue
+                            if not isinstance(event, dict) or "state" not in event:
+                                continue
+                            last_line = time.monotonic()
+                            startup = False
+                            if which == "task" and event["state"] == "task_state":
+                                task_controller.on_state(event)
+                                # Feedback remains in the native bounded raw log;
+                                # do not grow an unbounded in-memory event list.
+                                continue
+                            if which == "paired" and "phase" in event:
+                                phase = event["phase"]
+                            if event["state"] == "disabled":
+                                disabled = True
+                                if disabled_at is None:
+                                    disabled_at = last_line
+                            report["events"].append(event)
+                            temporary = output / "status.tmp"
+                            temporary.write_text(json.dumps(event))
+                            temporary.replace(output / "status.json")
+                            if event["state"] != "running":
+                                print(json.dumps(event), flush=True)
+                        if len(buffer) > 65536:
+                            raise RuntimeError("native output line too long")
                     now = time.monotonic()
-                    if which == "task" and failure is None and not stop:
+                    if task_health is not None and not disabled and failure is None:
+                        try:
+                            task_health.check()
+                        except Exception as exc:
+                            failure = f"health:{exc}"
+                    if which == "task" and not disabled and failure is None and not stop:
                         task_controller.service_request()
                         if task_controller.shutdown_requested:
                             failure = "operator_shutdown"
@@ -462,7 +535,7 @@ def run_automatic(
                                 failure = "native_finalization_timeout"
                         elif now - last_line > timeout:
                             failure = "native_heartbeat_timeout"
-                    if now >= next_health and failure is None:
+                    if task_health is None and now >= next_health and failure is None:
                         try:
                             _require_healthy(endpoint.interface, health_baseline)
                             lifecycle._require_interfaces_down(
@@ -482,48 +555,6 @@ def run_automatic(
                         failure = f"{failure};forced_kill"
                         child.wait()
                         break
-                    for key, _mask in selector.select(timeout=0.02):
-                        chunk = os.read(key.fd, 65536)
-                        if not chunk:
-                            selector.unregister(key.fileobj)
-                            continue
-                        if which == "task" and console.tell() + len(chunk) > 8 * 1024 * 1024:
-                            console.seek(0)
-                            console.truncate()
-                            report["console_retention"] = "latest_8_mib_rotating"
-                            report["console_rotations"] = report.get("console_rotations", 0) + 1
-                        console.write(chunk)
-                        console.flush()
-                        buffer += chunk
-                        while b"\n" in buffer:
-                            line, buffer = buffer.split(b"\n", 1)
-                            try:
-                                event = json.loads(line)
-                            except (ValueError, UnicodeDecodeError):
-                                continue
-                            if not isinstance(event, dict) or "state" not in event:
-                                continue
-                            last_line = time.monotonic()
-                            startup = False
-                            if which == "task" and event["state"] == "task_state":
-                                task_controller.on_state(event)
-                                # Feedback remains in the native bounded raw log;
-                                # do not grow an unbounded in-memory event list.
-                                continue
-                            if which == "paired" and "phase" in event:
-                                phase = event["phase"]
-                            if event["state"] == "disabled":
-                                disabled = True
-                                if disabled_at is None:
-                                    disabled_at = last_line
-                            report["events"].append(event)
-                            temporary = output / "status.tmp"
-                            temporary.write_text(json.dumps(event))
-                            temporary.replace(output / "status.json")
-                            if event["state"] != "running":
-                                print(json.dumps(event), flush=True)
-                        if len(buffer) > 65536:
-                            raise RuntimeError("native output line too long")
                 # Native disable marker is emitted before final file output and exit.
                 remaining = child.stdout.read()
                 console.write(remaining)
@@ -557,6 +588,9 @@ def run_automatic(
             child.stdout.close()
             if getattr(child, "stdin", None) is not None:
                 child.stdin.close()
+            if task_health is not None:
+                task_health.close()
+                report["maximum_os_health_check_s"] = task_health.maximum_check_s
 
     try:
         lock = lifecycle._acquire_lifecycle_lock(config, exclusive=True)

@@ -1,0 +1,12 @@
+[Unit]
+Description=VLAI L1 CPU performance governor
+After=nvpmodel.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vlai-l1-cpu-performance start
+ExecStop=/usr/local/sbin/vlai-l1-cpu-performance stop
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

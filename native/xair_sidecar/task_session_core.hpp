@@ -34,7 +34,7 @@ inline TaskCommand parse_task_command(const std::string& line) {
     for(auto& q:c.target) in>>q;
     if(!in || (in>>extra) || magic!="VLAI_TASK_V1" || !c.sequence || !c.source_ns ||
        !c.observation_ns || !std::isfinite(c.duration_s) ||
-       (c.operation!="start" && c.operation!="target" && c.operation!="return" &&
+       (c.operation!="start" && c.operation!="target" && c.operation!="return" && c.operation!="park" &&
         c.operation!="hold" && c.operation!="heartbeat"))
         throw std::runtime_error("invalid task command");
     for(double q:c.target) if(!std::isfinite(q)) throw std::runtime_error("nonfinite task target");
@@ -194,6 +194,10 @@ public:
     }
     void check(std::uint64_t now,const std::array<DecodedFeedback,8>& states,const TaskSession& task) {
         guard_.check_impl(now,states,task.reference(),true,false,true);
+    }
+    void check_command(std::uint64_t now,const std::array<DecodedFeedback,8>& states,
+                       const std::array<double,8>& command) {
+        guard_.check_impl(now,states,command,true,false,true);
     }
 private:
     AutoGuard guard_;

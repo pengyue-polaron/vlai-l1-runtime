@@ -28,6 +28,8 @@ def _link(interface: str) -> dict[str, Any]:
         check=True,
         capture_output=True,
         text=True,
+        timeout=0.25,
+        start_new_session=True,
     )
     entries = json.loads(result.stdout)
     if len(entries) != 1 or entries[0].get("ifname") != interface:
@@ -76,12 +78,14 @@ def capture_follower_feedback(
     output: Path,
     parameter_motor: str | None = None,
     role: str = "follower",
+    control_modes_only: bool = False,
 ) -> Path:
     """One configured probe window per selected motor role, then close owned links.
 
     This is a live query operation. It must only be called after operator
     authorization. Existing output directories and active controllers are refused.
     No retry, enable, disable, reset or teleoperation constructor is used.
+    Mode-only capture skips the SDK and reads all eight CTRL_MODE registers.
     The optional single-motor parameter stage uses only allowlisted read queries
     after successful state feedback and SDK-handle release. It needs separate
     operator authorization from a previous state-only diagnostic.
@@ -91,29 +95,35 @@ def capture_follower_feedback(
         raise ValueError("select distinct left/right motor sides")
     if role not in ("leader", "follower"):
         raise ValueError("select leader or follower motor role")
-    if parameter_motor is not None and (
-        role != "follower" or parameter_motor not in MOTOR_NAMES or len(sides) != 1
-    ):
-        raise ValueError("parameter reads require exactly one Follower side and one named motor")
+    if parameter_motor is not None and (parameter_motor not in MOTOR_NAMES or len(sides) != 1):
+        raise ValueError("parameter reads require exactly one selected side and one named motor")
+    if control_modes_only and (sides != ("right",) or parameter_motor is not None):
+        raise ValueError("mode-only capture requires right side without a parameter survey")
     if os.geteuid() != 0:
         raise RuntimeError("motor feedback capture requires root")
-    dependency = verify_xair_dependency(config)
+    dependency = None if control_modes_only else verify_xair_dependency(config)
     endpoints = tuple(
         next(e for e in config.can.endpoints if e.side == side and e.role == role) for side in sides
     )
     output.mkdir(parents=True, exist_ok=False)
     report: dict[str, Any] = {
-        "schema_version": 3 if parameter_motor is not None else 2,
+        "schema_version": 4 if control_modes_only else (3 if parameter_motor is not None else 2),
         "status": "failed",
         "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "config_sha256": hashlib.sha256(config.path.read_bytes()).hexdigest(),
-        "sdk_revision": dependency.revision,
-        "can_library_sha256": dependency.can_library_sha256,
-        "timestamp_kind": "host_sdk_cache_read_completion_monotonic_ns",
+        "sdk_revision": dependency.revision if dependency else None,
+        "can_library_sha256": dependency.can_library_sha256 if dependency else None,
+        "control_modes_only": control_modes_only,
+        "sdk_constructor_used": False if control_modes_only else None,
+        "timestamp_kind": (
+            "host_socket_dequeue_monotonic_ns"
+            if control_modes_only
+            else "host_sdk_cache_read_completion_monotonic_ns"
+        ),
         "raw_timestamp_kind": "host_socket_dequeue_monotonic_ns_not_hardware_time",
         "coordinate_kind": "raw_motor_coordinates_unverified",
         "motor_role": role,
-        "torque_kind": "sdk_estimate_nm_unvalidated",
+        "torque_kind": None if control_modes_only else "sdk_estimate_nm_unvalidated",
         "ft_validated": False,
         "motion_authorized": False,
         "endpoints": [],
@@ -171,6 +181,45 @@ def capture_follower_feedback(
                 owned.append(interface)  # Also clean up partially failed configuration.
                 lifecycle._configure_can(config, interface)
                 _require_healthy(interface, baseline)
+
+                if control_modes_only:
+                    from .parameter_probe import read_motor_control_mode
+
+                    entry["parameter_reads"] = []
+                    deadline_ns = time.monotonic_ns() + int(
+                        config.teleoperation.motor_probe_duration_s * 1e9
+                    )
+
+                    def mode_health(
+                        *, interface=interface, baseline=baseline, deadline_ns=deadline_ns
+                    ) -> None:
+                        _require_healthy(interface, baseline)
+                        if time.monotonic_ns() >= deadline_ns:
+                            raise TimeoutError("mode-only endpoint deadline expired")
+
+                    with (output / "parameters.jsonl").open("x", encoding="utf-8") as params:
+
+                        def record_mode(reading: dict[str, Any], *, entry=entry) -> None:
+                            params.write(json.dumps(reading) + "\n")
+                            params.flush()
+                            entry["parameter_reads"].append(reading)
+
+                        for motor in config.motors:
+                            read_motor_control_mode(
+                                config,
+                                interface,
+                                motor,
+                                role=role,
+                                check_health=mode_health,
+                                on_reading=record_mode,
+                                endpoint_deadline_ns=deadline_ns,
+                            )
+                    _require_healthy(interface, baseline)
+                    entry["after"] = _link(interface)
+                    entry["qdisc_drops"] = lifecycle._qdisc_drops(interface)
+                    _down(interface)
+                    owned.remove(interface)
+                    continue
 
                 def on_feedback(
                     round_index: int,
@@ -254,6 +303,7 @@ def capture_follower_feedback(
                             motor,
                             check_health=partial(_require_healthy, interface, baseline),
                             on_reading=on_reading,
+                            role=role,
                         )
                 _require_healthy(interface, baseline)
                 entry["after"] = _link(interface)

@@ -16,7 +16,12 @@ from typing import Any
 
 from ..configuration import MotorConfig, SystemConfig
 from ..feedback import RawMotorFrame
-from ..motor_parameters import ParameterRead, ReadRegister
+from ..motor_parameters import (
+    DEFAULT_READ_REGISTERS,
+    ParameterRead,
+    ReadRegister,
+    require_mit_mode,
+)
 
 _SO_RXQ_OVFL = 40  # Linux socket ABI, not a robot-specific setting.
 _CAN_RAW_ERR_FILTER = 2
@@ -110,6 +115,9 @@ def read_motor_parameters(
     *,
     check_health: Callable[[], None],
     on_reading: Callable[[dict[str, Any]], None],
+    role: str = "follower",
+    registers: tuple[ReadRegister, ...] = DEFAULT_READ_REGISTERS,
+    endpoint_deadline_ns: int | None = None,
     _backend_factory: Any = _ParameterSocket,
 ) -> None:
     """Live read-only protocol transactions, no retry or state-changing opcode.
@@ -118,16 +126,31 @@ def read_motor_parameters(
     guarded caller owns interface identity, lock, down/cleanup and authorization.
     This helper is not a standalone hardware entry point.
     """
-    if motor not in config.motors or not any(
-        endpoint.interface == interface and endpoint.role == "follower"
-        for endpoint in config.can.endpoints
+    if (
+        role not in ("follower", "leader")
+        or motor not in config.motors
+        or not any(
+            endpoint.interface == interface and endpoint.role == role
+            for endpoint in config.can.endpoints
+        )
     ):
-        raise ValueError("parameter query requires a configured Follower/motor")
+        raise ValueError("parameter query requires the explicit configured role/motor")
+    if (
+        not isinstance(registers, tuple)
+        or not registers
+        or any(not isinstance(register, ReadRegister) for register in registers)
+        or len(set(registers)) != len(registers)
+    ):
+        raise ValueError("parameter reads require distinct allowlisted registers")
     requests = tuple(
         ParameterRead(motor.name, motor.send_id, motor.receive_id, register)
-        for register in ReadRegister
+        for register in registers
     )
     deadline_ns = time.monotonic_ns() + int(config.teleoperation.motor_probe_duration_s * 1e9)
+    if endpoint_deadline_ns is not None:
+        if type(endpoint_deadline_ns) is not int or endpoint_deadline_ns <= 0:
+            raise ValueError("endpoint deadline must be a positive monotonic timestamp")
+        deadline_ns = min(deadline_ns, endpoint_deadline_ns)
     period_ns = int(1e9 / config.teleoperation.motor_probe_rate_hz)
     with _backend_factory(interface, motor, can_fd=config.can.fd) as backend:
         for request in requests:
@@ -139,3 +162,40 @@ def read_motor_parameters(
             )
             check_health()
             on_reading(result)
+
+
+def read_motor_control_mode(
+    config: SystemConfig,
+    interface: str,
+    motor: MotorConfig,
+    *,
+    check_health: Callable[[], None],
+    on_reading: Callable[[dict[str, Any]], None],
+    role: str = "follower",
+    endpoint_deadline_ns: int | None = None,
+    _backend_factory: Any = _ParameterSocket,
+) -> None:
+    """Explicit guarded mode-only read; preserve evidence before checking MIT.
+
+    No SDK/OpenArm initializer, mode write, enable, disable or motion command.
+    The caller owns endpoint identity, exclusivity, authorization and cleanup,
+    exactly as for read_motor_parameters. This is not a live entry point.
+    """
+
+    def accept(reading: dict[str, Any]) -> None:
+        on_reading(reading)
+        if reading.get("register") != "CTRL_MODE":
+            raise ValueError("missing CTRL_MODE reply")
+        require_mit_mode(reading.get("value"))
+
+    read_motor_parameters(
+        config,
+        interface,
+        motor,
+        check_health=check_health,
+        on_reading=accept,
+        role=role,
+        registers=(ReadRegister.CTRL_MODE,),
+        endpoint_deadline_ns=endpoint_deadline_ns,
+        _backend_factory=_backend_factory,
+    )

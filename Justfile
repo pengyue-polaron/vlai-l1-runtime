@@ -22,6 +22,12 @@ capture-start-pose-right task="push-distance":
         --config {{ system_config }} \
         --stationary-spec {{ repo }}/configs/tasks/pose_capture.json --task-id "{{ task }}"
 
+# Replace a saved start only after a fresh stationary capture succeeds.
+update-start-pose-right task="push-distance":
+    {{ vpy }} -m vlai_l1_runtime.start_pose \
+        --config {{ system_config }} \
+        --stationary-spec {{ repo }}/configs/tasks/pose_capture.json --task-id "{{ task }}" --replace
+
 task-check task="push-distance":
     {{ vpy }} -m vlai_l1_runtime.cli task check --config {{ system_config }} --task {{ repo }}/configs/tasks/{{ task }}.json
 
@@ -43,6 +49,14 @@ task-policy $session $actions="":
 task-finish session:
     {{ vpy }} -m vlai_l1_runtime.cli task finish --session "{{ session }}"
 
+# Read the idle right Follower's current pose; never enables motors.
+capture-park-pose-right:
+    sudo {{ vpy }} -m vlai_l1_runtime.cli task record-park --config {{ system_config }}
+
+# Smoothly move the existing task owner to the parking pose and retain torque.
+task-park session:
+    {{ vpy }} -m vlai_l1_runtime.cli task park --session "{{ session }}"
+
 # Explicit shutdown disables the Follower. This is not normal task completion.
 task-shutdown session:
     {{ vpy }} -m vlai_l1_runtime.cli task shutdown --session "{{ session }}"
@@ -50,6 +64,11 @@ task-shutdown session:
 # Real live-IPC observations to pi0 predictions; does not send motor commands.
 setup-inference:
     {{ uv }} pip install --python {{ vpy }} -r {{ repo }}/configs/inference/requirements.txt
+
+# Start/reuse Unified on work-pc:8809 and warm it with a saved real observation.
+# Prediction only; never starts a motor owner.
+inference-unified:
+    {{ vpy }} {{ repo }}/scripts/inference/setup_unified.py
 
 infer-right $task $distance_cm $output $samples="1":
     #!/usr/bin/env bash

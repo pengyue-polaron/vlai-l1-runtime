@@ -150,16 +150,17 @@ def test_leader_capture_uses_configured_leader_endpoint_only(fake_hardware, tmp_
 def test_optional_parameter_read_runs_after_probe_and_keeps_the_same_guard(
     fake_hardware, tmp_path, monkeypatch
 ):
-    from vlai_l1_runtime.motor_parameters import ReadRegister
+    from vlai_l1_runtime.motor_parameters import DEFAULT_READ_REGISTERS
     from vlai_l1_runtime.teleoperation import parameter_probe
 
-    def read(config, interface, motor, *, check_health, on_reading):
+    def read(config, interface, motor, *, check_health, on_reading, role):
+        assert role == "follower"
         assert fake_hardware.calls[-1] == ("probe", "can2")
         assert interface == "can2"
         assert motor.name == "joint_3"
         assert not fake_hardware.lock.closed
         fake_hardware.calls.append(("parameters", interface))
-        for register in ReadRegister:
+        for register in DEFAULT_READ_REGISTERS:
             check_health()
             on_reading({"motor": motor.name, "register": register.name, "value": 1})
 
@@ -189,7 +190,8 @@ def test_parameter_failure_retains_partial_evidence_and_closes_link(
 ):
     from vlai_l1_runtime.teleoperation import parameter_probe
 
-    def fail(config, interface, motor, *, check_health, on_reading):
+    def fail(config, interface, motor, *, check_health, on_reading, role):
+        assert role == "follower"
         on_reading({"register": "MASTER_ID", "value": 19})
         raise TimeoutError("no parameter reply")
 
@@ -228,7 +230,7 @@ def test_failed_state_probe_never_reaches_parameter_transport(fake_hardware, tmp
 
 
 def test_parameter_option_rejects_bimanual_before_hardware(fake_hardware, tmp_path):
-    with pytest.raises(ValueError, match="exactly one Follower"):
+    with pytest.raises(ValueError, match="exactly one selected side"):
         capture.capture_follower_feedback(
             fake_hardware.config,
             sides=("left", "right"),
@@ -367,3 +369,58 @@ def test_capture_refuses_sdk_values_without_paired_raw_frames(fake_hardware, tmp
         run(fake_hardware, tmp_path / "capture")
     assert fake_hardware.calls == [("configure", "can3"), ("down", "can3")]
     assert json.loads((tmp_path / "capture/report.json").read_text())["status"] == "failed"
+
+
+@pytest.mark.parametrize(("role", "interface"), [("leader", "can0"), ("follower", "can2")])
+@pytest.mark.parametrize("fault", [None, "missing", "wrong_mode"])
+def test_mode_only_capture_skips_sdk_and_preserves_cleanup(
+    fake_hardware, tmp_path, monkeypatch, role, interface, fault
+):
+    from vlai_l1_runtime.teleoperation import parameter_probe
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("SDK/state-probe path reached")
+
+    monkeypatch.setattr(capture, "verify_xair_dependency", forbidden)
+    monkeypatch.setattr(capture, "probe_motor_feedback", forbidden)
+    seen = []
+
+    def read(
+        config, actual_interface, motor, *, role, check_health, on_reading, endpoint_deadline_ns
+    ):
+        assert actual_interface == interface
+        assert not fake_hardware.lock.closed
+        check_health()
+        seen.append(motor.name)
+        if fault == "missing":
+            raise TimeoutError("missing CTRL_MODE")
+        on_reading({"motor": motor.name, "register": "CTRL_MODE", "value": 2 if fault else 1})
+        if fault:
+            raise ValueError("CTRL_MODE must report MIT")
+
+    monkeypatch.setattr(parameter_probe, "read_motor_control_mode", read)
+    output = tmp_path / "mode"
+
+    def run_mode():
+        return capture.capture_follower_feedback(
+            fake_hardware.config,
+            sides=("right",),
+            output=output,
+            role=role,
+            control_modes_only=True,
+        )
+
+    if fault:
+        with pytest.raises((TimeoutError, ValueError)):
+            run_mode()
+    else:
+        run_mode()
+        assert seen == list(MOTOR_NAMES)
+    report = json.loads((output / "report.json").read_text())
+    assert report["status"] == ("failed" if fault else "passed")
+    assert report["sdk_constructor_used"] is False
+    assert fake_hardware.calls == [("configure", interface), ("down", interface)]
+    assert fake_hardware.lock.closed
+    assert len(report["endpoints"][0]["parameter_reads"]) == (
+        0 if fault == "missing" else 1 if fault else 8
+    )

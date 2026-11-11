@@ -2,6 +2,7 @@
 // linked. Ideal feedback is not a model of motor, USB or mechanical behavior.
 #include "automatic_input.hpp"
 #include "task_session_io.hpp"
+#include "task_command_filter.hpp"
 #include <csignal>
 #include <iostream>
 #include <thread>
@@ -34,6 +35,7 @@ int main(int argc,char** argv) {
         std::signal(SIGHUP,stop_handler);std::signal(SIGPIPE,SIG_IGN);
         auto now=vlai_l1::task_now_ns();
         vlai_l1::TaskSession task(input.spec,*input.task,initial,now);
+        vlai_l1::TaskCommandFilter command_filter(initial,now,input.spec.rate_hz);
         std::array<vlai_l1::DecodedFeedback,8> feedback{};
         for(std::size_t i=0;i<8;++i) {
             auto& f=feedback[i];f.position_rad=initial[i]/vlai_l1::kDegrees;
@@ -50,7 +52,8 @@ int main(int argc,char** argv) {
             now=vlai_l1::task_now_ns();
             if(now>deadline+input.spec.state_timeout_ns) throw std::runtime_error("sim control deadline missed");
             vlai_l1::task_input(task,pending);
-            now=vlai_l1::task_now_ns();const auto target=task.advance(now);
+            now=vlai_l1::task_now_ns();const auto requested=task.advance(now);
+            const auto target=command_filter.advance(requested,now);
             const auto dt=static_cast<double>(now-previous_ns)/1e9;
             for(std::size_t i=0;i<8;++i) {
                 // Optional test plant follows the PREVIOUS sent reference with
@@ -66,7 +69,7 @@ int main(int argc,char** argv) {
                 f.velocity_rad_s=step/vlai_l1::kDegrees/dt;
                 f.raw.host_receive_ns=now;f.status_nibble=input.spec.enabled_status;
             }
-            guard.check(now,feedback,task);
+            guard.check_command(now,feedback,target);
             ++cycles;frames+=8;last_reference=target;previous_ns=now;
             task.mark_sent();
             vlai_l1::task_output(task,feedback,target);

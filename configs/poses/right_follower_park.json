@@ -1,0 +1,39 @@
+{
+  "follower_deg": {
+    "right_joint_1.pos": -5.58444804276705,
+    "right_joint_2.pos": -0.9507768466177612,
+    "right_joint_3.pos": 2.568190401512522,
+    "right_joint_4.pos": 15.135929719632744,
+    "right_joint_5.pos": -18.458184958345722,
+    "right_joint_6.pos": 3.5736094018206197,
+    "right_joint_7.pos": -7.726427809881606,
+    "right_gripper.pos": 1.9343390281384067
+  },
+  "leader_deg": null,
+  "receiver_sequence": 40,
+  "source_monotonic_ns": 336365783411370,
+  "stationary_window_ns": 206528758,
+  "stationary_samples": 4,
+  "max_span_deg": 0.021857032230863993,
+  "max_drift_deg_s": 0.09526800769851133,
+  "kind": "vlai_parking_pose_v1",
+  "side": "right",
+  "role": "follower",
+  "position_unit": "degree",
+  "coordinate_kind": "x_air_sdk_joint_degrees_unverified_physical_zero",
+  "feature_names": [
+    "right_joint_1.pos",
+    "right_joint_2.pos",
+    "right_joint_3.pos",
+    "right_joint_4.pos",
+    "right_joint_5.pos",
+    "right_joint_6.pos",
+    "right_joint_7.pos",
+    "right_gripper.pos"
+  ],
+  "validation_config_sha256": "c892986da32462a8356f97e57c73762b7a9d5cc671214c2066a5c11b5f9ce214",
+  "captured_utc": "2026-11-11T10:14:36.858904+00:00",
+  "source": "idle_right_follower_readonly_feedback",
+  "interface": "can2",
+  "parentdev": "1-3.1.2:1.0"
+}

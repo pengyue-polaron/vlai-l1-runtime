@@ -82,7 +82,7 @@ class NativeEvents:
         assert observation <= self.now
         self.accepted = sequence
         self.commands.append((op, q, sequence))
-        if op in ("start", "target", "return"):
+        if op in ("start", "target", "return", "park"):
             if op == "return":
                 q = [self.controller.task.pose["follower_deg"][key] for key in FEATURES]
             segment = {
@@ -115,6 +115,8 @@ def setup_controller(monkeypatch, tmp_path):
     monkeypatch.setattr(runtime, "ThreadPoolExecutor", ImmediateExecutor)
     task = SimpleNamespace(
         id="push-distance",
+        prompt="将方块向前推动10厘米",
+        distance_cm=10,
         root=tmp_path,
         start_pose=tmp_path / "data/start_poses/push-distance.json",
         pose={"follower_deg": dict.fromkeys(FEATURES, 0.0)},
@@ -168,6 +170,51 @@ def test_multiple_policy_chunks_keep_one_owner_then_return_and_hold(setup_contro
     assert not controller.shutdown_requested
     assert controller.status()["owner_pid"] == 12345
     assert {op for op, _, _ in simulation.commands[offset:]} == {"heartbeat"}
+
+
+def test_parking_cancels_policy_holds_and_preserves_original_start(setup_controller, monkeypatch):
+    from vlai_l1_runtime import parking_pose
+
+    controller, simulation, _ = setup_controller
+    target = [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, -1.0, 0.0]
+    monkeypatch.setattr(
+        parking_pose,
+        "load_parking_pose",
+        lambda _: {"follower_deg": dict(zip(FEATURES, target, strict=True))},
+    )
+    controller.request("policy")
+    while controller.actions_sent < 3:
+        simulation.step()
+    controller.request("park")
+    sent = controller.actions_sent
+    simulation.until("parked_hold")
+    assert controller.actions_sent == sent
+    assert simulation.q == target
+    assert not controller.shutdown_requested
+    assert controller.status()["owner_pid"] == simulation.owner_pid
+    offset = len(simulation.commands)
+    for _ in range(100):
+        simulation.step()
+    assert {op for op, _, _ in simulation.commands[offset:]} == {"heartbeat"}
+    with pytest.raises(ValueError, match="arrival at the task start"):
+        controller.request("policy")
+    controller.request("finish")
+    simulation.until("returned_hold")
+    assert simulation.q == [0.0] * 8
+    assert [op for op, _, _ in simulation.commands].count("start") == 1
+
+
+def test_missing_parking_pose_rejects_request_without_disabling(setup_controller, monkeypatch):
+    from vlai_l1_runtime import parking_pose
+
+    controller, simulation, _ = setup_controller
+    monkeypatch.setattr(parking_pose, "parking_path", lambda _: controller.output / "missing.json")
+    (controller.output / "request.json").write_text('{"operation":"park"}')
+    controller.service_request()
+    assert not json.loads((controller.output / "request-result.json").read_text())["accepted"]
+    simulation.step()
+    assert controller.phase == "ready"
+    assert not controller.shutdown_requested
 
 
 @pytest.mark.parametrize("fault", ["stale", "future", "shape", "bounds", "nan"])
@@ -341,7 +388,7 @@ def test_checkpoint_mismatch_is_rejected_before_camera_or_prediction(monkeypatch
     from vlai_l1_runtime import camera_ipc
 
     spec = SimpleNamespace(response_timeout_s=1)
-    monkeypatch.setattr(runtime.Pi0Spec, "load", lambda _: spec)
+    monkeypatch.setattr(runtime.Pi0Spec, "load", lambda _, **kwargs: spec)
     monkeypatch.setattr(runtime, "replace", lambda value, **_: value)
     monkeypatch.setattr(runtime, "Pi0ObservationBuilder", lambda *_, **__: None)
     closed = []
@@ -384,7 +431,7 @@ def test_explicit_retry_opens_fresh_client_after_prediction_or_camera_failure(
 
     expected = {"kind": "pi0", "path": "/checkpoint", "deployment_sha256": "a" * 64}
     spec = SimpleNamespace(response_timeout_s=1)
-    monkeypatch.setattr(runtime.Pi0Spec, "load", lambda _: spec)
+    monkeypatch.setattr(runtime.Pi0Spec, "load", lambda _, **kwargs: spec)
     monkeypatch.setattr(runtime, "replace", lambda value, **_: value)
     observation = SimpleNamespace(oldest_source_ns=123)
     monkeypatch.setattr(

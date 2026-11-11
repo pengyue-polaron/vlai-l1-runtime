@@ -25,6 +25,12 @@ the pose. With teleoperation already active and the Follower positioned, run:
 just capture-start-pose-right push-distance
 ```
 
+To replace an existing start, use `just update-start-pose-right push-distance`
+while teleoperation is active and the Follower is stationary. The old pose is
+replaced atomically only after fresh feedback passes validation; a failed capture
+leaves it intact. The new pose applies to the next task owner, and does not change
+the separate parking pose. Initial capture refuses to overwrite an existing file.
+
 Capture reads measured Follower J1-J7 plus gripper in SDK degrees from existing
 IPC; settings are in `configs/tasks/pose_capture.json`. Before replacing the
 teleoperation owner, park/support the arms because ending teleoperation can
@@ -53,19 +59,68 @@ health. Use a new output directory for each new owner and retain previous record
 | `just task-status SESSION` | Inspect owner state and arrival before requesting policy. |
 | `just task-policy SESSION` | Run continuous policy; an optional positive action count is supported. |
 | `just task-finish SESSION` | Return to the saved start and hold without disabling. |
+| `just task-park SESSION` | Stop policy, move smoothly to the saved parking pose and hold. |
 | `just task-shutdown SESSION` | Explicitly disable and exit. |
 
 These are lifecycle operations, not checks to repeat indiscriminately. A healthy
 owner already holding at the start can proceed directly to policy. Normal finish
 retains torque; explicit shutdown and fault handling are separate paths.
 
+Task OS-level CAN queries run in a separate read-only worker so slow `ip`/`tc`
+calls cannot block producer heartbeats. Query subprocesses are time-limited;
+failed or expired checks still stop the supervisor. The native CAN/motor guards
+and producer timeout remain active. `maximum_os_health_check_s` in the run report
+records the longest completed OS health check.
+
+The right-Follower parking pose is stored separately in
+`configs/poses/right_follower_park.json`. With the controller stopped and the arm
+stationary, `just capture-park-pose-right` saves the current measured pose through
+a bounded feedback query without enabling motors. It refuses an existing motor
+owner and checks only the right Follower interface. To park a running task, use
+`just task-park SESSION`; wait for `parked_hold` in `task-status`. Parking retains
+the same owner, gains and fault guards, with smooth speed/acceleration-limited
+references; it does not disable the arm or guarantee collision clearance.
+Use `task-finish` to return from parking to the task start before another policy
+run. `task-park` requires a running owner built with parking support; stopped
+sessions cannot accept it. No camera or model inference is needed for parking.
+
 ### Model interface and motor control
 
-Native pi0 consumes AgentView and right-wrist RGB, ordered joint8 degrees and a
-separate `distance_cm`; output is horizon32 at 30 Hz. The client validates
-checkpoint identity. Unified requires its actual force/FK-history interface and
-is not interchangeable with this pi0 configuration. Camera/model work stays
-outside the motor loop.
+Native pi0 consumes AgentView and right-wrist RGB, ordered joint8 degrees and
+the full language prompt; its server adapter ignores the separate numeric
+`target_distance_cm` field. Unified explicitly consumes that numeric distance
+as well as measured force/FK history. Both output horizon32 at 30 Hz and validate
+checkpoint identity. Camera/model/history work stays outside the motor loop.
+
+### Unified execution
+
+`just inference-unified` starts or reuses `vlai-unified-live.service` on `work-pc`
+port 8809 and the Jetson tmux tunnel `vlai-unified-tunnel`. It warms the checkpoint
+using an existing recorded observation, without motor access. Initial compilation
+can take minutes; warmup must finish before requesting live policy. The pi0
+service remains available on 8808.
+
+Use `just task-start push-distance-unified SESSION` in Jetson tmux with a new
+output directory. This task shares the existing `push-distance` start pose and
+parking pose, but pins `unified-29999`. After `task-status` reports `ready`, a
+first bounded trial is `just task-policy SESSION 32` (32 action samples, nominally
+about 1.07 seconds, then automatic return to the start and hold). The existing
+`task-finish`, `task-park`, and `task-shutdown` commands also apply. Live feedback
+and ownership must still be healthy at startup; this is not an automatic fault retry.
+
+Unified opens the HKVL force sensor exclusively for policy input. Do not run a
+separate serial collector at the same time. Its 30 Hz measured history contains
+the latest ten joint8/wrench6 samples and the full episode prefix of 22 features,
+using assets in `configs/inference/unified/`. Startup padding repeats the first
+real sample exactly as in training; no force samples are fabricated. Every new
+policy episode resets the history. Capacity is 2048 samples (about 68 seconds);
+exhaustion, missing/stale force, or invalid alignment rejects policy and holds.
+The prefix is never silently truncated. `task-status` exposes the loaded model,
+prompt and target distance. Neither model has measured block-distance completion:
+action counts limit execution length, not centimeters. Live Unified pushing
+performance has not been validated by the prediction-only checks.
+
+### Motor control
 
 The 100 Hz motor loop continuously conditions the 30 Hz absolute joint targets
 with a 0.15-second first-order filter and a 20 deg/s reference slew limit

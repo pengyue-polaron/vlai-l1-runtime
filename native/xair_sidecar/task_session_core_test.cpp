@@ -1,5 +1,6 @@
 #include "task_session_core.hpp"
 #include "task_session_recorded_policy.hpp"
+#include "task_command_filter.hpp"
 #include <functional>
 #include <iostream>
 void require(bool condition,const char* message) {if(!condition)throw std::runtime_error(message);}
@@ -25,6 +26,27 @@ int main() {
         const auto spec=make_spec();
         const vlai_l1::TaskLimits limits{100000000,5000000000,500000000};
         constexpr std::uint64_t epoch=1000000000;
+        {
+            auto held=recorded_policy::initial;
+            vlai_l1::TaskCommandFilter filter(held,epoch,100);
+            auto goal=held;goal[6]=27.06936980273856;
+            require(filter.advance(goal,epoch)==held,"first command retains holding reference");
+            auto first=filter.advance(goal,epoch+10000000);
+            require(first[6]>held[6] && first[6]-held[6]<.11,"recorded handover step smoothed");
+            require(filter.advance(goal,epoch+10000000)==first,"same timestamp cannot advance twice");
+            auto previous=first;
+            for(unsigned tick=2;tick<=1000;++tick) {
+                auto current=filter.advance(goal,epoch+tick*10000000ULL);
+                require(current[6]>=previous[6] && current[6]<=goal[6],"no handover overshoot");
+                require(current[6]-previous[6]<=.2000000001,"command speed bounded");
+                previous=current;
+            }
+            require(std::abs(previous[6]-goal[6])<1e-9,"hold converges to model target");
+            goal[6]=-80;
+            auto reversed=filter.advance(goal,epoch+11000000000ULL);
+            require(previous[6]-reversed[6]<=.2000000001,"delayed/reversed request cannot jump");
+            rejects([&]{filter.advance(goal,epoch);});
+        }
         auto initial=recorded_policy::initial;
         vlai_l1::TaskSession task(spec,limits,initial,epoch);
         std::uint64_t now=epoch,sequence=0;
@@ -75,6 +97,23 @@ int main() {
         now+=10000000;send("return",30);
         for(unsigned i=0;i<300;++i) {now+=100000000;send("heartbeat",0);}
         require(task.reference()==initial && !task.moving(),"smooth exact return to immutable start");
+        // Parking uses a distinct smooth target and never replaces saved_start_.
+        auto parked=initial;parked[3]-=2;
+        now+=10000000;
+        rejects([&]{task.accept({sequence+1,now,now,"park",.1,parked},now);});
+        auto outside=parked;outside[3]=121;
+        rejects([&]{task.accept({sequence+1,now,now,"park",10,outside},now);});
+        const auto parsed=vlai_l1::parse_task_command("VLAI_TASK_V1 1 10 10 park 5 0 0 0 0 0 0 0 0");
+        require(parsed.operation=="park","park protocol parsed");
+        send("park",5,parked);
+        for(unsigned i=0;i<25;++i) {now+=100000000;send("heartbeat",0);}
+        require(task.moving() && std::abs(task.reference()[3]-(initial[3]-1))<1e-9,
+                "parking interpolates smoothly at midpoint");
+        for(unsigned i=0;i<30;++i) {now+=100000000;send("heartbeat",0);}
+        require(task.reference()==parked && !task.moving(),"parking persists at its own pose");
+        now+=10000000;send("return",5);
+        for(unsigned i=0;i<50;++i) {now+=100000000;send("heartbeat",0);}
+        require(task.reference()==initial && !task.moving(),"parking preserves original start");
         auto fresh=[&] {return vlai_l1::TaskSession(spec,limits,initial,epoch);};
         {auto t=fresh();auto out=initial;out[3]=121;rejects([&]{t.accept({1,epoch,epoch,"start",240,out},epoch);});}
         {auto t=fresh();t.accept({1,epoch,epoch,"start",.01,initial},epoch);

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from vlai_l1_runtime.configuration import load_system_config
-from vlai_l1_runtime.motor_parameters import ParameterRead, ReadRegister
+from vlai_l1_runtime.motor_parameters import DEFAULT_READ_REGISTERS, ParameterRead, ReadRegister
 from vlai_l1_runtime.teleoperation import parameter_probe as probe
 
 CONFIG = Path(__file__).resolve().parents[1] / "configs/system/vlai_l1.toml"
@@ -202,7 +202,7 @@ def test_reader_uses_configured_budget_and_allowlist_only(transport):
         on_reading=readings.append,
         _backend_factory=Backend,
     )
-    assert [q.register for q in queries] == list(ReadRegister)
+    assert [q.register for q in queries] == list(DEFAULT_READ_REGISTERS)
     assert len(readings) == 8
     assert len(checks) == 16
     assert transport.closed
@@ -236,4 +236,113 @@ def test_transaction_failure_stops_later_queries(transport):
         )
     assert len(queries) == 1
     assert not readings
+    assert transport.closed
+
+
+def test_leader_parameter_read_requires_explicit_matching_role(transport):
+    calls = []
+
+    class Backend:
+        def __init__(self, interface, motor, *, can_fd):
+            assert interface == "can0"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def query(self, request, *, deadline_ns):
+            calls.append(request)
+            assert request.request[1][2] == 0x33
+            return {"register": request.register.name}
+
+    kwargs = {
+        "check_health": lambda: None,
+        "on_reading": lambda value: None,
+        "_backend_factory": Backend,
+    }
+    for role in ("follower", "invalid"):
+        with pytest.raises(ValueError, match="role/motor"):
+            probe.read_motor_parameters(
+                transport.config, "can0", transport.motor, role=role, **kwargs
+            )
+    assert not calls
+    probe.read_motor_parameters(transport.config, "can0", transport.motor, role="leader", **kwargs)
+    assert [call.register for call in calls] == list(DEFAULT_READ_REGISTERS)
+
+
+@pytest.mark.parametrize("value", [1, 2, 3, 4, None])
+def test_mode_only_helper_retains_evidence_and_requires_mit(transport, value):
+    readings, requests = [], []
+
+    class Backend:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            transport.closed = True
+
+        def query(self, request, *, deadline_ns):
+            requests.append(request)
+            return {"register": "CTRL_MODE", "value": value}
+
+    def run():
+        probe.read_motor_control_mode(
+            transport.config,
+            "can2",
+            transport.motor,
+            check_health=lambda: None,
+            on_reading=readings.append,
+            _backend_factory=Backend,
+        )
+
+    if value == 1:
+        run()
+    else:
+        with pytest.raises(ValueError, match="must report MIT"):
+            run()
+    assert [q.register for q in requests] == [ReadRegister.CTRL_MODE]
+    assert readings == [{"register": "CTRL_MODE", "value": value}]
+    assert transport.closed
+
+
+def test_mode_read_missing_reply_closes_without_retry(transport):
+    transport.replies.clear()
+    with pytest.raises(TimeoutError, match="CTRL_MODE"):
+        probe.read_motor_control_mode(
+            transport.config,
+            "can2",
+            transport.motor,
+            check_health=lambda: None,
+            on_reading=lambda value: pytest.fail("missing mode accepted"),
+        )
+    assert len(transport.sent) == 1
+    assert transport.sent[0][8:16] == bytes.fromhex("0300330a00000000")
+    assert transport.closed
+
+
+def test_endpoint_deadline_caps_mode_reply_wait(transport):
+    transport.replies = [
+        (
+            struct.pack("=IB3x64s", 19, 8, bytes.fromhex("0300330a01000000")),
+            [],
+            0,
+            (),
+        )
+    ]
+    readings = []
+    probe.read_motor_control_mode(
+        transport.config,
+        "can2",
+        transport.motor,
+        check_health=lambda: None,
+        on_reading=readings.append,
+        endpoint_deadline_ns=200,
+    )
+    assert transport.clock[0] == 200
+    assert len(readings) == 1
     assert transport.closed

@@ -1,0 +1,47 @@
+{
+  "kind": "right_control_mode_readonly_plan_v1",
+  "execution_status": "not_executed",
+  "read_opcode": 51,
+  "register": "CTRL_MODE",
+  "register_id": 10,
+  "required_mode": 1,
+  "required_mode_name": "MIT",
+  "endpoints": [
+    {
+      "role": "leader",
+      "side": "right",
+      "interface": "can0",
+      "parentdev": "1-3.1.4:1.0"
+    },
+    {
+      "role": "follower",
+      "side": "right",
+      "interface": "can2",
+      "parentdev": "1-3.1.2:1.0"
+    }
+  ],
+  "motors": [
+    "joint_1",
+    "joint_2",
+    "joint_3",
+    "joint_4",
+    "joint_5",
+    "joint_6",
+    "joint_7",
+    "gripper"
+  ],
+  "transport": "guarded raw parameter socket only; no SDK/OpenArm initializer",
+  "helper": "vlai_l1_runtime.teleoperation.parameter_probe.read_motor_control_mode",
+  "prohibited_operations": [
+    "enable",
+    "disable",
+    "mode_write",
+    "zero",
+    "motion"
+  ],
+  "existing_firmware_and_evidence_profiles": "unchanged",
+  "note": "This plan is not a launcher or installed-mode evidence. An authorized caller must bind identity, exclusive ownership, health checks and cleanup.",
+  "cli_flag": "--read-control-modes-only",
+  "endpoint_budget_s": 2.0,
+  "per_reply_window_s": 0.05
+}

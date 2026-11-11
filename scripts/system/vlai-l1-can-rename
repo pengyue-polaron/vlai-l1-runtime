@@ -1,0 +1,122 @@
+#!/usr/bin/python3
+"""Rename the four configured PEAK USB CAN interfaces without bringing them up."""
+
+from __future__ import annotations
+
+import ast
+import subprocess
+import sys
+from pathlib import Path
+
+
+def load_endpoints(path: Path) -> list[dict[str, str]]:
+    endpoints: list[dict[str, str]] = []
+    current: dict[str, str] | None = None
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if line == "[[can.endpoints]]":
+            if current is not None:
+                endpoints.append(current)
+            current = {}
+            continue
+        if line.startswith("["):
+            if current is not None:
+                endpoints.append(current)
+                current = None
+            continue
+        if current is None or "=" not in line:
+            continue
+        key, value = (part.strip() for part in line.split("=", 1))
+        if key in {"id", "interface", "parentdev", "side", "role"}:
+            parsed = ast.literal_eval(value)
+            if not isinstance(parsed, str):
+                raise RuntimeError(f"{key} must be a string")
+            current[key] = parsed
+    if current is not None:
+        endpoints.append(current)
+
+    required = {"id", "interface", "parentdev", "side", "role"}
+    if len(endpoints) != 4 or any(set(endpoint) != required for endpoint in endpoints):
+        raise RuntimeError("configuration must contain four complete CAN endpoints")
+    if {endpoint["interface"] for endpoint in endpoints} != {
+        "can0",
+        "can1",
+        "can2",
+        "can3",
+    }:
+        raise RuntimeError("configured CAN interfaces must be exactly can0-can3")
+    if len({endpoint["parentdev"] for endpoint in endpoints}) != 4:
+        raise RuntimeError("configured CAN parent devices must be unique")
+    return endpoints
+
+
+def driver(interface: str) -> str:
+    link = Path("/sys/class/net") / interface / "device/driver"
+    return link.resolve().name if link.is_symlink() else ""
+
+
+def parentdev(interface: str) -> str:
+    link = Path("/sys/class/net") / interface / "device"
+    return link.resolve().name if link.exists() else ""
+
+
+def run_ip(*arguments: str) -> None:
+    subprocess.run(("/usr/sbin/ip", *arguments), check=True)
+
+
+def main() -> None:
+    if len(sys.argv) != 2:
+        raise SystemExit("usage: vlai-l1-can-rename SYSTEM_CONFIG")
+    endpoints = load_endpoints(Path(sys.argv[1]))
+
+    sources: dict[str, str] = {}
+    for entry in Path("/sys/class/net").iterdir():
+        interface = entry.name
+        if driver(interface) == "peak_usb":
+            sources[parentdev(interface)] = interface
+
+    expected_parents = {endpoint["parentdev"] for endpoint in endpoints}
+    if set(sources) != expected_parents:
+        missing = sorted(expected_parents - set(sources))
+        extra = sorted(set(sources) - expected_parents)
+        raise RuntimeError(f"PEAK USB identity mismatch: missing={missing}, extra={extra}")
+
+    # Free can0 if the Jetson onboard controller currently owns that name.
+    if Path("/sys/class/net/can0").exists() and driver("can0") == "mttcan":
+        if Path("/sys/class/net/canboard0").exists():
+            raise RuntimeError("cannot rename onboard CAN: canboard0 already exists")
+        run_ip("link", "set", "can0", "down")
+        run_ip("link", "set", "can0", "name", "canboard0")
+
+    # Move all PEAK interfaces through collision-free temporary names first.
+    temporary: dict[str, str] = {}
+    for index, endpoint in enumerate(endpoints):
+        source = sources[endpoint["parentdev"]]
+        temp = f"vlai_tmp{index}"
+        if Path("/sys/class/net") .joinpath(temp).exists():
+            raise RuntimeError(f"temporary interface already exists: {temp}")
+        run_ip("link", "set", source, "down")
+        run_ip("link", "set", source, "name", temp)
+        temporary[endpoint["interface"]] = temp
+
+    for target, temp in temporary.items():
+        run_ip("link", "set", temp, "name", target)
+
+    for endpoint in endpoints:
+        interface = endpoint["interface"]
+        if driver(interface) != "peak_usb":
+            raise RuntimeError(f"{interface} did not resolve to peak_usb")
+        if parentdev(interface) != endpoint["parentdev"]:
+            raise RuntimeError(
+                f"{interface} parent mismatch: expected {endpoint['parentdev']}, "
+                f"found {parentdev(interface)}"
+            )
+        run_ip("link", "set", interface, "down")
+        print(
+            f"{interface} <- {endpoint['parentdev']} "
+            f"({endpoint['side']} {endpoint['role']})"
+        )
+
+
+if __name__ == "__main__":
+    main()

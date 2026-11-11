@@ -63,10 +63,11 @@ def render_task_spec(config, policy, task):
     # Retain motor identities, PD gains and physical feedback protection.
     # Diagnostic waypoint/excursion fields do not constrain the policy stream.
     base = dict(policy)
+    position_gains = base.pop("position_gains", None)
     base.pop("waypoints_deg", None)
     base["kind"] = "isolated_right_follower_diagnostic_v1"
     base["active_motor"] = "joint_4"
-    text = render_native_spec(config, base)
+    text = render_native_spec(config, base, position_gains=position_gains)
     lines = text.splitlines()
     lines[0] = "VLAI_RIGHT_FOLLOWER_TASK_V2"
     s = task.settings
@@ -90,16 +91,30 @@ class LivePredictor:
 
     def __init__(self, config, task, history):
         self.config, self.task, self.history = config, task, history
-        spec = Pi0Spec.load(task.inference_spec)
+        self.kind = task.expected_checkpoint["kind"]
+        spec = Pi0Spec.load(task.inference_spec, kind=self.kind)
         self.spec = replace(
             spec,
             response_timeout_s=min(spec.response_timeout_s, task.settings["observation_max_age_s"]),
         )
         self.client = None
         self.cameras = None
+        self.unified = None
+        self._new_episode = True
+        self._episode_active = True
         self.builder = Pi0ObservationBuilder(
             config, spec, task=task.prompt, distance_cm=task.distance_cm
         )
+
+    def begin_episode(self):
+        # Only signal here: serial I/O and history reset happen in the predictor worker.
+        self._new_episode = True
+        self._episode_active = True
+
+    def end_episode(self):
+        self._episode_active = False
+        if self.unified is not None:
+            self.unified.stop()
 
     def __call__(self):
         try:
@@ -114,22 +129,52 @@ class LivePredictor:
         from .camera_ipc import RawCameraBridgeClient
 
         if self.client is None:
-            self.client = Pi0PredictionClient(self.spec).__enter__()
+            self.client = (
+                Pi0PredictionClient(self.spec)
+                if self.kind == "pi0"
+                else Pi0PredictionClient(self.spec, expected_kind=self.kind)
+            ).__enter__()
             expected = self.task.expected_checkpoint
             actual = self.client.server_metadata.get("checkpoint", {})
             if actual != expected:
                 self.client.close()
                 self.client = None
                 raise ValueError("prediction server checkpoint does not match this task")
+            if (
+                self.kind == "unified"
+                and self.client.server_metadata.get("history_delivery") != "full_causal_prefix"
+            ):
+                raise ValueError("Unified server must accept a full causal history prefix")
             self.cameras = RawCameraBridgeClient(self.config).__enter__()
+        if self.kind == "unified" and self._new_episode:
+            from .unified_inference import UnifiedHistory
+
+            if self.unified is not None:
+                self.unified.close()
+            self.unified = UnifiedHistory(self.config, self.history).start()
+            if not self._episode_active:
+                raise RuntimeError("Unified episode ended during history startup")
+            self._new_episode = False
         images = self.cameras.capture(timeout_s=self.config.cameras.startup_timeout_s)
         stamps = [images[r].metadata.monotonic_ns for r in ("agent", "wrist_right")]
-        state = self.history((min(stamps) + max(stamps)) // 2)
+        if self.unified is not None:
+            state, extra, force_source = self.unified.snapshot(min(stamps))
+        else:
+            state = self.history((min(stamps) + max(stamps)) // 2)
         observation = self.builder.build(state, images, now_ns=time.monotonic_ns())
+        if self.unified is not None:
+            observation.payload.update(extra)
+            observation = replace(
+                observation, oldest_source_ns=min(observation.oldest_source_ns, force_source)
+            )
         actions, _raw = self.client.predict(observation)
         return actions.tolist(), observation.oldest_source_ns
 
     def close(self):
+        if self.unified is not None:
+            self.unified.close()
+            self.unified = None
+        self._new_episode = True
         client, cameras = self.client, self.cameras
         self.client = self.cameras = None
         try:
@@ -162,6 +207,7 @@ class TaskController:
         self.awaiting_accept = 0
         self.start_sequence = None
         self.return_sequence = None
+        self.parking_target = None
         self.hold_needed = False
         self.finish_requested = False
         self.shutdown_requested = False
@@ -207,12 +253,16 @@ class TaskController:
         if self.initial is None:
             self.initial = list(q)
             self.destination = list(event["reference_deg"])
-        if self.phase in ("going_to_start", "returning"):
+        if self.phase in ("going_to_start", "returning", "parking"):
             expected = (
                 self.start_sequence if self.phase == "going_to_start" else self.return_sequence
             )
             if event["completed_sequence"] >= expected and event["phase"] == "holding":
-                target = self.task.pose["follower_deg"]
+                target = (
+                    dict(zip(FEATURES, self.parking_target, strict=True))
+                    if self.phase == "parking"
+                    else self.task.pose["follower_deg"]
+                )
                 close = all(
                     abs(q[i] - target[name])
                     <= self.task.settings.get(
@@ -221,7 +271,11 @@ class TaskController:
                     for i, name in enumerate(FEATURES)
                 )
                 if close:
-                    self.phase = "ready" if self.phase == "going_to_start" else "returned_hold"
+                    self.phase = {
+                        "going_to_start": "ready",
+                        "returning": "returned_hold",
+                        "parking": "parked_hold",
+                    }[self.phase]
 
     def request(self, operation, *, actions=None):
         if operation == "shutdown":
@@ -233,26 +287,48 @@ class TaskController:
                 raise ValueError("invalid requested policy action count")
             if self._future is not None:
                 raise ValueError("previous prediction is still finishing")
+            begin = getattr(self.predictor, "begin_episode", None)
+            if begin is not None:
+                begin()
             self.actions_remaining, self.actions_sent = actions, 0
             self.finish_requested, self.error = False, None
             self.phase = "policy"
-        elif operation == "finish":
+        elif operation in ("finish", "park"):
             if self.start_sequence is None:
                 raise ValueError("no saved start has been accepted by this owner")
-            if self.phase not in ("policy", "policy_rejected_hold", "ready", "returned_hold"):
-                raise ValueError("finish unavailable in current task stage")
+            if self.phase not in (
+                "policy",
+                "policy_rejected_hold",
+                "ready",
+                "returned_hold",
+                "parked_hold",
+            ):
+                raise ValueError(f"{operation} unavailable in current task stage")
+            if operation == "park":
+                from .parking_pose import load_parking_pose
+
+                pose = load_parking_pose(self.config)
+                self.parking_target = [pose["follower_deg"][name] for name in FEATURES]
+                check_target(self.config, self.parking_target)
             self.targets.clear()
+            self._end_episode()
             self.finish_requested = True
             self.hold_needed = True
-            self.phase = "finishing"
+            self.phase = "preparing_park" if operation == "park" else "finishing"
         else:
-            raise ValueError("operation must be policy, finish or shutdown")
+            raise ValueError("operation must be policy, finish, park or shutdown")
 
     def reject(self, reason):
         self.error = str(reason)
         self.targets.clear()
+        self._end_episode()
         self.hold_needed = True
         self.phase = "policy_rejected_hold"
+
+    def _end_episode(self):
+        end = getattr(self.predictor, "end_episode", None)
+        if end is not None:
+            end()
 
     def _command(self, op, now_ns, *, duration=0.0, target=None, observation_ns=None):
         self.sequence += 1
@@ -348,26 +424,32 @@ class TaskController:
                 self.actions_sent += 1
                 return command
             if self.actions_remaining == 0:
+                self._end_episode()
                 self.finish_requested = True
                 self.phase = "finishing"
         if (
-            self.phase == "finishing"
+            self.phase in ("finishing", "preparing_park")
             and accepted
             and self.state["pending_sequence"] == 0
             and self.state["phase"] == "holding"
         ):
             # Return uses the latest known endpoint, never the stale teleop reference.
-            self.destination = list(self.state["reference_deg"])
-            target = [self.task.pose["follower_deg"][name] for name in FEATURES]
+            self.destination = list(self.state.get("desired_deg", self.state["reference_deg"]))
+            parking = self.phase == "preparing_park"
+            target = (
+                self.parking_target
+                if parking
+                else [self.task.pose["follower_deg"][name] for name in FEATURES]
+            )
             try:
                 command = self._motion(
-                    "return",
+                    "park" if parking else "return",
                     target,
                     transit_duration(self.config, self.policy, self.destination, target),
                     now_ns,
                 )
                 self.return_sequence = self.sequence
-                self.phase = "returning"
+                self.phase = "parking" if parking else "returning"
                 return command
             except ValueError as exc:
                 self.reject(exc)
@@ -408,6 +490,8 @@ class TaskController:
             "chunks_received": self.chunks_received,
             "start_pose": str(self.task.start_pose),
             "checkpoint": self.task.expected_checkpoint,
+            "prompt": self.task.prompt,
+            "distance_cm": self.task.distance_cm,
             "native": self.state,
         }
 

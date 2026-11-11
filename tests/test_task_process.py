@@ -5,6 +5,7 @@ import os
 import selectors
 import subprocess
 import time
+from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -38,6 +39,8 @@ def test_task_controller_native_process_policy_clock_then_persistent_return_hold
     initial = fixture["start_deg"] if recorded else [0.0] * 8
     action_count = 32 if recorded else 64
     task = SimpleNamespace(
+        prompt="将方块向前推动10厘米",
+        distance_cm=10,
         id="offline-push-distance",
         root=tmp_path,
         start_pose=tmp_path / "pose.json",
@@ -116,7 +119,7 @@ def test_task_controller_native_process_policy_clock_then_persistent_return_hold
             assert controller.phase != "policy_rejected_hold", controller.status()
             if controller.phase == "returned_hold":
                 returned_at = returned_at or time.monotonic()
-                assert controller.state["reference_deg"] == initial
+                assert controller.state["desired_deg"] == initial
                 if time.monotonic() - returned_at >= 2:
                     break
         else:
@@ -138,7 +141,17 @@ def test_task_controller_native_process_policy_clock_then_persistent_return_hold
                 applied[seq] = state
         assert list(applied) == list(targets), "native skipped/reordered a predicted target"
         for seq, event in applied.items():
-            assert event["reference_deg"] == pytest.approx(targets[seq], abs=1e-12)
+            assert event["desired_deg"] == pytest.approx(targets[seq], abs=1e-12)
+        # Model sample selection stays exact; only the motor reference is conditioned.
+        for before, after in pairwise(states):
+            assert (
+                max(
+                    abs(a - b)
+                    for a, b in zip(after["reference_deg"], before["reference_deg"], strict=True)
+                )
+                <= 0.2000001
+            )
+        assert controller.state["reference_deg"] == pytest.approx(initial, abs=1e-4)
         if recorded:
             assert list(targets.values()) == fixture["actions"]
         application_times = [event["monotonic_ns"] for event in applied.values()]
@@ -193,6 +206,100 @@ def test_task_controller_native_process_policy_clock_then_persistent_return_hold
         }
         (tmp_path / "evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
     finally:
+        controller.close()
+        selector.close()
+        if child.poll() is None:
+            child.terminate()
+            child.wait(timeout=3)
+
+
+def test_parking_native_process_holds_then_returns_without_model(tmp_path, monkeypatch):
+    from vlai_l1_runtime import parking_pose
+    from vlai_l1_runtime.teleoperation.task_health import TaskHealthMonitor
+
+    config = load_system_config(ROOT / "configs/system/vlai_l1.toml")
+    policy = json.loads((ROOT / "configs/tasks/right_follower_control.json").read_text())
+    target = [0.0, 0.0, 0.0, 0.3, 0.0, 0.0, -0.2, 0.0]
+    monkeypatch.setattr(
+        parking_pose,
+        "load_parking_pose",
+        lambda _: {"follower_deg": dict(zip(FEATURES, target, strict=True))},
+    )
+    task = SimpleNamespace(
+        prompt="将方块向前推动10厘米",
+        distance_cm=10,
+        id="parking-simulation",
+        start_pose=tmp_path / "pose.json",
+        pose={"follower_deg": dict.fromkeys(FEATURES, 0.0)},
+        expected_checkpoint={"kind": "no-model"},
+        settings={"observation_max_age_s": 8.0, "producer_timeout_s": 0.5},
+    )
+
+    def no_model():
+        pytest.fail("parking must not invoke the model")
+
+    controller = TaskController(config, task, policy, tmp_path, predictor=no_model)
+    spec, initial = tmp_path / "spec.txt", tmp_path / "initial.txt"
+    spec.write_text(render_task_spec(config, policy, task))
+    initial.write_text(" ".join(["0"] * 8))
+    child = subprocess.Popen(
+        [str(simulator()), str(spec), str(initial)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    selector = selectors.DefaultSelector()
+    selector.register(child.stdout, selectors.EVENT_READ)
+    buffer, parked_at = b"", None
+    returned = False
+    deadline = time.monotonic() + 10
+    # A synchronous query of this duration exceeds the native 0.5s heartbeat.
+    # The worker must allow both native feedback and producer heartbeats to run.
+    health = TaskHealthMonitor(lambda: time.sleep(0.6), interval_s=0.1, timeout_s=1)
+    try:
+        while time.monotonic() < deadline:
+            health.check()
+            assert child.poll() is None
+            if controller.phase == "ready":
+                controller.request("park")
+            if controller.phase == "parked_hold":
+                parked_at = parked_at or time.monotonic()
+                assert controller.state["desired_deg"] == target
+                assert not controller.shutdown_requested
+                if time.monotonic() - parked_at > 1:
+                    controller.request("finish")
+                    returned = True
+            if controller.phase == "returned_hold" and returned:
+                assert controller.state["desired_deg"] == [0.0] * 8
+                assert controller.state["owner_pid"] == child.pid
+                assert controller.actions_sent == 0
+                break
+            line = controller.tick(time.monotonic_ns())
+            if line:
+                child.stdin.write(line.encode())
+                child.stdin.flush()
+            for key, _mask in selector.select(timeout=0.01):
+                buffer += os.read(key.fd, 65536)
+                while b"\n" in buffer:
+                    raw, buffer = buffer.split(b"\n", 1)
+                    event = json.loads(raw)
+                    if event["state"] == "task_state":
+                        controller.on_state(event)
+        else:
+            pytest.fail(f"parking timed out: {controller.status()}")
+        assert child.poll() is None
+        assert health.maximum_check_s >= 0.6
+        child.stdin.close()
+        remainder = child.stdout.read()
+        assert child.wait(timeout=3) == 1
+        terminal = [
+            json.loads(raw)
+            for raw in (buffer + remainder).splitlines()
+            if json.loads(raw).get("state") == "simulation_terminal"
+        ][-1]
+        assert terminal["enable_calls"] == terminal["disable_calls"] == 1
+    finally:
+        health.close()
         controller.close()
         selector.close()
         if child.poll() is None:

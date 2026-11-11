@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+state_dir=/run/vlai-l1
+state_file="$state_dir/cpu-governors.before-performance"
+
+start() {
+    install -d -m 0755 "$state_dir"
+    : > "$state_file"
+    for policy in /sys/devices/system/cpu/cpufreq/policy*; do
+        governor_file="$policy/scaling_governor"
+        [ -r "$governor_file" ] || continue
+        current=$(cat "$governor_file")
+        printf '%s %s\n' "$policy" "$current" >> "$state_file"
+        printf '%s\n' performance > "$governor_file"
+        [ "$(cat "$governor_file")" = performance ]
+    done
+}
+
+stop() {
+    [ -r "$state_file" ] || exit 0
+    while read -r policy governor; do
+        governor_file="$policy/scaling_governor"
+        [ -w "$governor_file" ] || continue
+        printf '%s\n' "$governor" > "$governor_file"
+    done < "$state_file"
+    rm -f "$state_file"
+}
+
+case "${1:-}" in
+    start) start ;;
+    stop) stop ;;
+    *) echo "usage: $0 {start|stop}" >&2; exit 2 ;;
+esac

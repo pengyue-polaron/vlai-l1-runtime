@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import selectors
 import signal
 import subprocess
 import time
@@ -23,8 +24,9 @@ POLICY_PATH = ROOT / "configs/diagnostics/right_automatic_motion.json"
 
 
 @pytest.mark.parametrize("probe_failure", [False, True])
+@pytest.mark.parametrize("native_fault", [False, True])
 def test_task_launch_uses_only_original_follower_owner_and_never_retries_enable(
-    fake_hardware, monkeypatch, tmp_path, probe_failure
+    fake_hardware, monkeypatch, tmp_path, probe_failure, native_fault
 ):
     monkeypatch.setattr(os, "chown", lambda *_, **__: None)
     monkeypatch.setattr(os, "set_blocking", lambda *_, **__: None)
@@ -50,12 +52,38 @@ def test_task_launch_uses_only_original_follower_owner_and_never_retries_enable(
             launches.append((command, kwargs))
             self.stdout = io.BytesIO(b'{"state":"disabled"}\n')
             self.stdin = Input()
+            self.polls = 0
 
         def poll(self):
-            return 0
+            self.polls += 1
+            return None if native_fault and self.polls <= 2 else int(native_fault)
 
         def wait(self, **kwargs):
-            return 0
+            return int(native_fault)
+
+    if native_fault:
+
+        class Selector:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def register(self, *args):
+                pass
+
+            def select(self, **kwargs):
+                return [(SimpleNamespace(fd=123), None)]
+
+        chunks = iter(
+            [
+                b'{"state":"disabled"}\n',
+                b"FAIL persistent tracking error:joint_7\n",
+            ]
+        )
+        monkeypatch.setattr(selectors, "DefaultSelector", Selector)
+        monkeypatch.setattr(os, "read", lambda *_: next(chunks))
 
     monkeypatch.setattr(subprocess, "Popen", Child)
 
@@ -66,6 +94,9 @@ def test_task_launch_uses_only_original_follower_owner_and_never_retries_enable(
         def status(self):
             return {"phase": "returned_hold"}
 
+        def service_request(self):
+            raise AssertionError("must not schedule after native disabled")
+
         def close(self):
             closed.append(True)
 
@@ -73,6 +104,8 @@ def test_task_launch_uses_only_original_follower_owner_and_never_retries_enable(
     pose = tmp_path / "pose.json"
     pose.write_text(json.dumps({"follower_deg": [0] * 8}))
     task = SimpleNamespace(
+        prompt="将方块向前推动10厘米",
+        distance_cm=10,
         id="push-distance",
         start_pose=pose,
         expected_checkpoint={"kind": "pi0"},
@@ -92,7 +125,11 @@ def test_task_launch_uses_only_original_follower_owner_and_never_retries_enable(
         assert command[5] == "task"
         assert kwargs["stdin"] == subprocess.PIPE
         assert report["disabled_verified"] is True
-        assert report["status"] == "passed"
+        assert report["status"] == ("failed" if native_fault else "passed")
+        if native_fault:
+            assert "persistent tracking error:joint_7" in report["error"]
+            assert "feedback stale" not in report["error"]
+            assert "fallback_cleanup" not in report
         spec = (tmp_path / "run/native_spec.txt").read_text()
         assert spec.startswith("VLAI_RIGHT_FOLLOWER_TASK_V2\ncan2\n")
         assert "analysis_status" not in report

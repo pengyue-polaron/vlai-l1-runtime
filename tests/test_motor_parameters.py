@@ -21,7 +21,7 @@ def test_only_allowlisted_reads_and_exact_little_endian_reply(register):
     can_id, payload = query.request
     assert can_id == 0x7FF
     assert payload == bytes((3, 0, 0x33, register, 0, 0, 0, 0))
-    value = {7: 19, 8: 3, 21: 12.5, 22: 8.0, 23: 28.0}.get(register, 0x01020304)
+    value = {7: 19, 8: 3, 10: 1, 21: 12.5, 22: 8.0, 23: 28.0}.get(register, 0x01020304)
     assert query.decode(raw(query, value), sent_ns=10, deadline_ns=30) == value
 
 
@@ -90,3 +90,17 @@ def test_recorded_right_j3_parameter_replies(register, payload, expected):
     query = ParameterRead("joint_3", 3, 19, register)
     response = RawMotorFrame("joint_3", 19, 20, payload, True)
     assert query.decode(response, sent_ns=10, deadline_ns=30) == expected
+
+
+@pytest.mark.parametrize("value", [0, 5, 255, 0xFFFFFFFF])
+def test_unknown_mode_is_rejected(value):
+    query = ParameterRead("joint_3", 3, 19, ReadRegister.CTRL_MODE)
+    with pytest.raises(ValueError, match="unknown CTRL_MODE"):
+        query.decode(raw(query, value), sent_ns=10, deadline_ns=30)
+
+
+@pytest.mark.parametrize("value", [1, 2, 3, 4])
+def test_mode_protocol_values_are_read_without_rewriting(value):
+    query = ParameterRead("joint_3", 3, 19, ReadRegister.CTRL_MODE)
+    assert query.request == (0x7FF, bytes.fromhex("0300330a00000000"))
+    assert query.decode(raw(query, value), sent_ns=10, deadline_ns=30) == value

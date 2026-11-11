@@ -177,9 +177,9 @@ def load_task(config, manifest_path, *, require_start_pose=True):
     if (
         type(checkpoint) is not dict
         or set(checkpoint) != {"kind", "path", "deployment_sha256"}
-        or checkpoint["kind"] != "pi0"
+        or checkpoint["kind"] not in ("pi0", "unified")
     ):
-        raise ValueError("explicit pi0 checkpoint identity required")
+        raise ValueError("explicit pi0 or unified checkpoint identity required")
     if (
         type(checkpoint["path"]) is not str
         or not checkpoint["path"].strip()

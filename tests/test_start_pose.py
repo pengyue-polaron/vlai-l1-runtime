@@ -145,8 +145,9 @@ def test_missing_feedback_does_not_count_as_a_stable_window():
         window.accept(*sample(2, NS + SPEC.settle_ns), now_ns=NS + SPEC.settle_ns)
 
 
+@pytest.mark.parametrize("replace", [False, True])
 def test_capture_persists_canonical_task_pose_with_source_and_config_provenance(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, replace
 ):
     from vlai_l1_runtime import start_pose
     from vlai_l1_runtime.task_definition import config_sha256, validate_pose_record
@@ -156,6 +157,10 @@ def test_capture_persists_canonical_task_pose_with_source_and_config_provenance(
     config_path.parent.mkdir(parents=True)
     config_path.write_bytes(CONFIG.path.read_bytes())
     config = load_system_config(config_path)
+    output = tmp_path / "data/start_poses/push-distance.json"
+    if replace:
+        output.parent.mkdir(parents=True)
+        output.write_text("old pose")
     clock = [NS]
 
     class Receiver:
@@ -176,10 +181,62 @@ def test_capture_persists_canonical_task_pose_with_source_and_config_provenance(
 
     monkeypatch.setattr(xair, "XAirStateReceiver", Receiver)
     monkeypatch.setattr(start_pose.time, "monotonic_ns", lambda: clock[0])
-    record = capture_pose(config, SPEC, task_id="push-distance")
+    record = capture_pose(config, SPEC, task_id="push-distance", replace=replace)
     assert (tmp_path / "data/start_poses/push-distance.json").is_file()
     assert record["provenance"]["mode"] == "captured"
     assert record["validation_config_sha256"] == config_sha256(config)
     assert record["stationary_samples"] == 21
     assert record["leader_deg"][FEATURES[6]] == 20
     validate_pose_record(config, "push-distance", record)
+    assert "old pose" not in output.read_text()
+    assert not list(output.parent.glob(".pose-*"))
+
+
+def test_failed_recapture_keeps_existing_pose(monkeypatch, tmp_path):
+    from vlai_l1_runtime.teleoperation import xair
+
+    config_path = tmp_path / "configs/system/vlai_l1.toml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_bytes(CONFIG.path.read_bytes())
+    config = load_system_config(config_path)
+    output = tmp_path / "data/start_poses/push-distance.json"
+    output.parent.mkdir(parents=True)
+    output.write_text("old pose")
+
+    class Receiver:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def receive(self, **_kwargs):
+            return None
+
+    monkeypatch.setattr(xair, "XAirStateReceiver", Receiver)
+    with pytest.raises(PoseCaptureError, match="no fresh"):
+        capture_pose(config, SPEC, task_id="push-distance", replace=True)
+    assert output.read_text() == "old pose"
+
+
+def test_failed_atomic_replacement_preserves_old_pose(monkeypatch, tmp_path):
+    import json
+
+    from vlai_l1_runtime import start_pose
+
+    output = tmp_path / "pose.json"
+    output.write_text("old pose")
+    record = json.loads((ROOT / "data/start_poses/push-distance.json").read_text())
+    monkeypatch.setattr(start_pose, "_output_path", lambda *args, **kwargs: output)
+
+    def fail_replace(self, target):
+        raise OSError("injected replacement failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    with pytest.raises(OSError, match="injected replacement failure"):
+        start_pose._write_record(CONFIG, "push-distance", record, output, replace=True)
+    assert output.read_text() == "old pose"
+    assert not list(tmp_path.glob(".pose-*"))

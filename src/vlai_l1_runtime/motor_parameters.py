@@ -19,12 +19,36 @@ from .feedback import RawMotorFrame
 class ReadRegister(IntEnum):
     MASTER_ID = 7
     SLAVE_ID = 8
+    TIMEOUT = 9  # Read-only raw communication-timeout register; units not assumed.
+    CTRL_MODE = 10
     HARDWARE_VERSION = 13
     FIRMWARE_VERSION = 14
     POSITION_MAX = 21
     VELOCITY_MAX = 22
     TORQUE_MAX = 23
     SUB_VERSION = 36
+
+
+# enactic/openarm_can f3ca25bbda1e239f4cc81f4563fbc75538fef874,
+# include/openarm/damiao_motor/dm_motor_constants.hpp:
+# RID::CTRL_MODE=10; ControlMode values below. These are protocol expectations,
+# not evidence that any installed motor currently uses MIT.
+class ControlMode(IntEnum):
+    MIT = 1
+    POS_VEL = 2
+    VEL = 3
+    POS_FORCE = 4
+
+
+# Preserve the existing identity/version/range survey; mode reads are explicit.
+DEFAULT_READ_REGISTERS = tuple(
+    r for r in ReadRegister if r not in (ReadRegister.CTRL_MODE, ReadRegister.TIMEOUT)
+)
+
+
+def require_mit_mode(value: object) -> None:
+    if type(value) is not int or value != int(ControlMode.MIT):
+        raise ValueError(f"CTRL_MODE must report MIT (1), received {value!r}")
 
 
 @dataclass(frozen=True)
@@ -76,6 +100,8 @@ class ParameterRead:
                 raise ValueError("parameter range must be finite and positive")
             return value
         value = struct.unpack_from("<I", data, 4)[0]
+        if self.register == ReadRegister.CTRL_MODE and value not in ControlMode._value2member_map_:
+            raise ValueError(f"unknown CTRL_MODE value: {value}")
         if self.register == ReadRegister.MASTER_ID and value != self.response_id:
             raise ValueError("reported master ID differs from configured response ID")
         if self.register == ReadRegister.SLAVE_ID and value != self.slave_id:

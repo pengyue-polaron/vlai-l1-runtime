@@ -45,6 +45,8 @@ inline void task_output(const vlai_l1::TaskSession& task,const std::array<vlai_l
     for(std::size_t i=0;i<8;++i) out<<(i?",":"")<<feedback[i].position_rad*vlai_l1::kDegrees;
     out<<"],\"reference_deg\":[";
     for(std::size_t i=0;i<8;++i) out<<(i?",":"")<<target[i];
+    out<<"],\"desired_deg\":[";
+    for(std::size_t i=0;i<8;++i) out<<(i?",":"")<<task.reference()[i];
     out<<"]}\n";const auto line=out.str();
     if(line.size()>4096 || ::write(STDOUT_FILENO,line.data(),line.size())!=static_cast<ssize_t>(line.size()))
         throw std::runtime_error("task output blocked/failed");

@@ -236,6 +236,10 @@ class _SocketCanProbeBackend:
                 can_fd=can_fd,
                 motors=motors,
             )
+            # Let the newly opened USB/CAN session settle before the FIRST
+            # request. No warm-up request is sent and no failed round is skipped.
+            # Both roles passed 2 x 40 complete paired rounds with this delay.
+            time.sleep(0.1)
         except BaseException:
             self._socket.close()
             raise

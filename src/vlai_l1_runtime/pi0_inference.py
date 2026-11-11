@@ -67,11 +67,14 @@ class Pi0Spec:
             raise ValueError("maximum_message_bytes must be in [1, 64 MiB]")
 
     @classmethod
-    def load(cls, path: Path):
+    def load(cls, path: Path, *, kind="pi0"):
         document = json.loads(path.read_text())
         if not isinstance(document, dict) or set(document) != {"kind", *cls.__dataclass_fields__}:
             raise ValueError("exact pi0 inference configuration fields required")
-        if document.pop("kind") != "vlai_native_pi0_prediction_v1":
+        if (
+            kind not in ("pi0", "unified")
+            or document.pop("kind") != f"vlai_native_{kind}_prediction_v1"
+        ):
             raise ValueError("unsupported inference configuration")
         return cls(**document)
 
@@ -183,8 +186,11 @@ class Pi0ObservationBuilder:
 class Pi0PredictionClient:
     """One persistent, bounded WebSocket; no automatic connection retry."""
 
-    def __init__(self, spec: Pi0Spec):
+    def __init__(self, spec: Pi0Spec, *, expected_kind="pi0"):
         self.spec = spec
+        if expected_kind not in ("pi0", "unified"):
+            raise ValueError("unsupported native prediction kind")
+        self.expected_kind = expected_kind
         self._socket = None
         self.server_metadata = {}
 
@@ -203,7 +209,7 @@ class Pi0PredictionClient:
             metadata = unpack_message(self._socket.recv(timeout=self.spec.open_timeout_s))
             if (
                 not isinstance(metadata, dict)
-                or metadata.get("kind") != "pi0"
+                or metadata.get("kind") != self.expected_kind
                 or metadata.get("native_joint_degrees") is not True
                 or metadata.get("prediction_only") is not True
                 or metadata.get("transport_only", False) is not False
@@ -212,7 +218,9 @@ class Pi0PredictionClient:
                 or type(metadata.get("prediction_horizon")) is not int
                 or metadata["prediction_horizon"] != self.spec.action_horizon
             ):
-                raise ValueError("server is not the pinned native pi0 prediction server")
+                raise ValueError(
+                    f"server is not the pinned native {self.expected_kind} prediction server"
+                )
             self.server_metadata = metadata
         except BaseException:
             self._socket.close()

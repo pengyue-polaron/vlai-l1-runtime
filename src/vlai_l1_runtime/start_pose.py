@@ -10,6 +10,8 @@ import argparse
 import hashlib
 import json
 import math
+import os
+import tempfile
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -157,31 +159,53 @@ class StationaryPoseWindow:
         }
 
 
-def _output_path(config, task_id, output):
+def _output_path(config, task_id, output, *, replace=False):
     canonical = canonical_pose_path(config, task_id)
     if output is not None and Path(output).absolute() != canonical:
         raise PoseCaptureError("capture output must be the canonical per-task path")
-    if canonical.exists() or canonical.is_symlink():
+    if canonical.exists() and not canonical.is_file():
+        raise PoseCaptureError("pose output must be a regular file")
+    if canonical.exists() and not replace:
         raise FileExistsError(f"pose output already exists: {canonical}")
     return canonical
 
 
-def _write_record(config, task_id, record, output):
+def _write_record(config, task_id, record, output, *, replace=False):
     validate_pose_record(config, task_id, record)
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("x", encoding="utf-8") as stream:
-        json.dump(record, stream, ensure_ascii=False, indent=2, allow_nan=False)
-        stream.write("\n")
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=output.parent, prefix=".pose-", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            json.dump(record, stream, ensure_ascii=False, indent=2, allow_nan=False)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        _output_path(config, task_id, output, replace=replace)
+        if replace:
+            temporary.replace(output)
+        else:
+            os.link(temporary, output)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     return record
 
 
 def capture_pose(
-    config: SystemConfig, spec: CaptureSpec, *, task_id: str, output: Path | None = None
+    config: SystemConfig,
+    spec: CaptureSpec,
+    *,
+    task_id: str,
+    output: Path | None = None,
+    replace: bool = False,
 ):
-    """Listen to the existing right state stream, then create one inert pose file."""
+    """Capture fresh stationary feedback; optionally replace the old pose atomically."""
     from .teleoperation.xair import XAirStateReceiver
 
-    output = _output_path(config, task_id, output)
+    output = _output_path(config, task_id, output, replace=replace)
     window = StationaryPoseWindow(config, spec)
     deadline = time.monotonic_ns() + spec.maximum_hold_ns
     with XAirStateReceiver(config, sides=("right",)) as receiver:
@@ -221,7 +245,7 @@ def capture_pose(
         },
         **result,
     }
-    return _write_record(config, task_id, record, output)
+    return _write_record(config, task_id, record, output, replace=replace)
 
 
 def import_task_pose(config, task_id, source: Path, *, output: Path | None = None):
@@ -279,12 +303,15 @@ def main(argv=None):
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--stationary-spec", type=Path)
     parser.add_argument("--task-id", required=True)
+    parser.add_argument(
+        "--replace", action="store_true", help="replace only after successful capture"
+    )
     args = parser.parse_args(argv)
     config = load_system_config(args.config)
     spec = CaptureSpec.load(
         args.stationary_spec or config.path.parents[2] / "configs/tasks/pose_capture.json"
     )
-    record = capture_pose(config, spec, task_id=args.task_id)
+    record = capture_pose(config, spec, task_id=args.task_id, replace=args.replace)
     print(
         json.dumps(
             {

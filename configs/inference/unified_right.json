@@ -1,0 +1,12 @@
+{
+  "kind": "vlai_native_unified_prediction_v1",
+  "endpoint": "ws://127.0.0.1:8809",
+  "image_height": 224,
+  "image_width": 224,
+  "action_horizon": 32,
+  "action_hz": 30,
+  "open_timeout_s": 10,
+  "response_timeout_s": 360,
+  "close_timeout_s": 5,
+  "maximum_message_bytes": 67108864
+}
